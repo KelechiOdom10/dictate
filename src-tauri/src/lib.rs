@@ -76,11 +76,18 @@ pub fn run() {
                         match state {
                             ShortcutState::Pressed => {
                                 let _ = window.show();
-                                let _ = record_start();
+                                // Surfaced, not swallowed: while the stages are
+                                // stubs this line is how you know the handler
+                                // ran at all.
+                                if let Err(error) = record_start() {
+                                    println!("[hotkey] record_start: {error}");
+                                }
                             }
                             ShortcutState::Released => {
                                 let _ = window.hide();
-                                let _ = audio::stop();
+                                if let Err(error) = audio::stop() {
+                                    println!("[hotkey] audio::stop: {error}");
+                                }
                             }
                         }
                     }
