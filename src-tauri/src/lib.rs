@@ -84,9 +84,21 @@ pub fn run() {
                                 }
                             }
                             ShortcutState::Released => {
+                                // Hide first: the overlay should vanish on key-up,
+                                // not after the audio stream has finished tearing
+                                // down.
                                 let _ = window.hide();
-                                if let Err(error) = audio::stop() {
-                                    println!("[hotkey] audio::stop: {error}");
+                                match audio::stop() {
+                                    // The count is session 2's check: roughly
+                                    // duration x 16000. Logged here because this
+                                    // handler drains the buffer, so a later
+                                    // `record_stop` would find it already empty.
+                                    Ok(samples) => println!(
+                                        "[hotkey] {} samples ({:.2}s @ 16 kHz)",
+                                        samples.len(),
+                                        samples.len() as f32 / 16_000.0
+                                    ),
+                                    Err(error) => println!("[hotkey] audio::stop: {error}"),
                                 }
                             }
                         }
