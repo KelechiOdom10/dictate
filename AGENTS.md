@@ -52,5 +52,6 @@ because it was slowing the build down.
 - Every latency or accuracy claim gets a number from this machine, in
   `docs/spike-results.md`. No numbers from blog posts.
 - Temporary debug files go in `target/` or a temp dir, never the repo.
-- No settings UI, no menu bar item, no signing, no auto-update until the spike
-  gate passes.
+- UI is in scope (owner, 14 Nov 2026): menu bar item, settings window, recording
+  overlay, history, model manager. Signing and auto-update are still out of scope
+  until asked for.

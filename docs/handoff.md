@@ -221,8 +221,8 @@ only, no crate names.
 
 ## 9. What must not happen
 
-- Do not add a settings UI, menu bar item, signing, notarisation, or
-  auto-update before the seven checks have numbers.
+- Do not add signing, notarisation or auto-update until the owner asks. (Settings
+  UI and the menu bar item were brought into scope by the owner on 14 Nov 2026.)
 - Do not claim a latency or accuracy number that did not come from this machine.
   No numbers from blog posts, model cards, or other people's benchmarks.
 - Do not change the bundle identifier (`com.kelechiodom.dictate`). macOS keys
