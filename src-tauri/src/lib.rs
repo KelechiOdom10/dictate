@@ -94,12 +94,19 @@ pub fn run() {
                                             samples.len(),
                                             samples.len() as f32 / 16_000.0
                                         );
+                                        let app = app.clone();
                                         tauri::async_runtime::spawn_blocking(move || {
                                             match transcribe::transcribe(&samples) {
-                                                Ok(text) => println!(
-                                                    "[transcribe] release_to_text_ms={} text={text:?}",
-                                                    released.elapsed().as_millis()
-                                                ),
+                                                Ok(text) => {
+                                                    println!("[transcribe] release_to_text_ms={} text={text:?}", released.elapsed().as_millis());
+                                                    match insert::paste(&app, &text) {
+                                                    Ok(()) => println!(
+                                                        "[insert] release_to_paste_complete_ms={}",
+                                                        released.elapsed().as_millis()
+                                                    ),
+                                                    Err(error) => eprintln!("[insert] {error}"),
+                                                    }
+                                                },
                                                 Err(error) => eprintln!("[transcribe] {error}"),
                                             }
                                         });

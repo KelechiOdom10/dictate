@@ -75,4 +75,55 @@ sentence, release. Expect the sample count followed by
 the release handler before capture shutdown and includes worker scheduling and
 all transcription work. If inference is already running, another transcription
 returns a clear busy error instead of queuing model processes; wait and repeat.
-Nothing is pasted yet. The physical hotkey path has not been exercised in this run.
+The release path now attempts paste after this log. The physical hotkey path has not been exercised in this run.
+
+
+## Paste stage — 14 November 2026
+
+Prediction before the clipboard probe: the requested 300 ms delay should sleep
+for at least 300 ms; restoring must reproduce all item formats byte for byte.
+Two tests use unique, isolated macOS pasteboards, never the user's clipboard.
+They cover two items, binary and RTF representations, an empty clipboard, and a
+new copy during the delay. Both passed. Measured delays on the final probe:
+**310, 310, 310 ms**. This measures the wait, not target-app paste consumption;
+300 ms remains a provisional value until the three-app checks below pass.
+Removing the restore write made the multiple-item test fail (0 items versus 2),
+then restoring the implementation made both tests pass.
+
+AppKit printed a synchronous promise-fulfillment warning because the tests read
+pasteboard items written by their own process from a test thread. Assertions
+passed; this does not prove external applications consume the clipboard in time.
+A read-only `AXIsProcessTrusted` probe returned true for the task shell. This is
+not evidence of Accessibility trust for the unsigned dictate app. The app checks
+its own trust before touching the clipboard and names the Settings fix on error.
+
+Checks 4 and 5 remain **unverified**. No synthetic keystroke was sent to a user's
+focused application by this run. The bundle identifier, accessory activation
+policy, and overlay focus configuration are unchanged. Physical focus behaviour,
+permission denial in the app, target-app insertion and clipboard restoration
+through the hotkey still need this manual session:
+
+1. Run `pnpm tauri dev`. Copy a distinctive sentinel, then focus a TextEdit field.
+2. Hold ⌥⇧Space, speak, release. If refused, grant **dictate** under System
+   Settings → Privacy & Security → Accessibility, then retry. Rebuilt unsigned
+   apps may need the grant refreshed.
+3. Confirm the overlay never takes the cursor and the transcript appears once.
+   Paste into a separate field afterward: it must contain the sentinel.
+4. Repeat in VS Code and a browser input; repeat with rich text or an image copied
+   first, and verify the original remains pasteable afterward.
+5. Record failures and counts here. For check 6, collect at least 20 dictations
+   per app and independently observe when text appears. The log
+   `release_to_paste_complete_ms` includes capture stop, scheduling, transcription,
+   event posting, restore delay and clipboard restoration. It is an upper-bound
+   pipeline completion measurement, **not** confirmation of visible insertion.
+
+Paste uses Command-V rather than setting an accessibility element's value so it
+follows the target application's normal text-editing path, including custom and
+browser controls. Text-only clipboard backup was rejected because it loses
+images, rich text and multiple items. CGEvent uses the existing native stack
+rather than adding a second event abstraction. The delay gives asynchronous
+paste handlers a chance to read the temporary transcript before restoration;
+there is no cross-application acknowledgement, so an unusually slow app can
+still read too late. A newer copy detected during the delay is kept and reported
+instead of overwritten. macOS offers no atomic compare-and-restore operation,
+so an external clipboard write racing the final check remains possible.

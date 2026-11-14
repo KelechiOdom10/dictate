@@ -31,8 +31,8 @@ window is the overlay and it appears only while the chord is held.
 | Show on `Pressed`, hide on `Released`, log both | done, both events fire |
 | `pipeline_status`, `record_start`, `record_stop`, `finish_dictation` commands | wired |
 | `audio::start` / `audio::stop` | implemented; direct mic probe passed, hotkey / listening check pending |
-| `transcribe::transcribe` | stub |
-| `insert::paste` | stub |
+| `transcribe::transcribe` | implemented in dependent PR #2; generated-speech probe passed, owner speech pending |
+| `insert::paste` | implemented; isolated clipboard tests pass, three-app hotkey checks pending |
 | React overlay UI | placeholder, adequate |
 
 ## The interaction model, decided
@@ -43,6 +43,15 @@ the buffer drains on key-up. Not a toggle. The alternative in `GUIDE.md` — mov
 registration into Rust — never applied; the handler has always been in Rust.
 
 ## The immediate next action
+
+On `feat/clipboard-paste` (based on transcription PR #2), run the manual paste
+and clipboard checks in `docs/spike-results.md`. Accessibility denial, overlay
+focus, TextEdit, VS Code and browser insertion remain unverified in this run.
+The release handler now transcribes, posts Command-V, restores the clipboard,
+and logs `release_to_paste_complete_ms`, including its provisional 300 ms wait.
+This branch does not close the seven-check gate.
+
+The original capture-stage handoff follows; its physical checks remain open.
 
 Close check 1 in one minute: with the overlay up, type into the app you came
 from and confirm the characters land there. Show/hide proves the event plumbing;
