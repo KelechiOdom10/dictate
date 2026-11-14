@@ -1,3 +1,4 @@
+@import "./ui/ui.css";
 @import "./tokens.css";
 * {
   box-sizing: border-box;
@@ -80,11 +81,11 @@ aside {
   font-size: var(--font-heading);
   font-weight: var(--weight-semibold);
 }
-nav {
+.ui-sidebar-nav {
   display: grid;
   gap: var(--space-1);
 }
-nav button {
+.ui-sidebar-nav button {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -95,14 +96,14 @@ nav button {
   min-height: 36px;
   border-radius: var(--radius-control);
 }
-nav button svg {
+.ui-sidebar-nav button svg {
   color: var(--muted);
 }
-nav button.selected {
+.ui-sidebar-nav button.selected {
   background: var(--selected);
   font-weight: var(--weight-medium);
 }
-nav button.selected svg {
+.ui-sidebar-nav button.selected svg {
   color: var(--text);
 }
 footer {
@@ -143,7 +144,7 @@ header p {
 section + section {
   margin-top: var(--space-6);
 }
-section h2 {
+.ui-settings-group h2 {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -155,7 +156,7 @@ section h2 {
 .group {
   background: var(--surface);
   border-radius: var(--radius-panel);
-  overflow: hidden;
+  overflow: visible;
 }
 .setting-row {
   display: flex;
@@ -206,38 +207,6 @@ kbd {
 .capturing {
   background: var(--success);
   color: var(--accent);
-}
-.switch {
-  appearance: none;
-  margin: var(--space-0);
-  display: block;
-  width: 34px;
-  height: 20px;
-  border-radius: var(--radius-pill);
-  background: var(--muted);
-  border: 1px solid transparent;
-  cursor: pointer;
-  position: relative;
-}
-.switch::after {
-  content: "";
-  display: block;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-pill);
-  background: var(--thumb);
-}
-.switch:checked {
-  background: var(--accent);
-}
-.switch:checked::after {
-  transform: translateX(14px);
-}
-.switch:disabled {
-  opacity: 0.5;
 }
 .mic-test {
   display: flex;
@@ -313,33 +282,14 @@ meter {
 }
 .overlay {
   height: 100%;
-  display: flex;
+  display: grid;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border-radius: var(--radius-panel);
-  background: var(--overlay);
-  color: var(--overlay-text);
+  padding: var(--space-2);
 }
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-pill);
-  background: var(--recording);
-}
-.body {
-  flex: 1;
-  min-width: 0;
-}
-.label {
-  font-size: var(--font-sm);
-  color: var(--overlay-muted);
-}
-.status {
-  font-size: var(--font-body);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.overlay .ui-capsule {
+  width: 100%;
+  height: 100%;
+  justify-content: flex-start;
 }
 @media (max-width: 650px) {
   .settings-shell {
@@ -372,10 +322,10 @@ meter {
   .brand {
     padding: var(--space-0) var(--space-2) var(--space-4);
   }
-  nav {
+  .ui-sidebar-nav {
     grid-template-columns: repeat(3, 1fr);
   }
-  nav button {
+  .ui-sidebar-nav button {
     padding: var(--space-2);
     gap: var(--space-1);
     font-size: var(--font-xs);

@@ -1,7 +1,5 @@
-import type { KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import Row from "./SettingRow";
-import { shortcutLabel } from "./settings";
+import { SettingsRow, ShortcutRecorder as Recorder } from "./ui";
 
 type Props = {
   value: string;
@@ -11,7 +9,6 @@ type Props = {
   onSave: (shortcut: string) => Promise<void>;
   onError: (error: string) => void;
 };
-
 export default function ShortcutRecorder({
   value,
   recording,
@@ -29,41 +26,21 @@ export default function ShortcutRecorder({
       onError(String(e));
     }
   }
-
-  async function keyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (!recording || event.repeat) return;
-    event.preventDefault();
-    if (event.key === "Escape") {
-      onRecordingChange(false);
-      try {
-        await invoke("capture_shortcut", { enabled: false });
-      } catch (e) {
-        onError(String(e));
-      }
-      return;
-    }
-    if (["Meta", "Alt", "Control", "Shift"].includes(event.key)) return;
-    const modifiers = [
-      event.metaKey && "Super",
-      event.ctrlKey && "Control",
-      event.altKey && "Alt",
-      event.shiftKey && "Shift",
-    ].filter(Boolean);
-    if (!modifiers.length) {
-      onError("Include Command, Option, Control or Shift in your shortcut.");
-      return;
-    }
+  async function cancel() {
     onRecordingChange(false);
-    await onSave([...modifiers, event.code].join("+"));
     try {
       await invoke("capture_shortcut", { enabled: false });
     } catch (e) {
       onError(String(e));
     }
   }
-
+  async function commit(shortcut: string) {
+    onRecordingChange(false);
+    await onSave(shortcut);
+    await cancel();
+  }
   return (
-    <Row
+    <SettingsRow
       id="shortcut"
       label="Shortcut"
       help={
@@ -72,27 +49,17 @@ export default function ShortcutRecorder({
           : "Use this shortcut from any app."
       }
     >
-      <button
+      <Recorder
         id="shortcut"
-        className={`shortcut ${recording ? "capturing" : ""}`}
         aria-describedby="shortcut-help"
+        value={value}
+        recording={recording}
         disabled={disabled}
-        onClick={(event) => {
-          event.currentTarget.focus();
-          void capture();
-        }}
-        onKeyDown={(e) => void keyDown(e)}
-        onBlur={() => {
-          if (recording) {
-            onRecordingChange(false);
-            invoke("capture_shortcut", { enabled: false }).catch((e) =>
-              onError(String(e)),
-            );
-          }
-        }}
-      >
-        {recording ? "Press shortcut…" : <kbd>{shortcutLabel(value)}</kbd>}
-      </button>
-    </Row>
+        onStart={() => void capture()}
+        onCancel={() => void cancel()}
+        onCommit={(shortcut) => void commit(shortcut)}
+        onError={onError}
+      />
+    </SettingsRow>
   );
 }

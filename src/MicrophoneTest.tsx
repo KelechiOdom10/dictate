@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { Button, LevelMeter } from "./ui";
 
 type Props = {
   testing: boolean;
@@ -50,25 +51,20 @@ export default function MicrophoneTest({
   return (
     <div className="mic-test">
       <div className="meter-copy">
-        <meter
-          min={0}
-          max={1}
-          value={testing ? level : 0}
-          aria-label="Microphone input level"
-        />
+        <LevelMeter level={testing ? level : 0} />
         <span>
           {testing
             ? "Listening · audio is not saved"
             : "Check your input level"}
         </span>
       </div>
-      <button
+      <Button
         className="text-button"
         onClick={() => void onToggle()}
         disabled={disabled}
       >
         {testing ? "Stop test" : "Test microphone"}
-      </button>
+      </Button>
     </div>
   );
 }

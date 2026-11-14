@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SettingsWindow from "./SettingsWindow";
-import { readSettings, shortcutLabel } from "./settings";
+import { readSettings } from "./settings";
+import { RecordingCapsule, KeyboardShortcut } from "./ui";
 import "./App.css";
 
 const client = new QueryClient({
@@ -17,17 +18,15 @@ function Overlay() {
       .then(setStatus)
       .catch((e) => setStatus(String(e)));
     readSettings()
-      .then((settings) => setShortcut(shortcutLabel(settings.shortcut)))
+      .then((settings) => setShortcut(settings.shortcut))
       .catch((e) => setStatus(String(e)));
   }, []);
   return (
     <main className="overlay">
-      <div className="dot" />
-      <div className="body">
-        <p className="label">Listening</p>
-        <p className="status">{status}</p>
-      </div>
-      <kbd>{shortcut}</kbd>
+      <RecordingCapsule
+        state={{ kind: "ready", message: status }}
+        shortcut={<KeyboardShortcut value={shortcut} />}
+      />
     </main>
   );
 }

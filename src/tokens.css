@@ -1,14 +1,33 @@
 :root {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-  color-scheme: light dark;
+  color-scheme: light;
+  --neutral-0: #ffffff;
+  --neutral-50: #fafafa;
+  --neutral-100: #f5f5f5;
+  --neutral-200: #eaeaea;
+  --neutral-300: #d4d4d4;
+  --neutral-400: #adadad;
+  --neutral-500: #737373;
+  --neutral-600: #525252;
+  --neutral-700: #383838;
+  --neutral-800: #2b2b2b;
+  --neutral-900: #202020;
+  --neutral-950: #191919;
+  --warning: #815500;
+  --danger: var(--error);
+  --fg: var(--text);
+  --bg: var(--canvas);
+  --border: var(--line);
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
   --canvas: #ffffff;
   --sidebar: #fafafa;
   --surface: #f5f5f5;
   --text: #202020;
-  --muted: #747474;
+  --muted: #686868;
   --line: #eaeaea;
   --control: #ededed;
-  --accent: #537b50;
+  --accent: #486f45;
   --selected: #ebebeb;
   --success: #edf4e8;
   --primary: #191919;
@@ -16,6 +35,9 @@
   --error: #a23331;
   --recording: #e3746c;
   --thumb: #ffffff;
+  --overlay-accent: #a9c39b;
+  --overlay-success: #bcd6ae;
+  --overlay-danger: #f2a39f;
   --overlay: #202020;
   --overlay-text: #ededed;
   --overlay-muted: #b0b0b0;
@@ -45,7 +67,9 @@
   --space-16: 64px;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --warning: #ecc47e;
     --canvas: #202020;
     --sidebar: #242424;
     --surface: #2b2b2b;
@@ -59,5 +83,28 @@
     --primary: #ededed;
     --on-primary: #202020;
     --error: #f2a39f;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --warning: #ecc47e;
+  --canvas: #202020;
+  --sidebar: #242424;
+  --surface: #2b2b2b;
+  --text: #ededed;
+  --muted: #adadad;
+  --line: #363636;
+  --control: #383838;
+  --accent: #a9c39b;
+  --selected: #353535;
+  --success: #34402f;
+  --primary: #ededed;
+  --on-primary: #202020;
+  --error: #f2a39f;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
   }
 }
