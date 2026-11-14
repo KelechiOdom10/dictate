@@ -26,7 +26,7 @@ pays for. Hold a key, speak, release, transcript lands in whichever app had
 focus. Tauri 2, Rust core, React overlay, whisper.cpp. Nothing leaves the
 machine, so cost per minute is zero.
 
-The pipeline is three contracts, already stubbed and wired:
+The pipeline is three independently callable contracts:
 
 ```
 audio::start() -> audio::stop() -> Vec<f32>   // 16 kHz mono, in memory
@@ -65,7 +65,7 @@ machine, and word error rate measured on twenty of his own recordings.
 | `transcribe::transcribe` | stub |
 | `insert::paste` | stub |
 | React overlay UI | placeholder, adequate for the spike |
-| `docs/spike-results.md` | does not exist yet; created in session 5 |
+| `docs/spike-results.md` | exists with stage measurements; seven-check gate remains open |
 
 Spike sessions 1 of 5 are done. Sessions 2–5 are audio, transcription, paste, and
 measurement.
@@ -112,7 +112,8 @@ the actual pass condition, and paste inherits the same bug if it is wrong.
 
 ### 5b. Session 2 — audio capture (~3 h)
 
-Add `cpal`, implement `audio::start` / `audio::stop`. He writes the body.
+Capture is implemented by agents under the 14 Nov owner decision. The following
+liabilities explain its design; audible real-mic verification remains open.
 
 The three liabilities, in the order they usually bite:
 
@@ -132,7 +133,9 @@ If a held key auto-repeats `Pressed`, a second `start()` must not reset the
 buffer mid-sentence.
 
 Check: hold the chord ~4 s, expect ≈ duration × 16000 samples in the terminal
-and the first word not clipped. Then dump a wav with `hound` and listen; worth
+and the first word not clipped. Launch with `DICTATE_DEBUG_WAV=1 pnpm tauri dev`; each completed take logs a
+unique WAV path in the system temp directory. Open it and listen, then delete
+it (the opt-in dump persists and contains your recording). Worth
 ten minutes is a per-100 ms RMS print, because flat zero means a silent device
 and you want that known before transcription exists.
 
@@ -250,7 +253,7 @@ decision with its evidence and its rejected alternative. What he will discard:
 checklists that treat him as a beginner, hedged advice with no number, and any
 suggestion that adds scope before the current gate passes.
 
-He has explicitly asked to be guided rather than driven. Hold the line on
+The 14 Nov owner decision authorizes agents to implement. Hold the line on
 sequence even when he is enthusiastic about the next phase; that is the job.
 
 ---
@@ -263,12 +266,12 @@ docs/spike.md        the question and the seven checks. The only scope that coun
 GUIDE.md             build order, session by session, each with its likely failure
 docs/plan.md         the governing 16-week programme; this repo is its phase 1
 docs/handoff.md      this file
-docs/spike-results.md  created in session 5; seven rows, numbers, mechanisms
+docs/spike-results.md  measurements so far; seven-check gate remains open
 
 src-tauri/src/lib.rs       plugin registration, window wiring, command surface
-src-tauri/src/audio.rs     capture contract + stub (his to write)
-src-tauri/src/transcribe.rs  STT contract + stub (his to write)
-src-tauri/src/insert.rs    paste contract + stub (his to write)
+src-tauri/src/audio.rs     implemented capture contract
+src-tauri/src/transcribe.rs  implemented STT contract
+src-tauri/src/insert.rs    implemented paste contract
 src/                       React overlay. No pipeline logic.
 models/                    whisper GGML weights, never committed
 ```

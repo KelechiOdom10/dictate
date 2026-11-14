@@ -26,7 +26,8 @@ filtering above 8 kHz, and flushing a 10 ms recording at 44.1 kHz.
 Manual completion: run `pnpm tauri dev`, focus another app, hold ⌥⇧Space for
 about four seconds while speaking a sentence with a known first word, then
 release. Expect the device log and `[hotkey]` count near 64,000. Listen to a
-debug capture to confirm the first word and ending are intact before claiming
+debug capture (`DICTATE_DEBUG_WAV=1 pnpm tauri dev` logs its temp WAV path;
+delete the recording after listening) to confirm the first word and ending are intact before claiming
 spike check 2 passes.
 
 ## Transcription — 14 November 2026
@@ -127,3 +128,44 @@ there is no cross-application acknowledgement, so an unusually slow app can
 still read too late. A newer copy detected during the delay is kept and reported
 instead of overwritten. macOS offers no atomic compare-and-restore operation,
 so an external clipboard write racing the final check remains possible.
+
+## Silent-take guard — 14 November 2026
+
+Prediction: digital silence has RMS 0; generated speech should clear the
+provisional 0.003 RMS floor, while its first 150 ms should fail the 300 ms
+minimum regardless of energy. RMS is the square root of mean squared sample
+amplitude on normalized 16 kHz mono floats.
+
+Measured here using `say -v Samantha` with “The quick brown fox jumps over the
+lazy dog.”, then `afconvert -f WAVE -d LEI16@16000 -c 1`:
+
+| Buffer | Duration | RMS | Gate |
+|---|---:|---:|---|
+| Entire generated sentence | 2.67075 s | 0.150187 | pass |
+| First second of that sentence | 1 s | 0.150811 | pass |
+| First 150 ms of that sentence | 0.15 s | 0.115536 | skip: duration |
+| Generated digital silence | 2 s | 0 | skip: energy |
+
+Direct whisper-cli/base.en reproduction on 300 ms digital silence returned
+`you`. This confirms that a nonempty transcript alone cannot distinguish a
+silent take. The 300 ms minimum rejects accidental taps even when loud; the
+0.003 floor (about −50.5 dBFS) is about 50 times below the first-second speech
+RMS. These are provisional thresholds, not voice activity detection: room noise
+above the floor can pass, and quiet speech or speech surrounded by long silence
+can be rejected. No real-mic noise-floor or quiet-speech calibration was done.
+No words, including `you`, are blacklisted. Empty and punctuation-only text is
+dropped before paste.
+
+Regression tests were first run with both gates disabled: all three failed.
+With the gates enabled, silence/short/low-energy takes are rejected and one
+second of freshly generated speech passes. The shared pipeline guard returns
+before launching Whisper for rejected audio. Debug WAVs are opt-in, float32
+16 kHz mono in the system temporary directory, and retained for listening.
+
+Manual completion: launch `DICTATE_DEBUG_WAV=1 pnpm tauri dev`, focus a disposable
+text field, quickly tap ⌥⇧Space: nothing should type and `[hotkey] skipped:`
+should explain the duration. Hold silently for a second and expect the energy
+reason; speak a sentence and confirm it pastes. Listen to the logged WAV and
+delete it afterward. Repeat with quiet speech and normal room noise. Physical
+hotkey, real-mic gate behavior, first/last phonemes, and focused-app insertion
+were not verified in this run; the seven-check gate remains open.

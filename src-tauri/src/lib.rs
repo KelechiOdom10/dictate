@@ -54,9 +54,45 @@ fn record_stop() -> Result<usize, String> {
 #[tauri::command]
 fn finish_dictation(app: AppHandle) -> Result<String, String> {
     let samples = audio::stop()?;
-    let text = transcribe::transcribe(&samples)?;
-    insert::paste(&app, &text)?;
+    let text = dictation_text(&samples)?;
+    if !text.is_empty() {
+        insert::paste(&app, &text)?;
+    }
     Ok(text)
+}
+
+const MIN_TAKE_SAMPLES: usize = 4_800;
+const MIN_TAKE_RMS: f64 = 0.003;
+
+fn take_skip_reason(samples: &[f32]) -> Option<String> {
+    let seconds = samples.len() as f64 / 16_000.0;
+    if samples.len() < MIN_TAKE_SAMPLES {
+        return Some(format!("{seconds:.2} s, below minimum 0.30 s"));
+    }
+    let rms =
+        (samples.iter().map(|&s| f64::from(s).powi(2)).sum::<f64>() / samples.len() as f64).sqrt();
+    if !rms.is_finite() {
+        return Some("nonfinite audio".into());
+    }
+    (rms < MIN_TAKE_RMS)
+        .then(|| format!("{seconds:.2} s, RMS {rms:.6} below minimum {MIN_TAKE_RMS}"))
+}
+
+fn transcript_has_text(text: &str) -> bool {
+    text.trim().chars().any(char::is_alphanumeric)
+}
+
+fn dictation_text(samples: &[f32]) -> Result<String, String> {
+    if let Some(reason) = take_skip_reason(samples) {
+        println!("[hotkey] skipped: {reason}");
+        return Ok(String::new());
+    }
+    let text = transcribe::transcribe(samples)?;
+    if !transcript_has_text(&text) {
+        println!("[hotkey] skipped: transcript has no letters or numbers");
+        return Ok(String::new());
+    }
+    Ok(text.trim().to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -87,6 +123,7 @@ pub fn run() {
                             ShortcutState::Released => {
                                 let released = Instant::now();
                                 let _ = window.hide();
+                                // Release drains the buffer; a later record_stop finds no recording.
                                 match audio::stop() {
                                     Ok(samples) => {
                                         println!(
@@ -96,7 +133,8 @@ pub fn run() {
                                         );
                                         let app = app.clone();
                                         tauri::async_runtime::spawn_blocking(move || {
-                                            match transcribe::transcribe(&samples) {
+                                            match dictation_text(&samples) {
+                                                Ok(text) if text.is_empty() => {},
                                                 Ok(text) => {
                                                     println!("[transcribe] release_to_text_ms={} text={text:?}", released.elapsed().as_millis());
                                                     match insert::paste(&app, &text) {
@@ -140,4 +178,64 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod take_tests {
+    use super::*;
+
+    #[test]
+    fn silence_and_short_speech_are_skipped() {
+        assert!(take_skip_reason(&vec![0.0; 32_000]).is_some());
+        assert!(take_skip_reason(&vec![0.2; 2_400]).is_some());
+        assert!(take_skip_reason(&vec![0.002; 16_000]).is_some());
+        assert!(take_skip_reason(&[]).is_some());
+        assert_eq!(dictation_text(&vec![0.0; 32_000]).unwrap(), "");
+        assert_eq!(dictation_text(&vec![0.2; 2_400]).unwrap(), "");
+    }
+
+    #[test]
+    fn punctuation_is_dropped_without_filtering_words() {
+        for text in ["", "  ", " … — !? ", "。！？"] {
+            assert!(!transcript_has_text(text), "{text:?}");
+        }
+        for text in ["you", " I ", "42", "café", "你好"] {
+            assert!(transcript_has_text(text), "{text:?}");
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn one_second_of_generated_speech_passes() {
+        let temp = tempfile::tempdir().unwrap();
+        let aiff = temp.path().join("speech.aiff");
+        let wav = temp.path().join("speech.wav");
+        assert!(
+            std::process::Command::new("say")
+                .args(["-v", "Samantha", "-o"])
+                .arg(&aiff)
+                .arg("The quick brown fox jumps over the lazy dog.")
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            std::process::Command::new("afconvert")
+                .args(["-f", "WAVE", "-d", "LEI16@16000", "-c", "1"])
+                .arg(aiff)
+                .arg(&wav)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let mut reader = hound::WavReader::open(wav).unwrap();
+        let samples: Vec<f32> = reader
+            .samples::<i16>()
+            .take(16_000)
+            .map(|s| f32::from(s.unwrap()) / 32768.0)
+            .collect();
+        assert_eq!(samples.len(), 16_000);
+        assert!(take_skip_reason(&samples).is_none());
+        assert!(take_skip_reason(&samples[..2_400]).is_some());
+    }
 }

@@ -9,11 +9,11 @@ must not change.
 
 ## Where this is
 
-Spike, session 1 of 5. The question is in `docs/spike.md`; the build order and the
-failure you will hit at each step is `GUIDE.md`.
+Spike; the three pipeline stages are implemented on the PR stack. The question
+is in `docs/spike.md`; build order and likely failures are in `GUIDE.md`.
 
 ```
-~/Projects/dictate        git repo, branch main, 4 commits
+~/Projects/dictate        git repo; pipeline PR stack in progress
 Rust 1.99.1               installed via rustup, not on PATH in a fresh shell
 Tauri 2 + React 19 + TS   scaffolded by create-tauri-app, builds and runs
 ```
@@ -44,7 +44,7 @@ registration into Rust — never applied; the handler has always been in Rust.
 
 ## The immediate next action
 
-On `feat/clipboard-paste` (based on transcription PR #2), run the manual paste
+On the pipeline PR stack, run the manual paste
 and clipboard checks in `docs/spike-results.md`. Accessibility denial, overlay
 focus, TextEdit, VS Code and browser insertion remain unverified in this run.
 The release handler now transcribes, posts Command-V, restores the clipboard,
@@ -64,14 +64,16 @@ the sample count. The direct four-second microphone probe returned 64,170 sample
 `docs/spike-results.md`). The remaining manual check is ≈ duration × 16000 in the
 terminal, plus listening for the first phoneme.
 
-Two things that will cost you time, both already in the `audio.rs` doc comment:
+Two capture invariants implemented in `audio.rs`:
 the stream must be stored somewhere that outlives the function or capture stops
-silently, and the device rate is 44.1/48 kHz, so resample rather than decimate.
+silently, and the device rate may differ from 16 kHz, so resample rather than decimate.
 A third: make `start()` idempotent. If a held key auto-repeats `Pressed`, a
 second `start()` must not reset the buffer mid-sentence.
 
-Do session 2 before anything else. It is the session that decides whether the
-rest of the spike is measuring a microphone or blaming a model.
+For an audible capture, launch with `DICTATE_DEBUG_WAV=1 pnpm tauri dev`.
+Each completed take logs a unique WAV path in the system temporary directory.
+Open it to check first/last phonemes, then delete it. Dumps are opt-in, persist
+until deleted, and contain your recording.
 
 ## Decisions already made, and why
 
@@ -91,4 +93,4 @@ rest of the spike is measuring a microphone or blaming a model.
 - Land pipeline stages together. The owner authorized agents to build them
   separately, each with a plain-English walkthrough; see `AGENTS.md`.
 - Trust a latency or accuracy claim that did not come from this machine.
-  `docs/spike-results.md` is where those numbers go, and it does not exist yet.
+  `docs/spike-results.md` holds the measurements so far; unmeasured checks stay open.

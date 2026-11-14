@@ -23,8 +23,8 @@ struct Recording {
     rate: usize,
 }
 
-fn controller() -> Result<&'static Mutex<mpsc::Sender<Command>>, String> {
-    static CONTROLLER: OnceLock<Result<Mutex<mpsc::Sender<Command>>, String>> = OnceLock::new();
+fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
+    static CONTROLLER: OnceLock<Result<mpsc::Sender<Command>, String>> = OnceLock::new();
     CONTROLLER
         .get_or_init(|| {
             let (sender, receiver) = mpsc::channel();
@@ -66,7 +66,7 @@ fn controller() -> Result<&'static Mutex<mpsc::Sender<Command>>, String> {
                     }
                 })
                 .map_err(|e| format!("Start audio thread: {e}"))?;
-            Ok(Mutex::new(sender))
+            Ok(sender)
         })
         .as_ref()
         .map_err(Clone::clone)
@@ -74,8 +74,6 @@ fn controller() -> Result<&'static Mutex<mpsc::Sender<Command>>, String> {
 
 fn send(command: Command) -> Result<(), String> {
     controller()?
-        .lock()
-        .map_err(|e| e.to_string())?
         .send(command)
         .map_err(|e| format!("Audio thread unavailable: {e}"))
 }
@@ -190,8 +188,38 @@ impl Recording {
         if samples.is_empty() {
             return Err("Microphone delivered no samples".into());
         }
-        resample(samples, self.rate)
+        let samples = resample(samples, self.rate)?;
+        if std::env::var_os("DICTATE_DEBUG_WAV").is_some_and(|value| value == "1") {
+            match dump_wav(&samples) {
+                Ok(path) => println!("[audio] debug WAV: {}", path.display()),
+                Err(error) => eprintln!("[audio] debug WAV: {error}"),
+            }
+        }
+        Ok(samples)
     }
+}
+
+fn dump_wav(samples: &[f32]) -> Result<std::path::PathBuf, String> {
+    let file = tempfile::Builder::new()
+        .prefix("dictate-capture-")
+        .suffix(".wav")
+        .tempfile()
+        .map_err(|e| e.to_string())?;
+    let mut writer = hound::WavWriter::new(
+        file.as_file(),
+        hound::WavSpec {
+            channels: 1,
+            sample_rate: OUTPUT_RATE as u32,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    for sample in samples {
+        writer.write_sample(*sample).map_err(|e| e.to_string())?;
+    }
+    writer.finalize().map_err(|e| e.to_string())?;
+    file.keep().map(|(_, path)| path).map_err(|e| e.to_string())
 }
 
 fn resample(samples: Vec<f32>, rate: usize) -> Result<Vec<f32>, String> {
@@ -224,6 +252,24 @@ fn resample(samples: Vec<f32>, rate: usize) -> Result<Vec<f32>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_wav_retains_normalized_samples_in_temp_directory() {
+        let path = dump_wav(&[-0.5, 0.0, 0.5]).unwrap();
+        assert!(path.starts_with(std::env::temp_dir()));
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16_000);
+        assert_eq!(reader.spec().channels, 1);
+        assert_eq!(reader.spec().sample_format, hound::SampleFormat::Float);
+        assert_eq!(
+            reader
+                .samples::<f32>()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            [-0.5, 0.0, 0.5]
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn stereo_sine_keeps_duration_pitch_and_amplitude() {

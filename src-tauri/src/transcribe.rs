@@ -8,9 +8,10 @@ pub fn transcribe(samples: &[f32]) -> Result<String, String> {
     if samples.is_empty() || samples.iter().any(|sample| !sample.is_finite()) {
         return Err("Expected nonempty, finite 16 kHz mono audio".into());
     }
-    let _guard = TRANSCRIPTION
-        .try_lock()
-        .map_err(|_| "Transcription is already running; try again when it finishes".to_string())?;
+    let _guard = TRANSCRIPTION.try_lock().map_err(|_| {
+        eprintln!("[transcribe] rejected: transcription is already running");
+        "Transcription is already running; try again when it finishes".to_string()
+    })?;
     let cli = whisper_cli()?;
     let model = model_path()?;
     let temp =
