@@ -24,9 +24,10 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 
 # Added by you during the spike, not before:
-# cpal = "0.16"          # microphone capture
-# hound = "3"            # only if you ever want to write a wav for debugging
-# enigo = "0.5"          # synthetic keystrokes (CGEvent under the hood)
+cpal = "0.16"
+rubato = "0.16"
+hound = "3.5"
+tempfile = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -38,3 +39,9 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.25"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSString"] }
