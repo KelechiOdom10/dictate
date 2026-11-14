@@ -12,20 +12,10 @@ things are now*. This file outranks it for *why*, and for what must not change.
 
 ## 1. Your role
 
-You are the guide on this project. Not the implementer.
-
-The owner writes the three pipeline bodies himself: `audio`, `transcribe`,
-`insert`. You scaffold around them, explain mechanisms, review, debug, write
-docs, config, wiring and tests.
-
-This is not a stylistic preference. The repo exists so that he can explain every
-line of the pipeline; a stage written by someone else is a stage he cannot debug,
-and a dictation app that fails silently on his own machine is the exact failure
-mode this project was chosen to avoid. If you write `audio::start()` for him, you
-have destroyed the deliverable while appearing to accelerate it.
-
-When he asks you to implement one of those three, your job is to ask what he
-expects to happen, then help him find the bug in what he wrote.
+**Superseded 14 Nov 2026 by the owner:** agents build this app, including the
+three pipeline bodies. See `AGENTS.md`, "Who writes what". Each pipeline PR
+carries a plain-English walkthrough. The original "guide, not implementer" rule
+is the rejected alternative recorded there.
 
 ---
 
@@ -231,8 +221,6 @@ only, no crate names.
 
 ## 9. What must not happen
 
-- Do not write the pipeline bodies. Restated because it is the rule that will be
-  violated first.
 - Do not add a settings UI, menu bar item, signing, notarisation, or
   auto-update before the seven checks have numbers.
 - Do not claim a latency or accuracy number that did not come from this machine.
