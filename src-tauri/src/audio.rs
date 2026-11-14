@@ -6,7 +6,10 @@ const OUTPUT_RATE: usize = 16_000;
 type Reply<T> = mpsc::Sender<Result<T, String>>;
 
 enum Command {
-    Start(Reply<()>),
+    Start(Option<String>, Reply<()>),
+    Monitor(Option<String>, Reply<()>),
+    StopMonitor,
+    Level(Reply<f32>),
     Stop(Reply<Vec<f32>>),
     Status(mpsc::Sender<bool>),
 }
@@ -15,6 +18,8 @@ enum Command {
 struct Captured {
     samples: Vec<f32>,
     error: Option<String>,
+    level: f32,
+    retain: bool,
 }
 
 struct Recording {
@@ -32,9 +37,10 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                 .name("microphone".into())
                 .spawn(move || {
                     let mut recording: Option<Recording> = None;
+                    let mut monitor: Option<Recording> = None;
                     for command in receiver {
                         match command {
-                            Command::Start(reply) => {
+                            Command::Start(device, reply) => {
                                 let result = if let Some(active) = &recording {
                                     active
                                         .captured
@@ -42,8 +48,28 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                                         .map_err(|e| e.to_string())
                                         .and_then(|data| data.error.clone().map_or(Ok(()), Err))
                                 } else {
-                                    open_recording().map(|active| recording = Some(active))
+                                    open_recording(device.as_deref(), true)
+                                        .map(|active| recording = Some(active))
                                 };
+                                let _ = reply.send(result);
+                            }
+                            Command::Monitor(device, reply) => {
+                                monitor = None;
+                                let result = open_recording(device.as_deref(), false)
+                                    .map(|active| monitor = Some(active));
+                                let _ = reply.send(result);
+                            }
+                            Command::StopMonitor => monitor = None,
+                            Command::Level(reply) => {
+                                let result = monitor
+                                    .as_ref()
+                                    .ok_or_else(|| "Microphone test is stopped".to_string())
+                                    .and_then(|active| {
+                                        active.captured.lock().map_err(|e| e.to_string())
+                                    })
+                                    .and_then(|data| {
+                                        data.error.clone().map_or(Ok(data.level), Err)
+                                    });
                                 let _ = reply.send(result);
                             }
                             Command::Stop(reply) => {
@@ -84,8 +110,12 @@ pub fn is_recording() -> bool {
 }
 
 pub fn start() -> Result<(), String> {
+    start_device(None)
+}
+
+pub fn start_device(device: Option<String>) -> Result<(), String> {
     let (reply, result) = mpsc::channel();
-    send(Command::Start(reply))?;
+    send(Command::Start(device, reply))?;
     result
         .recv()
         .map_err(|e| format!("Audio start reply: {e}"))?
@@ -99,10 +129,40 @@ pub fn stop() -> Result<Vec<f32>, String> {
         .map_err(|e| format!("Audio stop reply: {e}"))?
 }
 
-fn open_recording() -> Result<Recording, String> {
-    let device = cpal::default_host()
-        .default_input_device()
-        .ok_or("No default microphone")?;
+pub fn input_devices() -> Result<Vec<String>, String> {
+    cpal::default_host()
+        .input_devices()
+        .map_err(|e| e.to_string())?
+        .map(|device| device.name().map_err(|e| e.to_string()))
+        .collect()
+}
+
+pub fn monitor_start(device: Option<String>) -> Result<(), String> {
+    let (reply, result) = mpsc::channel();
+    send(Command::Monitor(device, reply))?;
+    result.recv().map_err(|e| e.to_string())?
+}
+
+pub fn monitor_stop() -> Result<(), String> {
+    send(Command::StopMonitor)
+}
+
+pub fn microphone_level() -> Result<f32, String> {
+    let (reply, result) = mpsc::channel();
+    send(Command::Level(reply))?;
+    result.recv().map_err(|e| e.to_string())?
+}
+
+fn open_recording(name: Option<&str>, retain: bool) -> Result<Recording, String> {
+    let host = cpal::default_host();
+    let device = match name {
+        Some(name) => host
+            .input_devices()
+            .map_err(|e| e.to_string())?
+            .find(|device| device.name().is_ok_and(|value| value == name))
+            .ok_or_else(|| format!("Microphone unavailable: {name}"))?,
+        None => host.default_input_device().ok_or("No default microphone")?,
+    };
     let config = device
         .default_input_config()
         .map_err(|e| format!("Microphone config: {e}"))?;
@@ -113,7 +173,10 @@ fn open_recording() -> Result<Recording, String> {
         config.channels(),
         config.sample_format()
     );
-    let captured = Arc::new(Mutex::new(Captured::default()));
+    let captured = Arc::new(Mutex::new(Captured {
+        retain,
+        ..Captured::default()
+    }));
     let stream = match config.sample_format() {
         cpal::SampleFormat::F32 => build_stream::<f32>(&device, &config.config(), &captured)?,
         cpal::SampleFormat::I16 => build_stream::<i16>(&device, &config.config(), &captured)?,
@@ -150,7 +213,21 @@ where
             config,
             move |data: &[T], _| {
                 if let Ok(mut captured) = samples.lock() {
-                    append_mono(&mut captured.samples, data, channels);
+                    let mono: Vec<f32> = data
+                        .chunks_exact(channels)
+                        .map(|frame| {
+                            frame
+                                .iter()
+                                .map(|s| s.to_sample::<f32>().clamp(-1.0, 1.0))
+                                .sum::<f32>()
+                                / channels as f32
+                        })
+                        .collect();
+                    captured.level =
+                        (mono.iter().map(|s| s * s).sum::<f32>() / mono.len().max(1) as f32).sqrt();
+                    if captured.retain {
+                        append_mono(&mut captured.samples, data, channels);
+                    }
                 }
             },
             move |error| {
