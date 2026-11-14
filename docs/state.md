@@ -74,8 +74,8 @@ rest of the spike is measuring a microphone or blaming a model.
 ## Do not
 
 - Rebuild footy-ai. It gets an eval and tracing pass, not a rewrite.
-- Add settings UI, a menu bar item, signing, notarisation, or auto-update before
-  the seven checks in `docs/spike.md` have numbers.
+- Add signing, notarisation or auto-update until the owner asks. (Settings UI and
+  the menu bar item are in scope as of 14 Nov 2026.)
 - Write the pipeline bodies on someone else's behalf. The point of this repo is
   that its owner can explain every line; a stage someone else wrote is a stage
   they cannot debug.
