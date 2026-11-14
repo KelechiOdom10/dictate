@@ -30,7 +30,7 @@ window is the overlay and it appears only while the chord is held.
 | ⌥⇧Space registered via `tauri-plugin-global-shortcut` | done, registration succeeds |
 | Show on `Pressed`, hide on `Released`, log both | done, both events fire |
 | `pipeline_status`, `record_start`, `record_stop`, `finish_dictation` commands | wired |
-| `audio::start` / `audio::stop` | **stub — the next work** |
+| `audio::start` / `audio::stop` | implemented; direct mic probe passed, hotkey / listening check pending |
 | `transcribe::transcribe` | stub |
 | `insert::paste` | stub |
 | React overlay UI | placeholder, adequate |
@@ -49,8 +49,11 @@ from and confirm the characters land there. Show/hide proves the event plumbing;
 focus staying put is the actual pass condition in `docs/spike.md`, and it is the
 one that decides whether paste can work at all.
 
-Then session 2: add `cpal`, implement `audio::start`/`stop`. `Released` now logs
-the sample count, so the check reads itself: ≈ duration × 16000 in the terminal.
+Session 2 capture is implemented with a thread-owned stream, native-format
+conversion, mono downmix and filtered resampling to 16 kHz. `Released` logs
+the sample count. The direct four-second microphone probe returned 64,170 samples (see
+`docs/spike-results.md`). The remaining manual check is ≈ duration × 16000 in the
+terminal, plus listening for the first phoneme.
 
 Two things that will cost you time, both already in the `audio.rs` doc comment:
 the stream must be stored somewhere that outlives the function or capture stops
@@ -76,8 +79,7 @@ rest of the spike is measuring a microphone or blaming a model.
 - Rebuild footy-ai. It gets an eval and tracing pass, not a rewrite.
 - Add settings UI, a menu bar item, signing, notarisation, or auto-update before
   the seven checks in `docs/spike.md` have numbers.
-- Write the pipeline bodies on someone else's behalf. The point of this repo is
-  that its owner can explain every line; a stage someone else wrote is a stage
-  they cannot debug.
+- Land pipeline stages together. The owner authorized agents to build them
+  separately, each with a plain-English walkthrough; see `AGENTS.md`.
 - Trust a latency or accuracy claim that did not come from this machine.
   `docs/spike-results.md` is where those numbers go, and it does not exist yet.

@@ -24,7 +24,8 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 
 # Added by you during the spike, not before:
-# cpal = "0.16"          # microphone capture
+cpal = "0.16"
+rubato = "0.16"
 # hound = "3"            # only if you ever want to write a wav for debugging
 # enigo = "0.5"          # synthetic keystrokes (CGEvent under the hood)
 serde = { version = "1", features = ["derive"] }
