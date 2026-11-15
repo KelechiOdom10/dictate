@@ -82,6 +82,9 @@ struct Runtime {
 struct TakeStart {
     started_at_ms: i64,
     app: Option<String>,
+    /// The model chosen at key-down. The take streams on it, so the rest of
+    /// the take uses it too, even when Settings switch model mid-take.
+    model: PathBuf,
 }
 
 /// The open store, or the message to show when history is off.
@@ -983,6 +986,7 @@ fn hotkey(
         runtime.take_start = Some(TakeStart {
             started_at_ms: history::now_ms(),
             app: focus::frontmost_app(),
+            model: model.clone(),
         });
         surface::clear_error(app);
         let sound_feedback = runtime.settings.sound_feedback;
@@ -1035,12 +1039,13 @@ fn hotkey(
         });
     } else {
         let released = Instant::now();
-        let start = runtime.take_start.take().unwrap_or(TakeStart {
+        let start = runtime.take_start.take().unwrap_or_else(|| TakeStart {
             started_at_ms: history::now_ms(),
             app: None,
+            model: models::path(&app.state::<Models>().dir, runtime.settings.speech_model),
         });
         let retention = runtime.settings.history_retention;
-        let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
+        let model = start.model.clone();
         let settings = runtime.settings.clone();
         let live = runtime.live.take();
         match audio::stop() {
@@ -1154,12 +1159,7 @@ fn hotkey(
                 drop(live);
                 record_take(
                     app,
-                    &failed_capture(
-                        &start,
-                        &model,
-                        released.elapsed().as_millis() as i64,
-                        &error,
-                    ),
+                    &failed_capture(&start, released.elapsed().as_millis() as i64, &error),
                     retention,
                 );
                 report_error(app, &error);
@@ -1184,12 +1184,12 @@ fn start_live_take(model: &Path) -> Option<transcribe::LiveTake> {
 }
 
 /// The History row for a take whose audio never arrived.
-fn failed_capture(start: &TakeStart, model: &Path, total_ms: i64, error: &Problem) -> NewTake {
+fn failed_capture(start: &TakeStart, total_ms: i64, error: &Problem) -> NewTake {
     NewTake {
         text: String::new(),
         created_at_ms: start.started_at_ms,
         app: start.app.clone(),
-        model: transcribe::model_name(model),
+        model: transcribe::model_name(&start.model),
         audio_ms: 0,
         inference_ms: None,
         total_ms,
@@ -2376,8 +2376,8 @@ mod take_tests {
             &TakeStart {
                 started_at_ms: 1_000,
                 app: Some("Notes".into()),
+                model: PathBuf::from("/models/ggml-base.en.bin"),
             },
-            Path::new("/models/ggml-base.en.bin"),
             12,
             &audio::no_samples(),
         );
@@ -2400,8 +2400,8 @@ mod take_tests {
                 &TakeStart {
                     started_at_ms: 1,
                     app: None,
+                    model: PathBuf::from("/models/ggml-base.en.bin"),
                 },
-                Path::new("/models/ggml-base.en.bin"),
                 1,
                 &audio::no_samples(),
             ))
