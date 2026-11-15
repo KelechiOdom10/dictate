@@ -302,8 +302,10 @@ The frames are the most important part of the package. Rules, applied in order:
 
 1. **One frame per mark**, taken 100 ms before the mark ends, when the ink is
    finished but the screen has not yet moved on.
-2. **Merge** marks that end within 1.5 s of each other into one frame. That frame
-   lists all of their mark ids (the reference's frame 7) **[reference]**.
+2. **Merge** marks that end within 1.5 s of the first mark in a frame into that
+   frame. That frame lists all of their mark ids (the reference's frame 7)
+   **[reference]**. Measuring from the first mark, not the previous one, stops
+   a run of marks 1.4 s apart chaining into one frame (review of #20).
 3. **Speech beats with no mark**: if a speech segment ends more than 4 s away from
    any chosen frame, add a frame at the end of that segment. This covers "look at
    this" said while pointing without drawing.
@@ -311,8 +313,11 @@ The frames are the most important part of the package. Rules, applied in order:
    click, add a frame 300 ms after the click, when the UI has reacted.
 5. **Limit**: at most 12 frames. When over the limit, drop speech-beat frames
    first, then click frames. Never drop mark frames.
-6. **`said`** for frame *n* = the words whose start time falls between frame
-   *n−1* and frame *n*. Words after the last frame go to the last frame.
+6. **`said`** for frame *n* = the words that start after frame *n−1*'s cut-off,
+   up to frame *n*'s cut-off. A frame's cut-off is its time + 1.5 s
+   (`SAID_GRACE_MS`), or the next frame's time if that is sooner, because people
+   draw first and then say what the mark means. Words after the last cut-off go
+   to the last frame. Owner's decision, 15 Nov 2026; the window may be tuned.
 
 These rules are pure functions over `(strokes, words, clicks, duration)`. They are
 the part to unit-test hardest. The fixtures should be made-up timelines, not the
@@ -327,8 +332,10 @@ during recording. That holds IOSurface buffers that ScreenCaptureKit needs back,
 and costs memory for frames we may never use.
 
 **Drawing the ink in.** Draw each frame's strokes with `tiny-skia` (anti-aliased,
-red `#FF3B30`, 4 pt width scaled to the frame). Draw all strokes that ended at
-most 2 s before the frame, so the frame matches what the user saw. Number badges
+red `#FF3B30`, 4 pt width scaled to the frame). A frame draws every stroke of
+every mark it lists, and no other ink, so a frame merged to fit the 12-frame
+limit still shows each of its marks. Speech frames have no ink. Owner's
+decision, 15 Nov 2026, replacing "strokes that ended in the last 2 s". Number badges
 on the contact sheet use `ab_glyph` and a font bundled in the app.
 
 ### `annotation.json` (v1 schema)
