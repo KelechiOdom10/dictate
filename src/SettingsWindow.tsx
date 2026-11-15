@@ -1,5 +1,7 @@
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { flushSync } from "react-dom";
+import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useQuery } from "@tanstack/react-query";
 import General from "./GeneralSettings";
@@ -51,6 +53,18 @@ export default function SettingsWindow({
 }) {
   const status = useDictationStatus();
   const [page, setPage] = useState(initialPage);
+  useEffect(() => {
+    const subscription = listen("settings-page", ({ payload }) => {
+      if (
+        typeof payload === "string" &&
+        pages.some(({ name }) => name === payload)
+      )
+        setPage(payload);
+    });
+    return () => {
+      void subscription.then((stop) => stop()).catch(console.error);
+    };
+  }, []);
   const version = useQuery({ queryKey: ["version"], queryFn: getVersion });
   return (
     <div className="settings-shell">
@@ -67,7 +81,16 @@ export default function SettingsWindow({
             icon: <Icon size={17} strokeWidth={1.5} aria-hidden="true" />,
           }))}
           value={page}
-          onChange={setPage}
+          onChange={(next) => {
+            if (
+              document.startViewTransition &&
+              !matchMedia("(prefers-reduced-motion: reduce)").matches
+            ) {
+              document.startViewTransition(() =>
+                flushSync(() => setPage(next)),
+              );
+            } else setPage(next);
+          }}
         />
         <footer>
           <span>Version {version.data ?? "…"}</span>
@@ -81,7 +104,7 @@ export default function SettingsWindow({
           </Button>
         </footer>
       </aside>
-      <main className="settings-content">
+      <main key={page} className="settings-content">
         <header>
           <h1>{page}</h1>
           <p>{subtitles[page]}</p>

@@ -121,7 +121,9 @@ export default function General({
           recording={recording}
           disabled={busy}
           onRecordingChange={setRecording}
-          onSave={(shortcut) => save({ shortcut })}
+          onSave={async (shortcut) => {
+            await mutation.mutateAsync({ ...settings, shortcut });
+          }}
           onError={setError}
         />
         <Row

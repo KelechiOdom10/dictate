@@ -133,7 +133,7 @@ fn default_shortcut() -> String {
 }
 
 fn default_annotate_shortcut() -> String {
-    "Alt+Shift+KeyS".into()
+    "Alt+Shift+KeyA".into()
 }
 
 impl Default for Settings {
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(settings.mic_mode, MicMode::OnDemand);
         assert!(!settings.sound_feedback);
         assert!(!settings.debug_recordings);
-        assert_eq!(settings.annotate_shortcut, "Alt+Shift+KeyS");
+        assert_eq!(settings.annotate_shortcut, "Alt+Shift+KeyA");
         fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.version, 2);
@@ -524,7 +524,7 @@ mod tests {
         let previous = Settings::default();
         let no_devices = || Ok(Vec::new());
         let changed = Settings {
-            annotate_shortcut: "Alt+Shift+KeyA".into(),
+            annotate_shortcut: "Alt+Shift+KeyD".into(),
             ..previous.clone()
         };
         let changes = changed

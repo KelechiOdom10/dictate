@@ -1,8 +1,31 @@
 use crate::settings::OverlayPosition;
 use std::sync::Mutex;
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition};
+
+static VISIBILITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn hide(app: &AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    let generation = VISIBILITY.fetch_add(1, Ordering::SeqCst) + 1;
+    app.emit("overlay-hiding", ())
+        .map_err(|error| error.to_string())?;
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(180));
+        if VISIBILITY.load(Ordering::SeqCst) == generation
+            && let Some(window) = app.get_webview_window("main")
+            && let Err(error) = window.hide()
+        {
+            log::warn!("[overlay] hide: {error}");
+        }
+    });
+    Ok(())
+}
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
+    VISIBILITY.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    app.emit("overlay-showing", ())
+        .map_err(|error| error.to_string())?;
     let position = *app
         .state::<Mutex<OverlayPosition>>()
         .lock()

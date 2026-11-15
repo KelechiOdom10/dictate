@@ -32,9 +32,22 @@ const client = new QueryClient({
 function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
   const status = useDictationStatus();
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+  const [hiding, setHiding] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [level, setLevel] = useState(0);
   const capsule = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const subscriptions = [
+      listen("overlay-hiding", () => setHiding(true)),
+      listen("overlay-showing", () => setHiding(false)),
+    ];
+    return () => {
+      subscriptions.forEach(
+        (subscription) =>
+          void subscription.then((stop) => stop()).catch(console.error),
+      );
+    };
+  }, []);
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add("overlay-window");
@@ -100,12 +113,17 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
     <main className="overlay">
       <div
         ref={capsule}
-        className="overlay-capsule"
+        className={`overlay-capsule ${hiding ? "overlay-hiding" : ""}`}
         style={
           { "--overlay-max-width": `${OVERLAY_MAX_WIDTH}px` } as CSSProperties
         }
       >
         <RecordingCapsule
+          onFinish={() => void invoke("dictation_stop").catch(console.error)}
+          onCancel={() => void invoke("dictation_cancel").catch(console.error)}
+          onOpenSettings={() =>
+            void invoke("open_notice_settings").catch(console.error)
+          }
           state={
             error
               ? { kind: "error", title: error.title, fix: error.fix }
@@ -201,13 +219,21 @@ function Appearance({
       );
     };
     update();
+    if (windowKind === "settings" && query.isFetched) {
+      frame = requestAnimationFrame(() => {
+        root.classList.remove("appearance-changing");
+        frame = requestAnimationFrame(
+          () => void invoke("settings_ready").catch(console.error),
+        );
+      });
+    }
     system.addEventListener("change", update);
     return () => {
       system.removeEventListener("change", update);
       cancelAnimationFrame(frame);
       root.classList.remove("appearance-changing");
     };
-  }, [query.data?.theme, query.data?.appearanceMode]);
+  }, [query.data?.theme, query.data?.appearanceMode, query.isFetched]);
   return null;
 }
 

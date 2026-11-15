@@ -46,7 +46,13 @@ pub fn shape(text: &str, capitalize_first: bool, trailing_space: bool) -> String
     shaped
 }
 
-pub fn paste(_app: &AppHandle, text: &str, delivery: Delivery) -> Result<(), Problem> {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Outcome {
+    Pasted,
+    Copied,
+}
+
+pub fn paste(_app: &AppHandle, text: &str, delivery: Delivery) -> Result<Outcome, Problem> {
     #[cfg(target_os = "macos")]
     return objc2::rc::autoreleasepool(|_| macos::paste(text, delivery));
     #[cfg(not(target_os = "macos"))]
@@ -81,15 +87,16 @@ mod macos {
         fn AXIsProcessTrusted() -> bool;
     }
 
-    pub(super) fn paste(text: &str, delivery: super::Delivery) -> Result<(), Problem> {
+    pub(super) fn paste(text: &str, delivery: super::Delivery) -> Result<super::Outcome, Problem> {
         let _guard = PASTE
             .try_lock()
             .map_err(|_| Problem::new("Still pasting", "Wait a moment, then dictate again."))?;
         if text.trim().is_empty() {
-            return Ok(());
+            return Ok(super::Outcome::Copied);
         }
-        if delivery.method == PasteMethod::CopyOnly {
-            return copy_to_board(&NSPasteboard::generalPasteboard(), text);
+        if delivery.method == PasteMethod::CopyOnly || !crate::focus::editable_target() {
+            copy_to_board(&NSPasteboard::generalPasteboard(), text)?;
+            return Ok(super::Outcome::Copied);
         }
         // SAFETY: AXIsProcessTrusted has no arguments or caller preconditions.
         if !unsafe { AXIsProcessTrusted() } {
@@ -110,11 +117,11 @@ mod macos {
         };
         let board = NSPasteboard::generalPasteboard();
         if delivery.restore_clipboard {
-            paste_to_board(&board, text, send)
+            paste_to_board(&board, text, send).map(|()| super::Outcome::Pasted)
         } else {
             copy_to_board(&board, text)?;
             send();
-            Ok(())
+            Ok(super::Outcome::Pasted)
         }
     }
 

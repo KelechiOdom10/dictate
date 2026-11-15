@@ -11,6 +11,7 @@ export default defineConfig({
             initialGlobals: { theme, mode },
           }),
         ],
+        optimizeDeps: { include: ["react-dom"] },
         test: {
           name: `${theme}-${mode}`,
           browser: {

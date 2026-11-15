@@ -139,6 +139,17 @@ async function openSettings(
               denied.push(command);
               throw `${command} not allowed on window \`${label}\``;
             }
+            if (command === "dictation_stop" && status.phase === "recording") {
+              status = { phase: "transcribing", error: null };
+              emit("dictation-state", "transcribing");
+            }
+            if (
+              command === "dictation_cancel" &&
+              status.phase === "recording"
+            ) {
+              status = { phase: "idle", error: null };
+              emit("dictation-state", "idle");
+            }
             if (command === "pipeline_status") return status;
             if (command === "get_settings") {
               if (failLoad) throw "Settings file could not be read";
@@ -203,7 +214,7 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
     page.getByText("Tap to record. Tap again to insert your words."),
   ).toBeVisible();
   await page
-    .getByLabel("Microphone", { exact: true })
+    .getByRole("combobox", { name: "Microphone", exact: true })
     .selectOption("USB Microphone");
   await page.getByRole("button", { name: "Test microphone" }).click();
   await expect(page.getByRole("meter")).toHaveAttribute("value", "0.6");
@@ -217,7 +228,9 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
   ).toContainText("⌃⇧D");
   await page.getByRole("button", { name: "Shortcut", exact: true }).click();
   await page.keyboard.press("Meta+Q");
-  await expect(page.getByRole("alert")).toHaveText("Shortcut unavailable");
+  await expect(
+    page.getByText("Used by another app — pick another", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Shortcut", exact: true }),
   ).toContainText("⌃⇧D");
@@ -228,20 +241,26 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
   ).toContainText("In use");
   await page.getByRole("button", { name: "Output", exact: true }).click();
   await page
-    .getByLabel("After you dictate", { exact: true })
+    .getByLabel("After dictation", { exact: true })
     .selectOption("copyOnly");
-  await expect(
-    page.getByRole("switch", { name: "Restore clipboard" }),
-  ).toBeDisabled();
+  await expect(page.getByLabel("After dictation", { exact: true })).toHaveValue(
+    "copyOnly",
+  );
+  await page
+    .getByLabel("After dictation", { exact: true })
+    .selectOption("pasteKeep");
+  await expect(page.getByLabel("After dictation", { exact: true })).toHaveValue(
+    "pasteKeep",
+  );
   await page.getByRole("button", { name: "Advanced", exact: true }).click();
   await page.getByRole("switch", { name: "Sound feedback" }).click();
   await expect(
     page.getByRole("switch", { name: "Sound feedback" }),
   ).toBeChecked();
   await page.getByRole("button", { name: "General", exact: true }).click();
-  await expect(page.getByLabel("Microphone", { exact: true })).toHaveValue(
-    "USB Microphone",
-  );
+  await expect(
+    page.getByRole("combobox", { name: "Microphone", exact: true }),
+  ).toHaveValue("USB Microphone");
 });
 
 test("load failure offers recovery and controls never appear with unknown settings", async ({
@@ -332,9 +351,7 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
       detail: "HotKey already registered",
     },
   });
-  await expect(page.getByRole("alert")).toHaveText(
-    "Shortcut unavailableChoose another shortcut in Settings.",
-  );
+  await expect(page.getByRole("alert")).toHaveText("Shortcut unavailable");
   await page.screenshot({ path: "target/overlay-error-browser.png" });
   await page.evaluate(() =>
     window.postMessage(
@@ -420,7 +437,7 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
     ),
   );
   await expect(page.getByRole("alert")).toHaveText(
-    "Accessibility access neededAllow dictate in System Settings → Privacy & Security → Accessibility.",
+    "Accessibility access needed",
   );
 });
 
@@ -641,9 +658,7 @@ test("invalid appearance events show a recoverable overlay error", async ({
       "*",
     ),
   );
-  await expect(page.getByRole("alert")).toHaveText(
-    "Settings couldn’t refreshOpen Settings and save again.",
-  );
+  await expect(page.getByRole("alert")).toHaveText("Settings couldn’t refresh");
 });
 
 for (const label of ["ink", "annotate-bar"] as const) {
@@ -803,3 +818,83 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
       }
     }
 });
+
+for (const mode of ["light", "dark"]) {
+  test(`QA round 3 states in ${mode}`, async ({ page }) => {
+    await page.emulateMedia({
+      colorScheme: mode === "dark" ? "dark" : "light",
+      reducedMotion: "reduce",
+    });
+    await page.setViewportSize({
+      width: process.env.QA_BASELINE ? 820 : 720,
+      height: process.env.QA_BASELINE ? 680 : 580,
+    });
+    const output = process.env.QA_BASELINE ? "before" : "after";
+    await openSettings(page);
+    await expect(
+      page.getByRole("heading", { name: "General", exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `target/qa-round-3/${output}-settings-${mode}.png`,
+    });
+    await page.getByRole("button", { name: "Shortcut", exact: true }).click();
+    await expect(
+      page
+        .getByRole("button", { name: "Shortcut", exact: true })
+        .filter({ hasText: "Press shortcut" }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `target/qa-round-3/${output}-recorder-${mode}.png`,
+    });
+    await page.keyboard.press("Escape");
+    const settingsPage = page;
+    page = await page.context().newPage();
+    await settingsPage.close();
+    await page.emulateMedia({
+      colorScheme: mode === "dark" ? "dark" : "light",
+      reducedMotion: "reduce",
+    });
+    await page.setViewportSize({ width: 436, height: 120 });
+    await openSettings(page, {
+      overlay: true,
+      startupError: {
+        title: "Annotate needs Screen Recording",
+        fix: "Open System Settings to allow access.",
+        detail: null,
+      },
+    });
+    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-mode", mode);
+    await page.screenshot({
+      path: `target/qa-round-3/${output}-notice-${mode}.png`,
+    });
+    await page.evaluate(() =>
+      window.postMessage(
+        {
+          type: "dictate-test",
+          event: "dictation-state",
+          payload: { phase: "recording", error: null },
+        },
+        "*",
+      ),
+    );
+    await expect(page.getByRole("status")).toHaveText("Recording");
+    await page.screenshot({
+      path: `target/qa-round-3/${output}-recording-${mode}.png`,
+    });
+    await page.getByRole("button", { name: "Finish dictation" }).click();
+    await expect(page.getByRole("status")).toHaveText("Transcribing…");
+    await page.evaluate(() =>
+      window.postMessage(
+        {
+          type: "dictate-test",
+          event: "dictation-state",
+          payload: { phase: "recording", error: null },
+        },
+        "*",
+      ),
+    );
+    await page.getByRole("button", { name: "Discard dictation" }).click();
+    await expect(page.getByRole("status")).toContainText("Ready");
+  });
+}

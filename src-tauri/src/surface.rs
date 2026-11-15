@@ -229,6 +229,7 @@ fn handle_menu(app: &AppHandle, id: &str) -> Result<(), String> {
                     &text,
                     crate::insert::Delivery::from_settings(&settings),
                 )
+                .map(|_| ())
                 .map_err(|e| e.to_string())
             }
         }
@@ -270,11 +271,7 @@ pub fn setup(app: &App, _settings: &Settings) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "settings" => {
-                if let Some(window) = app.get_webview_window("settings")
-                    && let Err(error) = window.show().and_then(|()| window.set_focus())
-                {
-                    log::warn!("[settings] {error}");
-                }
+                crate::show_settings(app);
             }
             "quit" => app.exit(0),
             id => {

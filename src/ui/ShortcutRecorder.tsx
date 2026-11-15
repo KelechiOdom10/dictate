@@ -92,7 +92,9 @@ export function ShortcutRecorder({
       }}
     >
       {recording ? (
-        "Press shortcut…"
+        <>
+          Press shortcut <KeyboardShortcut value="esc" size={size} />
+        </>
       ) : (
         <KeyboardShortcut value={value} size={size} />
       )}

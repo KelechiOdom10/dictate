@@ -59,6 +59,18 @@ adler2 = { opt-level = 3 }
 # Debug ggml and every dev-build dictation pays for it.
 transcribe-cpp-sys = { opt-level = 3 }
 
+[profile.dev.package.dictate]
+opt-level = 2
+
+[profile.dev.package.rubato]
+opt-level = 3
+
+[profile.dev.package.rustfft]
+opt-level = 3
+
+[profile.dev.package.realfft]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = true
