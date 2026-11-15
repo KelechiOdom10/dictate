@@ -353,7 +353,7 @@ on the contact sheet are white rounded squares with the digits drawn as
   "durationMs": 49430,
   "display": { "id": 1, "frame": { "x": 0, "y": 0, "w": 1512, "h": 982 }, "scale": 2 },
   "frontmostApp": { "name": "…", "bundleId": "…" },        // at start
-  "video": { "file": "recording.mp4", "offsetMs": 140, "width": 2560, "height": 1662, "fps": 15 },
+  "video": { "file": "recording.mp4", "offsetMs": 140, "width": 2560, "height": 1662, "fps": 15, "durationMs": 31260 },
   "audio": { "file": "audio.wav", "offsetMs": 35, "sampleRate": 16000 },
   "transcript": {
     "model": "ggml-small.en", "text": "…",
