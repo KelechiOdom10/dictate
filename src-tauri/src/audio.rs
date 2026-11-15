@@ -6,7 +6,7 @@ const OUTPUT_RATE: usize = 16_000;
 type Reply<T> = mpsc::Sender<Result<T, String>>;
 
 enum Command {
-    Start(Option<String>, Reply<()>),
+    Start(Option<String>, Reply<bool>),
     Monitor(Option<String>, Reply<()>),
     StopMonitor,
     Level(Reply<f32>),
@@ -26,6 +26,7 @@ struct Recording {
     stream: cpal::Stream,
     captured: Arc<Mutex<Captured>>,
     rate: usize,
+    fallback: bool,
 }
 
 fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
@@ -42,14 +43,15 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                         match command {
                             Command::Start(device, reply) => {
                                 let result = if let Some(active) = &recording {
-                                    active
-                                        .captured
-                                        .lock()
-                                        .map_err(|e| e.to_string())
-                                        .and_then(|data| data.error.clone().map_or(Ok(()), Err))
+                                    active.captured.lock().map_err(|e| e.to_string()).and_then(
+                                        |data| data.error.clone().map_or(Ok(active.fallback), Err),
+                                    )
                                 } else {
-                                    open_recording(device.as_deref(), true)
-                                        .map(|active| recording = Some(active))
+                                    open_recording(device.as_deref(), true).map(|active| {
+                                        let fallback = active.fallback;
+                                        recording = Some(active);
+                                        fallback
+                                    })
                                 };
                                 let _ = reply.send(result);
                             }
@@ -110,10 +112,10 @@ pub fn is_recording() -> bool {
 }
 
 pub fn start() -> Result<(), String> {
-    start_device(None)
+    start_device(None).map(|_| ())
 }
 
-pub fn start_device(device: Option<String>) -> Result<(), String> {
+pub fn start_device(device: Option<String>) -> Result<bool, String> {
     let (reply, result) = mpsc::channel();
     send(Command::Start(device, reply))?;
     result
@@ -129,12 +131,50 @@ pub fn stop() -> Result<Vec<f32>, String> {
         .map_err(|e| format!("Audio stop reply: {e}"))?
 }
 
-pub fn input_devices() -> Result<Vec<String>, String> {
+type Devices = Vec<(String, cpal::Device)>;
+
+fn device_cache() -> &'static Mutex<Option<Devices>> {
+    static DEVICES: OnceLock<Mutex<Option<Devices>>> = OnceLock::new();
+    DEVICES.get_or_init(|| Mutex::new(None))
+}
+
+fn list_devices() -> Result<Devices, String> {
     cpal::default_host()
         .input_devices()
         .map_err(|e| e.to_string())?
-        .map(|device| device.name().map_err(|e| e.to_string()))
+        .map(|device| {
+            device
+                .name()
+                .map(|name| (name, device))
+                .map_err(|e| e.to_string())
+        })
         .collect()
+}
+
+pub fn input_devices() -> Result<Vec<String>, String> {
+    let devices = list_devices()?;
+    let names = devices.iter().map(|(name, _)| name.clone()).collect();
+    *device_cache().lock().map_err(|e| e.to_string())? = Some(devices);
+    Ok(names)
+}
+
+fn selected_device(name: &str) -> Result<Option<cpal::Device>, String> {
+    let mut cache = device_cache().lock().map_err(|e| e.to_string())?;
+    if let Some(device) = cache
+        .as_ref()
+        .and_then(|devices| devices.iter().find(|(label, _)| label == name))
+        .map(|(_, device)| device)
+        && device.default_input_config().is_ok()
+    {
+        return Ok(Some(device.clone()));
+    }
+    let devices = list_devices()?;
+    let device = devices
+        .iter()
+        .find(|(label, _)| label == name)
+        .map(|(_, device)| device.clone());
+    *cache = Some(devices);
+    Ok(device)
 }
 
 pub fn monitor_start(device: Option<String>) -> Result<(), String> {
@@ -155,14 +195,11 @@ pub fn microphone_level() -> Result<f32, String> {
 
 fn open_recording(name: Option<&str>, retain: bool) -> Result<Recording, String> {
     let host = cpal::default_host();
-    let device = match name {
-        Some(name) => host
-            .input_devices()
-            .map_err(|e| e.to_string())?
-            .find(|device| device.name().is_ok_and(|value| value == name))
-            .ok_or_else(|| format!("Microphone unavailable: {name}"))?,
-        None => host.default_input_device().ok_or("No default microphone")?,
-    };
+    let selected = name.map(selected_device).transpose()?.flatten();
+    let fallback = name.is_some() && selected.is_none();
+    let device = selected
+        .or_else(|| host.default_input_device())
+        .ok_or("No default microphone")?;
     let config = device
         .default_input_config()
         .map_err(|e| format!("Microphone config: {e}"))?;
@@ -190,6 +227,7 @@ fn open_recording(name: Option<&str>, retain: bool) -> Result<Recording, String>
         stream,
         captured,
         rate: config.sample_rate().0 as usize,
+        fallback,
     })
 }
 
@@ -332,6 +370,42 @@ fn resample(samples: Vec<f32>, rate: usize) -> Result<Vec<f32>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "Opens the real microphone briefly; run explicitly"]
+    fn disconnected_preference_records_and_monitors_with_default_microphone() {
+        let missing = Some("dictate-nonexistent-microphone-test".into());
+        assert!(start_device(missing.clone()).unwrap());
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(!stop().unwrap().is_empty());
+        monitor_start(missing).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(microphone_level().unwrap().is_finite());
+        monitor_stop().unwrap();
+    }
+
+    #[test]
+    #[ignore = "Measures local cached device selection without opening the microphone"]
+    fn measure_cached_device_selection() {
+        let names = input_devices().unwrap();
+        let name = names.first().expect("A microphone is required");
+        let mut timings = Vec::new();
+        for _ in 0..30 {
+            let start = std::time::Instant::now();
+            assert!(selected_device(name).unwrap().is_some());
+            timings.push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        assert!(
+            selected_device("dictate-nonexistent-microphone-test")
+                .unwrap()
+                .is_none()
+        );
+        timings.sort_by(f64::total_cmp);
+        println!(
+            "cached_selection_n=30 median_ms={:.3} p95_ms={:.3} max_ms={:.3}",
+            timings[15], timings[28], timings[29]
+        );
+    }
 
     #[test]
     fn debug_wav_retains_normalized_samples_in_temp_directory() {

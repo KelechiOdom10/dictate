@@ -35,9 +35,11 @@ export type RecordingState =
 export function RecordingCapsule({
   state,
   shortcut,
+  notice,
 }: {
   state: RecordingState;
   shortcut?: ReactNode;
+  notice?: string;
 }) {
   const labels: Record<RecordingState["kind"], string> = {
     ready: "Listening",
@@ -61,6 +63,7 @@ export function RecordingCapsule({
         role={state.kind === "error" ? "alert" : "status"}
       >
         <span>{labels[state.kind]}</span>
+        {notice && <span className="ui-capsule-message">{notice}</span>}
         {(state.kind === "ready" || state.kind === "error") && (
           <span className="ui-capsule-message">{state.message}</span>
         )}
