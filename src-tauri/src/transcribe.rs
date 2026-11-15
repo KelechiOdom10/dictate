@@ -2,6 +2,7 @@ use crate::problem::Problem;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
+use transcribe_cpp::TimestampKind;
 
 static TRANSCRIPTION: Mutex<()> = Mutex::new(());
 
@@ -23,12 +24,23 @@ pub struct Segment {
     pub end_ms: u64,
     pub text: String,
 }
-/// Transcribe 16 kHz mono audio with the GGML model at `model`.
+/// Transcribe 16 kHz mono audio with the model file at `model`: a GGUF file
+/// runs in process on the held engine, anything else through whisper-cli.
 pub fn transcribe(samples: &[f32], model: &Path) -> Result<String, Problem> {
     validate(samples)?;
     let _guard = lock()?;
-    let cli = ready(model)?;
-    let text = run_whisper(&cli, model, samples, &["-nt", "-otxt"], "txt").map_err(failed)?;
+    let text = match engine(model) {
+        Engine::InProcess => {
+            if !model.is_file() {
+                return Err(missing_model(model));
+            }
+            held::run(model, samples, TimestampKind::None)?.text
+        }
+        Engine::WhisperCli => {
+            let cli = ready(model)?;
+            run_whisper(&cli, model, samples, &["-nt", "-otxt"], "txt").map_err(failed)?
+        }
+    };
     Ok(text.trim().to_string())
 }
 
@@ -42,33 +54,178 @@ pub fn transcribe(samples: &[f32], model: &Path) -> Result<String, Problem> {
 /// audio opens with silence (4 s of silence made the first word 4 s early), and
 /// less so after long pauses. So the audio is cut into runs of speech with
 /// `speech_spans`, each run is transcribed alone, and its offset is added back.
+///
+/// The in-process engine returns word times itself. The same `speech_spans`
+/// cut is kept for it: times were already right without it, but it keeps one
+/// decode from holding a whole long Annotate session in memory.
 pub fn transcribe_timed(samples: &[f32], model: &Path) -> Result<Vec<Word>, Problem> {
     validate(samples)?;
     let _guard = lock()?;
-    let cli = ready(model)?;
+    let cli = match engine(model) {
+        Engine::InProcess if !model.is_file() => return Err(missing_model(model)),
+        Engine::InProcess => None,
+        Engine::WhisperCli => Some(ready(model)?),
+    };
     let mut words = Vec::new();
     for span in speech_spans(samples) {
         let offset_ms = span.start as u64 * 1000 / SAMPLE_RATE as u64;
-        let json = run_whisper(
-            &cli,
-            model,
-            &samples[span],
-            &["-ojf", "-ml", "1", "-sow"],
-            "json",
-        )
-        .map_err(failed)?;
-        words.extend(
-            parse_words(&json)
-                .map_err(failed)?
-                .into_iter()
-                .map(|word| Word {
-                    start_ms: word.start_ms + offset_ms,
-                    end_ms: word.end_ms + offset_ms,
-                    text: word.text,
-                }),
-        );
+        let span_words = match &cli {
+            None => engine_words(held::run(model, &samples[span], TimestampKind::Word)?),
+            Some(cli) => {
+                let json = run_whisper(
+                    cli,
+                    model,
+                    &samples[span],
+                    &["-ojf", "-ml", "1", "-sow"],
+                    "json",
+                )
+                .map_err(failed)?;
+                parse_words(&json).map_err(failed)?
+            }
+        };
+        words.extend(span_words.into_iter().map(|word| Word {
+            start_ms: word.start_ms + offset_ms,
+            end_ms: word.end_ms + offset_ms,
+            text: word.text,
+        }));
     }
     Ok(words)
+}
+
+/// Which program turns a model file into text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Engine {
+    /// `transcribe-cpp` in this process, on a model held in memory.
+    InProcess,
+    /// A new whisper-cli process per call.
+    WhisperCli,
+}
+
+fn engine(model: &Path) -> Engine {
+    if model.extension().is_some_and(|ext| ext == "gguf") {
+        Engine::InProcess
+    } else {
+        Engine::WhisperCli
+    }
+}
+
+/// Loads `model` and runs one short decode so the first dictation doesn't pay
+/// for loading or Metal's first-run setup, or, for a whisper-cli model or a
+/// missing file, lets go of whatever model is held. Call it at startup and
+/// whenever the chosen model changes. Waits for a running transcription.
+pub fn prepare(model: &Path) -> Result<(), Problem> {
+    if engine(model) == Engine::WhisperCli || !model.is_file() {
+        held::unload();
+        return match engine(model) {
+            Engine::InProcess => Err(missing_model(model)),
+            Engine::WhisperCli => Ok(()),
+        };
+    }
+    let started = std::time::Instant::now();
+    held::run(model, &[0.0; SAMPLE_RATE], TimestampKind::None)?;
+    log::info!(
+        "[transcribe] ready {} in {} ms",
+        model_name(model),
+        started.elapsed().as_millis()
+    );
+    Ok(())
+}
+
+/// The model file the in-process engine holds, if any.
+pub fn held_model() -> Option<PathBuf> {
+    held::path()
+}
+
+/// Whether `model` needs whisper-cli installed to transcribe.
+pub fn needs_whisper_cli(model: &Path) -> bool {
+    engine(model) == Engine::WhisperCli
+}
+
+/// The engine's words with times in ms. Punctuation stays on its word
+/// ("dog."), as `segments` expects.
+fn engine_words(transcript: transcribe_cpp::Transcript) -> Vec<Word> {
+    transcript
+        .words
+        .into_iter()
+        .filter_map(|word| {
+            let text = word.text.trim();
+            (!text.is_empty()).then(|| Word {
+                start_ms: word.t0_ms.max(0) as u64,
+                end_ms: word.t1_ms.max(word.t0_ms).max(0) as u64,
+                text: text.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The one model `transcribe-cpp` keeps loaded. Loading Parakeet takes about
+/// 70 ms once Metal's shaders are compiled, and its first decode 60–360 ms, so
+/// it stays loaded between takes. Only one is held: loading another, or
+/// `unload`, drops the old session and with it the model's memory.
+mod held {
+    use super::{Problem, failed};
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+    use transcribe_cpp::{Model, RunOptions, Session, TimestampKind, Transcript};
+
+    struct Held {
+        path: PathBuf,
+        session: Session,
+    }
+
+    static HELD: Mutex<Option<Held>> = Mutex::new(None);
+
+    fn slot() -> std::sync::MutexGuard<'static, Option<Held>> {
+        HELD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn path() -> Option<PathBuf> {
+        slot().as_ref().map(|held| held.path.clone())
+    }
+
+    pub fn unload() {
+        if let Some(held) = slot().take() {
+            log::info!("[transcribe] unloaded {}", held.path.display());
+        }
+    }
+
+    /// Runs one decode on `model`, loading it first if another model, or
+    /// none, is held.
+    pub fn run(
+        model: &Path,
+        samples: &[f32],
+        timestamps: TimestampKind,
+    ) -> Result<Transcript, Problem> {
+        // The engine and ggml print every Metal kernel they compile. Send it
+        // through `log`, where the app keeps warnings and errors only.
+        static LOGGING: std::sync::Once = std::sync::Once::new();
+        LOGGING.call_once(transcribe_cpp::init_logging);
+        let mut slot = slot();
+        if slot.as_ref().is_none_or(|held| held.path != model) {
+            if let Some(old) = slot.take() {
+                log::info!("[transcribe] unloaded {}", old.path.display());
+            }
+            let started = std::time::Instant::now();
+            let session = Model::load(model)
+                .and_then(|loaded| loaded.session())
+                .map_err(|e| failed(format!("Load {}: {e}", model.display())))?;
+            log::info!(
+                "[transcribe] loaded {} in {} ms",
+                model.display(),
+                started.elapsed().as_millis()
+            );
+            *slot = Some(Held {
+                path: model.to_path_buf(),
+                session,
+            });
+        }
+        let held = slot.as_mut().expect("loaded above");
+        let options = RunOptions {
+            timestamps,
+            ..RunOptions::default()
+        };
+        held.session.run(samples, &options).map_err(failed)
+    }
 }
 
 const SAMPLE_RATE: usize = 16_000;
@@ -382,7 +539,7 @@ mod tests {
             eprintln!("SKIP missing model: whisper-cli is checked first");
             return;
         }
-        let _turn = whisper_turn();
+        let _turn = transcription_turn();
         let model = Path::new("/nonexistent/ggml-base.en.bin");
         for problem in [
             transcribe(&[0.1], model).unwrap_err(),
@@ -560,9 +717,10 @@ mod tests {
         assert_eq!(segments(&[]), []);
     }
 
-    /// `transcribe` refuses to run twice at once, so the tests that call
-    /// whisper-cli take turns instead of failing each other.
-    fn whisper_turn() -> std::sync::MutexGuard<'static, ()> {
+    /// `transcribe` refuses to run twice at once, and the held engine is one
+    /// slot, so the tests that transcribe take turns instead of failing each
+    /// other.
+    fn transcription_turn() -> std::sync::MutexGuard<'static, ()> {
         static TURN: Mutex<()> = Mutex::new(());
         TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -617,7 +775,7 @@ mod tests {
 
     #[test]
     fn generated_speech_transcribes_through_whisper_cli() {
-        let _turn = whisper_turn();
+        let _turn = transcription_turn();
         let Some(samples) = generated_speech(
             "generated speech transcription",
             "The quick brown fox jumps over the lazy dog.",
@@ -679,7 +837,7 @@ mod tests {
 
     #[test]
     fn leading_silence_keeps_word_times_on_the_audio_clock() {
-        let _turn = whisper_turn();
+        let _turn = transcription_turn();
         let test = "leading silence word times";
         let Some(speech) = generated_speech(test, "Move the button. Then make it blue.") else {
             return;
@@ -701,7 +859,7 @@ mod tests {
 
     #[test]
     fn a_long_pause_mid_take_keeps_later_words_on_time() {
-        let _turn = whisper_turn();
+        let _turn = transcription_turn();
         let test = "mid-take pause word times";
         let Some(first) = generated_speech(test, "Move the button.") else {
             return;
@@ -748,7 +906,7 @@ That is everything for this page, thank you.";
 
     #[test]
     fn generated_minute_gets_increasing_word_times_through_whisper_cli() {
-        let _turn = whisper_turn();
+        let _turn = transcription_turn();
         let test = "generated speech timed transcription";
         let Some(samples) = generated_speech(test, MINUTE_OF_SPEECH) else {
             return;
@@ -789,6 +947,195 @@ That is everything for this page, thank you.";
             rebuilt.len() >= 10,
             "expected about one segment per sentence"
         );
+    }
+
+    /// Parakeet Unified for the in-process tests: `DICTATE_PARAKEET_MODEL`,
+    /// else this checkout's `models/` folder.
+    fn parakeet_model() -> PathBuf {
+        std::env::var_os("DICTATE_PARAKEET_MODEL")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../models")
+                    .join(
+                        crate::models::info(crate::models::SpeechModel::ParakeetUnifiedEn)
+                            .file_name,
+                    )
+            })
+    }
+
+    fn parakeet_speech(test: &str, text: &str) -> Option<Vec<f32>> {
+        let model = parakeet_model();
+        if !model.is_file() {
+            eprintln!("SKIP {test}: no model at {}", model.display());
+            return None;
+        }
+        if !cfg!(target_os = "macos") {
+            eprintln!("SKIP {test}: requires macOS say and afconvert");
+            return None;
+        }
+        Some(say(text))
+    }
+
+    const FOX: &str = "The quick brown fox jumps over the lazy dog.";
+
+    #[test]
+    fn gguf_files_run_in_process_and_the_rest_through_whisper_cli() {
+        assert_eq!(engine(Path::new("/m/parakeet.gguf")), Engine::InProcess);
+        assert_eq!(engine(Path::new("/m/ggml-base.en.bin")), Engine::WhisperCli);
+        assert!(!needs_whisper_cli(&parakeet_model()));
+    }
+
+    #[test]
+    fn missing_gguf_model_points_to_the_models_page_without_whisper_cli() {
+        let _turn = transcription_turn();
+        let model = Path::new("/nonexistent/parakeet.gguf");
+        for problem in [
+            transcribe(&[0.1], model).unwrap_err(),
+            transcribe_timed(&[0.1], model).unwrap_err(),
+            prepare(model).unwrap_err(),
+        ] {
+            assert_eq!(problem.title, "Speech model missing");
+            assert!(
+                problem
+                    .detail
+                    .unwrap()
+                    .contains("/nonexistent/parakeet.gguf")
+            );
+        }
+        assert_eq!(held_model(), None);
+    }
+
+    #[test]
+    fn engine_words_trim_text_and_keep_punctuation() {
+        let word = |t0_ms, t1_ms, text: &str| transcribe_cpp::Word {
+            t0_ms,
+            t1_ms,
+            text: text.into(),
+            ..Default::default()
+        };
+        let transcript = transcribe_cpp::Transcript {
+            words: vec![
+                word(480, 640, " The"),
+                word(-20, 10, "dog."),
+                word(900, 880, "late"),
+                word(1000, 1100, " "),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            engine_words(transcript),
+            [
+                super::Word {
+                    start_ms: 480,
+                    end_ms: 640,
+                    text: "The".into()
+                },
+                super::Word {
+                    start_ms: 0,
+                    end_ms: 10,
+                    text: "dog.".into()
+                },
+                super::Word {
+                    start_ms: 900,
+                    end_ms: 900,
+                    text: "late".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parakeet_transcribes_the_fox_exactly() {
+        let _turn = transcription_turn();
+        let Some(samples) = parakeet_speech("parakeet fox", FOX) else {
+            return;
+        };
+        let model = parakeet_model();
+        prepare(&model).unwrap();
+        let start = std::time::Instant::now();
+        let text = transcribe(&samples, &model).unwrap();
+        eprintln!(
+            "parakeet fox: warm transcribe_ms={} text={text:?}",
+            start.elapsed().as_millis()
+        );
+        assert_eq!(text, FOX);
+    }
+
+    #[test]
+    fn parakeet_word_times_after_three_seconds_of_silence() {
+        let _turn = transcription_turn();
+        let test = "parakeet leading silence";
+        let Some(fox) = parakeet_speech(test, FOX) else {
+            return;
+        };
+        let mut samples = vec![0.0; 3 * SAMPLE_RATE];
+        samples.extend(&fox);
+        let words = transcribe_timed(&samples, &parakeet_model()).unwrap();
+        let error = report_onset(test, &words, 3_480);
+        assert!(error <= 250, "words: {words:?}");
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(texts.join(" "), FOX);
+        for pair in words.windows(2) {
+            assert!(pair[0].start_ms <= pair[1].start_ms, "words: {words:?}");
+        }
+    }
+
+    #[test]
+    fn switching_models_unloads_the_held_one() {
+        let _turn = transcription_turn();
+        let model = parakeet_model();
+        if !model.is_file() {
+            eprintln!("SKIP switching models: no model at {}", model.display());
+            return;
+        }
+        prepare(&model).unwrap();
+        assert_eq!(held_model(), Some(model.clone()));
+        prepare(Path::new("/models/ggml-base.en.bin")).unwrap();
+        assert_eq!(held_model(), None);
+        prepare(&model).unwrap();
+        assert_eq!(held_model(), Some(model));
+        prepare(Path::new("/models/deleted.gguf")).unwrap_err();
+        assert_eq!(held_model(), None);
+    }
+
+    /// Warm Parakeet on the fox clip (n = 11) and on `measure_catalog_models`'
+    /// 5.9 s sentence (n = 5), after one warm-up. Asserts the fox median is
+    /// within 100 ms. Run alone, so other tests don't share the GPU.
+    #[test]
+    #[ignore = "Timing; run with --ignored --nocapture --test-threads=1"]
+    fn measure_parakeet_warm_latency() {
+        let _turn = transcription_turn();
+        let model = parakeet_model();
+        let cold = std::time::Instant::now();
+        prepare(&model).unwrap();
+        println!("prepare_ms={}", cold.elapsed().as_millis());
+        let median = |samples: &[f32], runs: usize| {
+            let mut timings: Vec<u128> = (0..runs)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    transcribe(samples, &model).unwrap();
+                    start.elapsed().as_millis()
+                })
+                .collect();
+            timings.sort();
+            (timings[runs / 2], timings[0], timings[runs - 1])
+        };
+        let fox = say(FOX);
+        let (fox_median, min, max) = median(&fox, 11);
+        println!(
+            "fox seconds={:.2} median_ms={fox_median} min_ms={min} max_ms={max}",
+            fox.len() as f64 / 16_000.0
+        );
+        let sentence = say("Please move the Thursday design review to Friday morning, \
+             and send Priya the updated budget before lunch.");
+        let (sentence_median, min, max) = median(&sentence, 5);
+        println!(
+            "sentence seconds={:.2} median_ms={sentence_median} min_ms={min} max_ms={max} text={:?}",
+            sentence.len() as f64 / 16_000.0,
+            transcribe(&sentence, &model).unwrap()
+        );
+        assert!(fox_median <= 100, "fox median {fox_median} ms");
     }
 
     /// Times every catalog model on one generated sentence: one warm-up, then
