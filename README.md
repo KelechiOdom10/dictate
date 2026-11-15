@@ -11,3 +11,9 @@ The pipeline spike and the first settings surface are in development.
 - `docs/settings.md` — settings runtime, design choices and manual checks
 
 Pipeline contracts live in `src-tauri/src/`: `audio` → `transcribe` → `insert`.
+
+## Building
+
+The Parakeet engine (`transcribe-cpp`) compiles ggml with CMake, so the build
+machine needs it: `brew install cmake`. Whisper models still run through
+Homebrew's `whisper-cli` (`brew install whisper.cpp`).

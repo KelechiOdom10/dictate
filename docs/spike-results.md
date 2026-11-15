@@ -524,3 +524,40 @@ this machine, which needs the manual run in the PR.
 ```sh
 cargo test --manifest-path src-tauri/Cargo.toml --test annotate_session -- --nocapture
 ```
+
+## Parakeet in process — 15 November 2026
+
+Apple M4 Pro, debug build with ggml at `opt-level = 3`, `transcribe-cpp`
+0.4.2 with Metal. Model: Parakeet Unified English 0.6B, Q8_0
+(`parakeet-unified-en-0.6b-Q8_0.gguf`, 731,357,568 bytes), held in memory by
+`transcribe.rs` and warmed with one 1 s decode by `transcribe::prepare`.
+Fixtures are generated at test time with `say -v Samantha`, 16 kHz mono.
+
+| Check | Result | Target |
+|---|---:|---:|
+| Download from the pinned URL, length + SHA-256 verified | pass, 47 s | verifies |
+| Fox (2.67 s) text | `The quick brown fox jumps over the lazy dog.` | exact |
+| Fox, warm `transcribe` median (n = 11, three runs) | 60 / 61 / 73 ms | ≤ 100 ms |
+| 3 s silence + fox, first word from `transcribe_timed` | "The" at 3,470 ms | 3,480 ± 250 ms |
+| Switch to a whisper model or a missing file | held model dropped, `ggml_metal_free` logged | unloads |
+| `prepare` (load + warm decode), shaders already compiled | 137–166 ms | — |
+
+The 5.9 s sentence from "Speech model speed" above, warm, n = 5 per run:
+medians 152, 106 and 134 ms (min 80 ms, max 431 ms). 134 ms is the Models page
+speed meter, against 232 ms for base.en and 437 ms for small.en through
+whisper-cli. Parakeet returned "…send Pri of the updated budget…", so it missed
+"Priya" where small.en didn't; one synthetic sentence, not an accuracy
+measurement.
+
+Not measured yet: `release_to_text_ms` for a physical ⌥⇧Space take, which
+needs the manual step in the PR. The app logs it as
+`[dictate] release_to_text_ms=… inference_ms=… audio_ms=… model=…`.
+
+Reproduce (put the GGUF at `models/parakeet-unified-en-0.6b-Q8_0.gguf`, or
+point `DICTATE_PARAKEET_MODEL` at it):
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --lib transcribe::tests::parakeet -- --nocapture --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml --lib measure_parakeet_warm_latency -- --ignored --nocapture --test-threads=1
+TMPDIR="$PWD/target" cargo test --manifest-path src-tauri/Cargo.toml --lib parakeet_downloads_from_its_pinned_url -- --ignored --nocapture
+```
