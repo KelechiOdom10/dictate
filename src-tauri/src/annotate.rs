@@ -3,8 +3,9 @@
 //!
 //! The rules here are pure: the phase a tap moves to, whether dictation may
 //! start, and how a finished recording becomes an `Annotation`. `lib.rs` holds
-//! the phase, calls `audio` and `transcribe`, and drives the pill. Screen
-//! video, ink and frames come in later stages.
+//! the phase, calls `audio` and `transcribe`, and drives the pill. Ink drawn
+//! during the session comes from `ink.rs`. Screen video and frames come in
+//! later stages.
 //!
 //! `audio.rs` keeps one shared recording, so Annotate and dictation must never
 //! record at the same time: a dictation `stop()` would take Annotate's audio.
@@ -12,7 +13,7 @@
 use std::io;
 use std::path::Path;
 
-use crate::package::{self, Annotation, Audio, Display, Session};
+use crate::package::{self, Annotation, Audio, Display, Session, Stroke};
 use crate::transcribe::Word;
 
 /// Session folders live in `<app data>/annotations/<id>/`.
@@ -70,14 +71,16 @@ pub struct Started {
     pub frontmost_app: Option<package::App>,
 }
 
-/// The `annotation.json` for an audio-only session: times, duration and the
-/// transcript, through the package builder. No video means no frames, so the
-/// builder's speech frames are dropped rather than pointing at missing images.
+/// The `annotation.json` for a session without video: times, duration, the
+/// transcript and the ink, through the package builder, which groups strokes
+/// into marks. No video means no frames, so the builder's frames are dropped
+/// rather than pointing at missing images.
 pub fn annotation(
     started: Started,
     duration_ms: u64,
     model: String,
     words: Vec<Word>,
+    strokes: Vec<Stroke>,
 ) -> Annotation {
     let mut annotation = package::build(Session {
         id: session_id(started.unix_ms),
@@ -93,7 +96,7 @@ pub fn annotation(
         },
         transcript_model: model,
         words,
-        strokes: Vec::new(),
+        strokes,
         missing_permissions: Vec::new(),
     });
     annotation.frames.clear();
@@ -149,10 +152,25 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (y, m, d)
 }
 
-/// The main display in global points, as the package records it.
+/// The display under the pointer, which is the one Annotate records and draws
+/// on. Falls back to the main display.
 #[cfg(target_os = "macos")]
-pub fn main_display() -> Display {
-    let display = core_graphics::display::CGDisplay::main();
+pub fn recorded_display() -> Display {
+    use core_graphics::display::CGDisplay;
+    let displays: Vec<Display> = CGDisplay::active_displays()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| display(CGDisplay::new(id)))
+        .collect();
+    let (x, y) = crate::annotate_ui::pointer().unwrap_or((0.0, 0.0));
+    crate::ink::display_at(&displays, x, y)
+        .cloned()
+        .unwrap_or_else(|| display(CGDisplay::main()))
+}
+
+/// A display in global points, as the package records it.
+#[cfg(target_os = "macos")]
+fn display(display: core_graphics::display::CGDisplay) -> Display {
     let bounds = display.bounds();
     let scale = if bounds.size.width > 0.0 {
         display.pixels_wide() as f64 / bounds.size.width
@@ -256,7 +274,7 @@ mod tests {
             word(7000, 7400, "Fix"),
             word(7400, 7800, "it."),
         ];
-        let annotation = annotation(started(), 10_000, "ggml-base.en".into(), words);
+        let annotation = annotation(started(), 10_000, "ggml-base.en".into(), words, Vec::new());
 
         assert_eq!(annotation.id, "2026-11-14_14-56-36");
         assert_eq!(annotation.started_at, "2026-11-14T14:56:36.159Z");
@@ -275,11 +293,47 @@ mod tests {
     }
 
     #[test]
+    fn strokes_drawn_during_the_session_reach_annotation_json_as_marks() {
+        // Three overlapping strokes 1 s apart, drawn on the recorded display.
+        let mut ink = crate::ink::Ink::new(started().display);
+        for (t, cx) in [(2_000, 400.0), (3_000, 420.0), (4_000, 440.0)] {
+            ink.press(t, cx, 300.0);
+            ink.sample(t + 100, cx + 200.0, 300.0);
+            ink.sample(t + 200, cx + 200.0, 500.0);
+            ink.sample(t + 300, cx, 500.0);
+            ink.sample(t + 400, cx + 5.0, 305.0);
+            ink.release(t + 500);
+        }
+        let annotation = annotation(
+            started(),
+            10_000,
+            "ggml-base.en".into(),
+            Vec::new(),
+            ink.finish(9_000),
+        );
+
+        assert_eq!(annotation.strokes.len(), 3);
+        assert_eq!(annotation.strokes[0].t0, 2_000);
+        assert_eq!(&annotation.strokes[0].pts[..3], &[2_646, 3_055, 0]);
+        assert_eq!(annotation.marks.len(), 1);
+        assert_eq!(annotation.marks[0].strokes, vec![0, 1, 2]);
+        assert_eq!(annotation.marks[0].shape, package::Shape::Circle);
+        let json = serde_json::to_value(&annotation).unwrap();
+        assert_eq!(json["strokes"][2]["t1"], 4_500);
+    }
+
+    #[test]
     fn write_creates_the_folder_with_a_16k_wav_and_json() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join(FOLDER).join("2026-11-14_14-56-36");
         let samples = vec![0.0f32; 160_000];
-        let annotation = annotation(started(), 10_000, "ggml-base.en".into(), Vec::new());
+        let annotation = annotation(
+            started(),
+            10_000,
+            "ggml-base.en".into(),
+            Vec::new(),
+            Vec::new(),
+        );
 
         write(&folder, &samples, &annotation).unwrap();
 
@@ -336,6 +390,7 @@ mod tests {
             10_000,
             crate::transcribe::model_name(&model),
             words,
+            Vec::new(),
         );
         let folder = temp.path().join(FOLDER).join(&annotation.id);
         write(&folder, &samples, &annotation).unwrap();

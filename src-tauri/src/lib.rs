@@ -16,6 +16,7 @@
 //! receives status and small scalar levels, never raw samples.
 
 mod annotate;
+mod annotate_ui;
 mod audio;
 #[cfg(target_os = "macos")]
 pub mod frames;
@@ -27,6 +28,7 @@ pub mod transcribe;
 
 mod focus;
 mod history;
+mod ink;
 mod models;
 mod overlay;
 mod problem;
@@ -772,6 +774,39 @@ fn settings_refresh_failed() -> Problem {
 }
 
 #[tauri::command]
+fn annotate_bar_state(app: AppHandle) -> annotate_ui::BarState {
+    annotate_ui::bar_state(&app)
+}
+
+#[tauri::command]
+fn annotate_pen(app: AppHandle) {
+    annotate_ui::pen(&app, |now_ms| ink::PenInput::Button { now_ms });
+}
+
+#[tauri::command]
+fn annotate_pen_down(app: AppHandle) {
+    annotate_ui::pen_down(&app);
+}
+
+#[tauri::command]
+fn annotate_pen_up(app: AppHandle) {
+    annotate_ui::pen_up(&app);
+}
+
+/// The stop button on the floating bar: the same as a tap of the shortcut,
+/// but only ever stops.
+#[tauri::command]
+fn annotate_stop(app: AppHandle) {
+    let state = app.state::<Mutex<Runtime>>();
+    let Ok(runtime) = state.lock() else {
+        return;
+    };
+    if runtime.annotate == annotate::Phase::Recording {
+        annotate_tap(&app, runtime);
+    }
+}
+
+#[tauri::command]
 fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     overlay::resize(&app, width, height)
 }
@@ -805,12 +840,16 @@ fn hotkey(
     match shortcut_target(&runtime.settings, runtime.annotate_registered, shortcut) {
         Some(Target::Dictation) => {}
         Some(Target::Annotate) => {
-            if event == ShortcutState::Pressed {
-                annotate_tap(app, runtime);
+            annotate_shortcut(app, runtime, event);
+            return;
+        }
+        None => {
+            drop(runtime);
+            if *shortcut == annotate_ui::escape() && event == ShortcutState::Pressed {
+                annotate_ui::pen(app, |_| ink::PenInput::Escape);
             }
             return;
         }
-        None => return,
     }
     let next = shortcut_transition(runtime.settings.shortcut_mode, runtime.phase, event);
     if next == runtime.phase {
@@ -1072,8 +1111,31 @@ fn flash_notice(app: &AppHandle, notice: &'static str) {
     });
 }
 
-/// One tap of the Annotate shortcut: start a session, or stop it and save the
-/// package in the background.
+/// The Annotate shortcut. Idle: a press starts a session. Recording: a press
+/// opens a provisional stroke and the release decides, by the tap-or-hold
+/// rule in `ink`, whether it was a stroke to keep or a tap that stops.
+fn annotate_shortcut(
+    app: &AppHandle,
+    runtime: std::sync::MutexGuard<'_, Runtime>,
+    event: ShortcutState,
+) {
+    match (runtime.annotate, event) {
+        (annotate::Phase::Recording, ShortcutState::Pressed) => {
+            drop(runtime);
+            annotate_ui::pressed(app);
+        }
+        (annotate::Phase::Recording, ShortcutState::Released) => {
+            if annotate_ui::released(app) {
+                annotate_tap(app, runtime);
+            }
+        }
+        (_, ShortcutState::Pressed) => annotate_tap(app, runtime),
+        (_, ShortcutState::Released) => {}
+    }
+}
+
+/// One tap of the Annotate shortcut, or the bar's stop button: start a
+/// session, or stop it and save the package in the background.
 fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>) {
     let next = annotate::tap(runtime.annotate, runtime.phase == Phase::Idle);
     if next == runtime.annotate {
@@ -1106,29 +1168,33 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 }
             };
             let audio_offset_ms = clock.elapsed().as_millis() as u64;
+            let display = annotate::recorded_display();
             runtime.annotate = next;
             runtime.annotate_started = Some((
                 clock,
                 annotate::Started {
                     unix_ms,
                     audio_offset_ms,
-                    display: annotate::main_display(),
+                    display: display.clone(),
                     frontmost_app: focus::frontmost_app_id(),
                 },
             ));
-            surface::set_notice(app, microphone_notice(fallback));
+            let notice = microphone_notice(fallback);
+            let show_pill = notice.is_some();
+            surface::set_notice(app, notice);
             surface::set_phase(app, "annotating");
             drop(runtime);
-            log::info!("[annotate] started, audio_offset_ms={audio_offset_ms}");
-            if let Err(error) = overlay::show(app) {
-                report_error(
-                    app,
-                    &Problem::new(
-                        "Overlay couldn’t open",
-                        "Annotate is recording; tap the shortcut to finish.",
-                    )
-                    .because(error),
-                );
+            log::info!(
+                "[annotate] started, audio_offset_ms={audio_offset_ms} display={} at ({}, {})",
+                display.id,
+                display.frame.x,
+                display.frame.y
+            );
+            annotate_ui::begin(app, display, clock, unix_ms);
+            // The floating bar shows the session; the pill only appears to
+            // carry a notice.
+            if show_pill && let Err(error) = overlay::show(app) {
+                log::warn!("[annotate] show notice: {error}");
             }
         }
         annotate::Phase::Packaging => {
@@ -1142,10 +1208,18 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
             surface::set_notice(app, None);
             surface::set_phase(app, "packaging");
             drop(runtime);
+            // After the lock is released: hiding the panels and releasing Esc
+            // wait on the main thread.
+            let strokes = annotate_ui::end(app);
+            if let Err(error) = overlay::show(app) {
+                log::warn!("[annotate] show saving: {error}");
+            }
             let app = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
                 let outcome = match samples {
-                    Ok(samples) => save_annotation(&app, &samples, started, duration_ms, &model),
+                    Ok(samples) => {
+                        save_annotation(&app, &samples, started, duration_ms, strokes, &model)
+                    }
                     Err(error) => Err(error),
                 };
                 let phase = match &outcome {
@@ -1193,6 +1267,7 @@ fn save_annotation(
     samples: &[f32],
     started: annotate::Started,
     duration_ms: u64,
+    strokes: Vec<package::Stroke>,
     model: &Path,
 ) -> Result<(), Problem> {
     let stopped = Instant::now();
@@ -1207,8 +1282,13 @@ fn save_annotation(
         Err(error) => (Vec::new(), Some(error)),
     };
     let transcribe_ms = stopped.elapsed().as_millis();
-    let annotation =
-        annotate::annotation(started, duration_ms, transcribe::model_name(model), words);
+    let annotation = annotate::annotation(
+        started,
+        duration_ms,
+        transcribe::model_name(model),
+        words,
+        strokes,
+    );
     annotate::write(&folder, samples, &annotation).map_err(|e| {
         Problem::new(
             "Annotation not saved",
@@ -1217,10 +1297,12 @@ fn save_annotation(
         .because(e)
     })?;
     log::info!(
-        "[annotate] saved {} samples={} duration_ms={duration_ms} words={} transcribe_ms={transcribe_ms} stop_to_saved_ms={}",
+        "[annotate] saved {} samples={} duration_ms={duration_ms} words={} strokes={} marks={} transcribe_ms={transcribe_ms} stop_to_saved_ms={}",
         folder.display(),
         samples.len(),
         annotation.transcript.words.len(),
+        annotation.strokes.len(),
+        annotation.marks.len(),
         stopped.elapsed().as_millis()
     );
     match transcribe_error {
@@ -1262,6 +1344,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -1285,6 +1368,11 @@ pub fn run() {
             microphone_test,
             microphone_level,
             resize_overlay,
+            annotate_bar_state,
+            annotate_pen,
+            annotate_pen_down,
+            annotate_pen_up,
+            annotate_stop,
             report_settings_refresh_error,
             list_history,
             delete_history,
@@ -1413,6 +1501,7 @@ pub fn run() {
                 });
             }
             surface::setup(app, &settings)?;
+            annotate_ui::setup(app)?;
             if let Some(window) = app.get_webview_window("main") {
                 window.set_ignore_cursor_events(true)?;
                 window.set_focusable(false)?;

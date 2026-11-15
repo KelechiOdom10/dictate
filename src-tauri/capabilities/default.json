@@ -4,7 +4,9 @@
   "description": "Capability for the main window",
   "windows": [
     "main",
-    "settings"
+    "settings",
+    "ink",
+    "annotate-bar"
   ],
   "permissions": [
     "core:default",

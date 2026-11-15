@@ -8,6 +8,7 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import SettingsWindow from "./SettingsWindow";
+import { AnnotateBarWindow, InkWindow } from "./AnnotateWindows";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings, settingsSchema } from "./settings";
 import { RecordingCapsule, KeyboardShortcut } from "./ui";
@@ -209,13 +210,19 @@ function Appearance({
   return null;
 }
 
+const windowKind = new URLSearchParams(location.search).get("window");
+
 export default function App() {
   const [appearanceError, setAppearanceError] = useState<Problem | null>(null);
   return (
     <QueryClientProvider client={client}>
       <Appearance onError={setAppearanceError} />
-      {new URLSearchParams(location.search).get("window") === "settings" ? (
+      {windowKind === "settings" ? (
         <SettingsWindow />
+      ) : windowKind === "ink" ? (
+        <InkWindow />
+      ) : windowKind === "annotate-bar" ? (
+        <AnnotateBarWindow />
       ) : (
         <Overlay appearanceError={appearanceError} />
       )}

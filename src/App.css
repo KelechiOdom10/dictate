@@ -271,3 +271,12 @@ html.overlay-window,
   align-items: center;
   gap: var(--space-2);
 }
+
+.ink-window {
+  position: fixed;
+  inset: 0;
+  cursor: crosshair;
+}
+.annotate-bar-window {
+  height: 100vh;
+}
