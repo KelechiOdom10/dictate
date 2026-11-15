@@ -16,6 +16,8 @@
 //! receives status and small scalar levels, never raw samples.
 
 mod audio;
+#[cfg(target_os = "macos")]
+pub mod frames;
 mod insert;
 pub mod package;
 #[cfg(target_os = "macos")]

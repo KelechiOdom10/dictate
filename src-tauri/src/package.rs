@@ -42,7 +42,7 @@ pub const SPEECH_FRAME_GAP_MS: u64 = 4_000;
 pub const MAX_FRAMES: usize = 12;
 
 /// Stored point coordinates are fractions ×10,000.
-const POINT_SCALE: f64 = 10_000.0;
+pub const POINT_SCALE: f64 = 10_000.0;
 
 /// What the recorder hands over when a session stops.
 #[derive(Debug, Clone)]
@@ -92,6 +92,27 @@ pub struct Display {
     /// In points, in global display space.
     pub frame: Rect,
     pub scale: f64,
+}
+
+impl Display {
+    /// A point in global display space (points, as `CGEvent::location` gives
+    /// it) as a stored stroke point: fractions of this display ×10,000,
+    /// top-left origin, clamped to the display. Works for displays whose
+    /// origin is not (0, 0), such as one left of or above the main display.
+    pub fn stroke_point(&self, global_x: f64, global_y: f64) -> (u32, u32) {
+        let fraction = |value: f64, origin: f64, size: f64| {
+            let f = if size > 0.0 {
+                (value - origin) / size
+            } else {
+                0.0
+            };
+            (f.clamp(0.0, 1.0) * POINT_SCALE).round() as u32
+        };
+        (
+            fraction(global_x, self.frame.x, self.frame.w),
+            fraction(global_y, self.frame.y, self.frame.h),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -343,8 +364,8 @@ pub fn choose_frames(
             t: candidate.t,
             reason: candidate.reason,
             marks: candidate.marks,
-            file: format!("frames/{:02}.png", position + 1),
-            full: format!("frames-full/{:02}.png", position + 1),
+            file: format!("frames/frame-{:02}.png", position + 1),
+            full: format!("frames-full/frame-{:02}.png", position + 1),
             said: words.join(" "),
         })
         .collect()
@@ -1074,8 +1095,8 @@ Positions are fractions of the screen, x left→right, y top→bottom. Full data
         );
         assert_eq!(value["marks"][0]["shape"], "circle");
         assert_eq!(value["frames"][0]["reason"], "mark");
-        assert_eq!(value["frames"][0]["file"], "frames/01.png");
-        assert_eq!(value["frames"][0]["full"], "frames-full/01.png");
+        assert_eq!(value["frames"][0]["file"], "frames/frame-01.png");
+        assert_eq!(value["frames"][0]["full"], "frames-full/frame-01.png");
         assert_eq!(value["contactSheet"], CONTACT_SHEET);
     }
 

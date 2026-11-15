@@ -275,14 +275,16 @@ path for microphone audio.
   summary.md           the text that is pasted
   recording.mp4
   audio.wav            16 kHz mono PCM16 (what whisper read)
-  frames/01.png …      key frames with ink, long edge ≤ 1568 px
-  frames-full/01.png … native resolution, with ink
-  contact-sheet.png    grid of frames/, numbered, long edge ≤ 1600 px
+  frames/frame-01.png …      key frames with ink, long edge ≤ 1568 px
+  frames-full/frame-01.png … native resolution, with ink
+  contact-sheet.png          grid of frames/, numbered, long edge ≤ 2400 px
 ```
 
 The 1568 px limit on `frames/` follows the image-size guidance of common chat
 models **[inferred; check against the current Claude and OpenAI docs before
-fixing it]**. The reference contact sheet is 1600 px wide **[reference]**.
+fixing it]**. The reference contact sheet is 1600 px wide **[reference]**; ours
+allows 2400 px so twelve frames in four columns stay about 580 px wide each,
+which keeps UI text readable (task 8).
 Cropping to the active windows, which the reference app does, is a v2 item. v1
 frames are the full display.
 
@@ -327,7 +329,8 @@ owner's real capture.
 tolerance on `recording.mp4`, after recording ends. Frame times are only known
 after transcription, so one path that runs after recording covers every rule.
 Call it through `objc2-av-foundation`. If the bindings get in the way, use a small
-`swiftc` helper (spike S5). Rejected alternative: keeping recent frames in memory
+`swiftc` helper (spike S5). Built with `objc2-av-foundation` (task 8): the
+bindings had everything, so there is no second toolchain or subprocess. Rejected alternative: keeping recent frames in memory
 during recording. That holds IOSurface buffers that ScreenCaptureKit needs back,
 and costs memory for frames we may never use.
 
@@ -336,7 +339,9 @@ red `#FF3B30`, 4 pt width scaled to the frame). A frame draws every stroke of
 every mark it lists, and no other ink, so a frame merged to fit the 12-frame
 limit still shows each of its marks. Speech frames have no ink. Owner's
 decision, 15 Nov 2026, replacing "strokes that ended in the last 2 s". Number badges
-on the contact sheet use `ab_glyph` and a font bundled in the app.
+on the contact sheet are white rounded squares with the digits drawn as
+`tiny-skia` strokes (task 8): only 0–9 are needed, so no font file or
+`ab_glyph` dependency.
 
 ### `annotation.json` (v1 schema)
 
@@ -361,7 +366,7 @@ on the contact sheet use `ab_glyph` and a font bundled in the app.
               "description": "circled region x 0.13–0.91, y 0.00–0.89" }],
   "clicks": [{ "t": 6456, "x": 0.6938, "y": 0.0182, "button": "left" }],
   "frames": [{ "n": 1, "t": 11413, "reason": "mark", "marks": ["m1"],
-               "file": "frames/01.png", "full": "frames-full/01.png", "said": "…" }],
+               "file": "frames/frame-01.png", "full": "frames-full/frame-01.png", "said": "…" }],
   "contactSheet": "contact-sheet.png",
   "missingPermissions": []
 }
