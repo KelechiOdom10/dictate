@@ -15,6 +15,14 @@ const historyReady = {
       .and(page.locator(".ui-list-item-button").last())
       .and(page.locator(".ui-list-item-button").first())
       .waitFor(),
+  "pages--history-retention": (page) =>
+    page
+      .getByRole("group", { name: "Delete dictations older than 1 day?" })
+      .waitFor(),
+  "pages--history-delete": (page) =>
+    page
+      .locator(".ui-detail", { hasText: "Then hand it to review." })
+      .waitFor(),
   "pages--history-no-matches": (page) =>
     page.getByRole("heading", { name: "No matches for “zebra”" }).waitFor(),
 };

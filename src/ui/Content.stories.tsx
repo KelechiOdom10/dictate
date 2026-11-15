@@ -8,6 +8,7 @@ import {
   ListItem,
   DetailPanel,
   ModelCard,
+  SelectList,
   ProgressBar,
   EmptyState,
   Toast,
@@ -43,52 +44,62 @@ export const Note: Story = {
     </div>
   ),
 };
-export const SelectableNote: Story = {
-  name: "ListItem / selectable",
+export const Selectable: Story = {
+  name: "SelectList / pointer and arrow keys",
   render: () => {
-    const [selected, setSelected] = useState(1);
-    const rows = [
-      {
-        title: "Pick up coffee on the way back",
-        meta: "Notes",
-        date: "1h ago",
-      },
-      {
-        title: "Ship the history page once the screenshots look right",
-        meta: "Slack",
-        date: "1d ago",
-      },
-      { title: "No speech detected", meta: "Notes · Skipped", date: "4d ago" },
-    ];
+    const [selected, setSelected] = useState(2);
     return (
-      <div className="story-stack" style={{ maxWidth: 280 }}>
-        {rows.map((row, index) => (
-          <ListItem
-            key={row.title}
-            {...row}
-            selected={selected === index}
-            onSelect={() => setSelected(index)}
-          />
-        ))}
+      <div style={{ maxWidth: 280 }}>
+        <SelectList
+          label="Dictations"
+          items={[
+            {
+              id: 1,
+              title: "Pick up coffee on the way back",
+              meta: "Notes",
+              date: "1h ago",
+            },
+            {
+              id: 2,
+              title: "Ship the history page once the screenshots look right",
+              meta: "Slack",
+              date: "1d ago",
+            },
+            {
+              id: 3,
+              title: "No speech detected",
+              meta: "Notes · Skipped",
+              date: "4d ago",
+            },
+          ]}
+          value={selected}
+          onChange={setSelected}
+        />
       </div>
     );
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     const first = c.getByRole("button", { name: /Pick up coffee/ });
+    const second = c.getByRole("button", { name: /Ship the history page/ });
+    const third = c.getByRole("button", { name: /No speech detected/ });
+    await expect(second).toHaveAttribute("tabindex", "0");
+    await expect(first).toHaveAttribute("tabindex", "-1");
     await userEvent.click(first);
     await expect(first).toHaveAttribute("aria-current", "true");
-    await expect(
-      c.getByRole("button", { name: /Ship the history page/ }),
-    ).not.toHaveAttribute("aria-current");
+    await userEvent.keyboard("{End}");
+    await expect(third).toHaveFocus();
+    await expect(third).toHaveAttribute("aria-current", "true");
+    await userEvent.keyboard("{ArrowUp}");
+    await expect(second).toHaveFocus();
   },
 };
 export const Detail: Story = {
   name: "DetailPanel",
   render: () => (
     <DetailPanel
-      title="1h ago"
-      subtitle="14 Nov 2026, 2:57 PM"
+      title="Dictation"
+      subtitle="1h ago · 14 Nov 2026, 2:57 PM"
       actions={
         <>
           <IconButton variant="ghost" label="Copy text">

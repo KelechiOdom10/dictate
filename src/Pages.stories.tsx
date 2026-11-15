@@ -240,15 +240,57 @@ export const History: Story = {
     const slack = await c.findByRole("button", { name: /Ship the history/ });
     await userEvent.click(slack);
     await expect(slack).toHaveAttribute("aria-current", "true");
-    await expect(c.getByRole("region", { name: "3h ago" })).toHaveTextContent(
-      "Then hand it to review.",
-    );
+    await expect(
+      c.getByRole("region", { name: "Dictation" }),
+    ).toHaveTextContent("Then hand it to review.");
     await userEvent.keyboard("{ArrowDown}");
     await expect(
       c.getByRole("button", { name: /No speech detected/ }),
     ).toHaveFocus();
     await expect(c.getByRole("button", { name: "Copy text" })).toBeDisabled();
     await userEvent.click(c.getByRole("button", { name: /Bakery/i }));
+  },
+};
+export const HistoryDelete: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await c.findByRole("button", { name: /bakery/i });
+    await userEvent.click(c.getByRole("button", { name: "Delete dictation" }));
+    await expect(c.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await expect(c.getByRole("button", { name: /bakery/i })).toBeVisible();
+    await userEvent.click(c.getByRole("button", { name: "Delete dictation" }));
+    await userEvent.click(
+      within(
+        c.getByRole("group", { name: "Delete this dictation?" }),
+      ).getByRole("button", { name: "Delete dictation" }),
+    );
+    await waitFor(() =>
+      expect(c.queryByRole("button", { name: /bakery/i })).toBeNull(),
+    );
+    await expect(
+      c.getByRole("button", { name: /Ship the history/ }),
+    ).toHaveAttribute("aria-current", "true");
+  },
+};
+export const HistoryRetention: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const keep = await c.findByRole("combobox", { name: "Keep history for" });
+    await waitFor(() => expect(keep).toBeEnabled());
+    await userEvent.selectOptions(keep, "forever");
+    await expect(c.queryByRole("group", { name: /older than/ })).toBeNull();
+    await userEvent.selectOptions(keep, "day");
+    await expect(
+      c.getByRole("group", { name: "Delete dictations older than 1 day?" }),
+    ).toBeVisible();
+    await userEvent.click(c.getByRole("button", { name: "Cancel" }));
+    await expect(keep).toHaveValue("forever");
+    await userEvent.selectOptions(keep, "day");
   },
 };
 export const HistoryEmpty: Story = {

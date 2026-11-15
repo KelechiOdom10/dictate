@@ -28,8 +28,9 @@ See [recording-overlay.md](recording-overlay.md) for its native boundary and man
 | SettingsRow, SettingsGroup | Row associates label and help with a control id; pass `aria-describedby="<id>-help"` to the control. Group supplies a section heading. Children keep complex settings composable.                     |
 | SidebarNav                 | Items plus value/onChange keep navigation in the window. The selected item uses aria-current.                                                                                                         |
 | Card                       | A surface around children, without extra modes.                                                                                                                                                       |
-| ListItem                   | Date, title, preview and optional action children express the shared history hierarchy. Title is an h2 under the page h1.                                                                             |
-| DetailPanel                | Title, metadata rows and body children keep transcript formatting out of the primitive.                                                                                                               |
+| ListItem                   | Date, title, optional meta/preview and action children for a static row. Long titles truncate to one line; the full value lives in the detail view. |
+| SelectList                 | Rows with one selected id (aria-current). Owns a roving tabindex: one Tab stop, Up/Down/Home/End move selection and focus. The caller owns the id. |
+| DetailPanel                | Title, optional subtitle and header actions, body children, then metadata rows. Transcript formatting stays out of the primitive. |
 | SearchField                | Label/value/onChange supports filtering. Clear restores input focus.                                                                                                                                  |
 | LevelMeter                 | A normalized 0–1 value drives bars and a labelled native meter. The caller supplies live readings.                                                                                                    |
 | RecordingCapsule           | A discriminated state requires timer/level only while recording, a message only for ready and a title plus fix for error; skipped supplies a quiet retry instruction. Caller owns timing; status announcements never include a live timer. An optional notice is a secondary line that preserves the phase and timer.                              |
@@ -65,8 +66,10 @@ transitions and the busy spinner's rotation; focus rings stay visible.
 
 
 General stories render the actual settings window with Tauri's official mock IPC
-edge. Loading/error variants exercise query states. History, Models and overlay
-pages use sample data and have no live downloads or storage. Model accuracy/speed
+edge. Loading/error variants exercise query states. History stories render the real
+History page over mock IPC (populated, empty, search, no matches, delete and
+retention confirmations). Models and overlay pages use sample data and have no
+live downloads. Model accuracy/speed
 ratings are illustrative, never measurements from this machine. axe and browser
 fixtures do not prove VoiceOver, native WebKit, global hotkeys, login items,
 permissions or end-to-end dictation; those need native verification.

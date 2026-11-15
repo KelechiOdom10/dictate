@@ -19,19 +19,26 @@ import {
   type HistoryEntry,
   type TakeStatus,
 } from "./history";
-import { readSettings, settingsSchema, writeSettings } from "./settings";
+import {
+  readSettings,
+  settingsSchema,
+  writeSettings,
+  type Settings,
+} from "./settings";
 import {
   Button,
   DetailPanel,
   EmptyState,
   FilterChips,
   IconButton,
-  ListItem,
+  KeyboardShortcut,
   SearchField,
   Select,
+  SelectList,
 } from "./ui";
 
 type Filter = "all" | TakeStatus;
+type Retention = Settings["historyRetention"];
 const filters: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "pasted", label: "Pasted" },
@@ -43,6 +50,13 @@ const statusLabels: Record<TakeStatus, string> = {
   skipped: "Skipped",
   failed: "Failed",
 };
+const retentionLabels: Record<Retention, string> = {
+  day: "1 day",
+  week: "7 days",
+  month: "30 days",
+  forever: "forever",
+};
+const retentionOrder: Retention[] = ["day", "week", "month", "forever"];
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -59,6 +73,9 @@ export default function HistoryPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [pendingRetention, setPendingRetention] = useState<Retention | null>(
+    null,
+  );
   const [error, setError] = useState("");
   const query = useDeferredValue(search.trim());
   const history = useQuery({
@@ -95,15 +112,13 @@ export default function HistoryPage() {
   );
   const selected =
     entries.find((entry) => entry.id === selectedId) ?? entries[0];
+  const current = settings.data?.historyRetention ?? "week";
 
-  function selectNeighbour(offset: number, list: HTMLElement) {
-    if (!selected) return;
-    const index = entries.indexOf(selected) + offset;
-    const next = entries[Math.min(Math.max(index, 0), entries.length - 1)];
-    setSelectedId(next.id);
-    list
-      .querySelectorAll<HTMLButtonElement>(".ui-list-item-button")
-      [entries.indexOf(next)]?.focus();
+  function saveRetention(value: Retention) {
+    if (!settings.data) return;
+    setPendingRetention(null);
+    setError("");
+    retention.mutate({ ...settings.data, historyRetention: value });
   }
 
   async function removeSelected() {
@@ -116,34 +131,46 @@ export default function HistoryPage() {
   }
 
   const toolbar = (
-    <div className="history-toolbar">
-      <SearchField
-        label="Search history"
-        placeholder="Search history"
-        value={search}
-        onChange={setSearch}
-      />
-      <Select
-        aria-label="Keep history for"
-        value={settings.data?.historyRetention ?? "week"}
-        disabled={!settings.data || retention.isPending}
-        onChange={(e) => {
-          if (!settings.data) return;
-          setError("");
-          retention.mutate({
-            ...settings.data,
-            historyRetention: settingsSchema.shape.historyRetention.parse(
+    <>
+      <div className="history-toolbar">
+        <SearchField
+          label="Search history"
+          placeholder="Search history"
+          value={search}
+          onChange={setSearch}
+        />
+        <Select
+          aria-label="Keep history for"
+          value={pendingRetention ?? current}
+          disabled={!settings.data || retention.isPending}
+          onChange={(e) => {
+            const value = settingsSchema.shape.historyRetention.parse(
               e.target.value,
-            ),
-          });
-        }}
-      >
-        <option value="day">Keep 1 day</option>
-        <option value="week">Keep 7 days</option>
-        <option value="month">Keep 30 days</option>
-        <option value="forever">Keep forever</option>
-      </Select>
-    </div>
+            );
+            if (retentionOrder.indexOf(value) < retentionOrder.indexOf(current))
+              setPendingRetention(value);
+            else saveRetention(value);
+          }}
+        >
+          {retentionOrder.map((value) => (
+            <option key={value} value={value}>
+              Keep {retentionLabels[value]}
+            </option>
+          ))}
+        </Select>
+      </div>
+      {pendingRetention && (
+        <Confirm
+          question={`Delete dictations older than ${retentionLabels[pendingRetention]}?`}
+          confirmLabel="Delete older dictations"
+          onConfirm={() => saveRetention(pendingRetention)}
+          onCancel={() => setPendingRetention(null)}
+        >
+          They are removed now, and from then on after{" "}
+          {retentionLabels[pendingRetention]}.
+        </Confirm>
+      )}
+    </>
   );
 
   if (history.isPending)
@@ -187,7 +214,15 @@ export default function HistoryPage() {
       )}
       {nothingYet ? (
         <EmptyState title="Nothing here yet">
-          Dictate something and it appears here. Your history stays on this Mac.
+          {settings.data ? (
+            <>
+              {settings.data.shortcutMode === "hold" ? "Hold " : "Press "}
+              <KeyboardShortcut value={settings.data.shortcut} /> and speak.
+              Each dictation appears here.
+            </>
+          ) : (
+            "Each dictation appears here."
+          )}
         </EmptyState>
       ) : !selected ? (
         <EmptyState
@@ -206,32 +241,22 @@ export default function HistoryPage() {
         </EmptyState>
       ) : (
         <div className="history-split">
-          <div
-            className="history-list"
-            role="group"
-            aria-label="Dictations"
-            onKeyDown={(e) => {
-              if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-              e.preventDefault();
-              selectNeighbour(e.key === "ArrowDown" ? 1 : -1, e.currentTarget);
-            }}
-          >
-            {entries.map((entry) => (
-              <ListItem
-                key={entry.id}
-                title={entryTitle(entry)}
-                meta={[
-                  entry.app ?? "Unknown app",
-                  entry.status === "pasted" ? null : statusLabels[entry.status],
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-                date={relativeTime(entry.createdAtMs, now)}
-                selected={entry.id === selected.id}
-                onSelect={() => setSelectedId(entry.id)}
-              />
-            ))}
-          </div>
+          <SelectList
+            label="Dictations"
+            items={entries.map((entry) => ({
+              id: entry.id,
+              title: entryTitle(entry),
+              meta: [
+                entry.app ?? "Unknown app",
+                entry.status === "pasted" ? null : statusLabels[entry.status],
+              ]
+                .filter(Boolean)
+                .join(" · "),
+              date: relativeTime(entry.createdAtMs, now),
+            }))}
+            value={selected.id}
+            onChange={setSelectedId}
+          />
           <Detail
             key={selected.id}
             entry={selected}
@@ -242,6 +267,46 @@ export default function HistoryPage() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function Confirm({
+  question,
+  confirmLabel,
+  children,
+  onConfirm,
+  onCancel,
+}: {
+  question: string;
+  confirmLabel: string;
+  children?: React.ReactNode;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <div
+      className="history-confirm"
+      role="group"
+      aria-label={question}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+      }}
+    >
+      <div>
+        <p className="history-confirm-question">{question}</p>
+        {children && <p className="ui-preview">{children}</p>}
+      </div>
+      <div className="ui-actions">
+        <Button ref={cancel} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" onClick={onConfirm}>
+          {confirmLabel}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -265,6 +330,8 @@ function Detail({
   onError: (error: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const trash = useRef<HTMLButtonElement>(null);
   const reset = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(reset.current), []);
   async function copy() {
@@ -284,14 +351,13 @@ function Detail({
       : `${statusLabels[entry.status]}${entry.detail ? ` · ${entry.detail}` : ""}`;
   return (
     <DetailPanel
-      title={relativeTime(entry.createdAtMs, now)}
-      subtitle={fullDate.format(entry.createdAtMs)}
+      title="Dictation"
+      subtitle={`${relativeTime(entry.createdAtMs, now)} · ${fullDate.format(entry.createdAtMs)}`}
       actions={
         <>
           <IconButton
             variant="ghost"
             label={copied ? "Copied" : "Copy text"}
-            title={copied ? "Copied" : "Copy text"}
             disabled={!entry.text}
             onClick={() => void copy()}
           >
@@ -302,11 +368,11 @@ function Detail({
             )}
           </IconButton>
           <IconButton
+            ref={trash}
             variant="ghost"
             label="Delete dictation"
-            title="Delete dictation"
-            disabled={deleting}
-            onClick={onDelete}
+            disabled={deleting || confirming}
+            onClick={() => setConfirming(true)}
           >
             <Trash2 size={16} aria-hidden="true" />
           </IconButton>
@@ -319,20 +385,30 @@ function Detail({
         { label: "Application", value: entry.app ?? "Unknown" },
         { label: "Speech model", value: modelLabel(entry.model) },
         { label: "Status", value: status },
+        { label: "Audio", value: formatSeconds(entry.audioMs) },
         {
-          label: "Latency",
-          value: [
-            `${formatSeconds(entry.audioMs)} audio`,
+          label: "Transcription",
+          value:
             entry.inferenceMs === null
-              ? null
-              : `${formatMs(entry.inferenceMs)} transcription`,
-            `${formatMs(entry.totalMs)} total`,
-          ]
-            .filter(Boolean)
-            .join(" · "),
+              ? "Not run"
+              : formatMs(entry.inferenceMs),
         },
+        { label: "Release to finish", value: formatMs(entry.totalMs) },
       ]}
     >
+      {confirming && (
+        <Confirm
+          question="Delete this dictation?"
+          confirmLabel="Delete dictation"
+          onConfirm={onDelete}
+          onCancel={() => {
+            setConfirming(false);
+            requestAnimationFrame(() => trash.current?.focus());
+          }}
+        >
+          It can’t be recovered.
+        </Confirm>
+      )}
       {entry.text ? (
         <p>{entry.text}</p>
       ) : (

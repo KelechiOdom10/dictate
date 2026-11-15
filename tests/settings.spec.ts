@@ -102,6 +102,7 @@ async function openSettings(
               return ["Built-in Microphone", "USB Microphone"];
             if (command === "microphone_level") return 0.12;
             if (command === "plugin:app|version") return "0.1.0";
+            if (command === "list_history") return [];
             if (command === "dismiss_error") {
               status = { phase: "idle", error: null };
               emit("dictation-state", "idle");
@@ -215,6 +216,9 @@ for (const colorScheme of ["light", "dark"] as const) {
     await page.keyboard.press("Enter");
     await expect(
       page.getByRole("heading", { name: "History", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Nothing here yet" }),
     ).toBeVisible();
   });
 }

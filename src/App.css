@@ -116,16 +116,28 @@ meter {
 .history .error {
   margin: 0;
 }
+.history-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-panel);
+  background: var(--warning-surface);
+  white-space: normal;
+}
+.history-confirm-question {
+  font-weight: var(--weight-medium);
+}
+.ui-detail .history-confirm {
+  margin-bottom: var(--space-4);
+}
 .history-split {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: var(--space-4);
   align-items: start;
-}
-.history-list {
-  display: grid;
-  gap: var(--space-half);
-  min-width: 0;
 }
 .history .ui-detail {
   position: sticky;

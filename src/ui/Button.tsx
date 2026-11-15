@@ -1,8 +1,8 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ComponentProps } from "react";
 
 export type ControlSize = "sm" | "md" | "lg";
 
-type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
+type Props = ComponentProps<"button"> & {
   size?: ControlSize;
   variant?: "primary" | "secondary" | "ghost";
 };
