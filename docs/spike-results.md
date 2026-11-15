@@ -277,3 +277,33 @@ The real dictate bundle (`pnpm tauri build`) cannot run this check yet, because
 no Tauri command calls `screen` until the Annotate session task wires it in. The
 bundle above has the same shape: a bundle id, ad-hoc signed, started by
 LaunchServices.
+
+## Annotate timed transcription — 15 November 2026
+
+`transcribe::transcribe_timed` runs whisper-cli with `-ojf -ml 1 -sow`, so each
+JSON segment is one word with ms offsets. Measured on this machine (Apple M4
+Pro, Homebrew whisper.cpp 1.9.5). The fixture is generated at test time with
+`say -v Samantha` (17 sentences of UI feedback), converted to 16 kHz mono:
+**61,979 ms** of audio. No recording is checked in. Three runs per model:
+
+| Model | `transcribe_timed` wall time | Words | Segments rebuilt | Last word ends |
+|---|---:|---:|---:|---:|
+| base.en | 1,126 / 1,100 / 1,021 ms | 205 | 14 | 61,760 ms (219 ms before the end) |
+| small.en | 2,049 / 2,126 / 2,139 ms | 205 | 22 | 61,800 ms (179 ms before the end) |
+
+The timer covers WAV writing, the subprocess, model loading, inference and JSON
+parsing. It excludes speech generation. Word start and end times never go
+backwards in any run. Segments split after `.`, `!` or `?`, or at a pause of
+700 ms or more; small.en puts in more sentence punctuation, so it makes more
+segments from the same audio. These numbers agree with the design doc's
+53.7 s estimate (base.en 1.59 s, small.en 2.73 s). This is synthetic speech;
+a real spoken minute has not been measured.
+
+Reproduce (the test prints `SKIP` with the reason when whisper-cli or the model
+is missing):
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml generated_minute -- --nocapture
+DICTATE_WHISPER_MODEL="$PWD/models/ggml-small.en.bin" cargo test --manifest-path src-tauri/Cargo.toml generated_minute -- --nocapture
+cargo run --manifest-path src-tauri/Cargo.toml --example transcribe_timed -- speech.wav
+```
