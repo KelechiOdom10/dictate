@@ -16,6 +16,13 @@ export const settingsSchema = z
     appearanceMode: z.enum(["system", "light", "dark"]),
     historyRetention: z.enum(["day", "week", "month", "forever"]),
     speechModel: speechModelSchema,
+    pasteMethod: z.enum(["paste", "copyOnly"]),
+    restoreClipboard: z.boolean(),
+    trailingSpace: z.boolean(),
+    capitalizeFirst: z.boolean(),
+    micMode: z.enum(["onDemand", "warm"]),
+    soundFeedback: z.boolean(),
+    debugRecordings: z.boolean(),
   })
   .strict() satisfies z.ZodType<Settings>;
 

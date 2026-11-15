@@ -510,7 +510,7 @@ pub fn remove_partials(dir: &Path) -> usize {
         .filter(|path| match fs::remove_file(path) {
             Ok(()) => true,
             Err(error) => {
-                eprintln!("[models] remove {}: {error}", path.display());
+                log::warn!("[models] remove {}: {error}", path.display());
                 false
             }
         })
@@ -554,14 +554,14 @@ pub fn adopt_legacy(dir: &Path, candidates: &[PathBuf]) -> Option<SpeechModel> {
                 });
             match copied {
                 Ok(()) => {
-                    println!(
+                    log::info!(
                         "[models] adopted {} from {}",
                         info.file_name,
                         candidate.display()
                     );
                     return Some(info.id);
                 }
-                Err(error) => eprintln!("[models] skip {}: {error}", candidate.display()),
+                Err(error) => log::warn!("[models] skip {}: {error}", candidate.display()),
             }
         }
     }

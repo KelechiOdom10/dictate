@@ -52,7 +52,7 @@ pub fn clear_error(app: &AppHandle) {
         .error = None;
     refresh_tray(app);
     if let Err(error) = app.emit("dictation-state", status(app).phase) {
-        eprintln!("[tray] {error}");
+        log::warn!("[tray] {error}");
     }
 }
 
@@ -85,14 +85,14 @@ fn refresh_tray(app: &AppHandle) {
     };
     if let Some(tray) = app.tray_by_id("dictate") {
         if let Err(error) = tray.set_icon_with_as_template(Some(icon(phase)), true) {
-            eprintln!("[tray] {error}");
+            log::warn!("[tray] {error}");
         }
         let tooltip = status.error.map_or_else(
             || format!("dictate · {phase}"),
             |error| format!("dictate · {}", error.title),
         );
         if let Err(error) = tray.set_tooltip(Some(tooltip)) {
-            eprintln!("[tray] {error}");
+            log::warn!("[tray] {error}");
         }
     }
 }
@@ -104,7 +104,7 @@ pub fn set_phase(app: &AppHandle, phase: &str) {
         .phase = phase.into();
     refresh_tray(app);
     if let Err(error) = app.emit("dictation-state", phase) {
-        eprintln!("[tray] {error}");
+        log::warn!("[tray] {error}");
     }
 }
 
@@ -131,7 +131,7 @@ pub fn update_shortcut(app: &AppHandle, shortcut: &str) {
         .0
         .set_text(format!("Shortcut: {}", shortcut_label(shortcut)))
     {
-        eprintln!("[tray] {error}");
+        log::warn!("[tray] {error}");
     }
 }
 
@@ -164,7 +164,7 @@ pub fn setup(app: &App, settings: &Settings) -> tauri::Result<()> {
                 if let Some(window) = app.get_webview_window("settings")
                     && let Err(error) = window.show().and_then(|()| window.set_focus())
                 {
-                    eprintln!("[settings] {error}");
+                    log::warn!("[settings] {error}");
                 }
             }
             "quit" => app.exit(0),

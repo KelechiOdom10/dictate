@@ -259,3 +259,29 @@ Reproduce (about 3.9 GB of weights, kept outside the repo):
 DICTATE_MEASURE_MODELS_DIR=/path/to/ggml/files \
   cargo test --manifest-path src-tauri/Cargo.toml measure_catalog_models -- --ignored --nocapture
 ```
+
+## Warm microphone — 15 November 2026
+
+Advanced → *Keep the microphone ready* leaves the input stream open between
+takes and keeps the last 300 ms in a ring buffer. A take starts by handing that
+buffer over instead of opening a stream.
+
+Measured on this Mac (Apple M4 Pro, system default input) with
+`warm_microphone_starts_takes_with_preroll_and_stays_open` in
+`src-tauri/src/audio.rs`, four runs:
+
+| | Result |
+| --- | ---: |
+| `start_device(None)` with the mic warm | 0.615–0.654 ms |
+| Samples from a 200 ms hold, first take | 8,042–8,128 (0.50–0.51 s) |
+| Samples from a 200 ms hold, second take | 8,042–8,128 |
+
+Compare the cold named-device start above: 61–83 ms before the stream plays.
+The extra ~300 ms in each take is the pre-roll from before the key press, and
+the second take proves the stream stays warm after a take ends. Unoptimised test
+build; the timer stops when `start_device` returns. Physical key delivery and a
+real clipped-word comparison are left to the manual checks.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml warm_microphone -- --ignored --nocapture
+```

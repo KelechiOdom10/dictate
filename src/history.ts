@@ -17,7 +17,7 @@ export const historyEntrySchema = z
     audioMs: z.number().int().nonnegative(),
     inferenceMs: z.number().int().nonnegative().nullable(),
     totalMs: z.number().int().nonnegative(),
-    status: z.enum(["pasted", "skipped", "failed"]),
+    status: z.enum(["pasted", "copied", "skipped", "failed"]),
     detail: z.string().nullable(),
   })
   .strict() satisfies z.ZodType<HistoryEntry>;

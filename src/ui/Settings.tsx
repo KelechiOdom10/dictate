@@ -69,3 +69,10 @@ export function SidebarNav({
     </nav>
   );
 }
+export function PathText({ children }: { children: string }) {
+  return (
+    <code className="ui-path" title={children}>
+      {children}
+    </code>
+  );
+}

@@ -5,7 +5,14 @@ import { z } from "zod";
 import { problem, problemSchema } from "./problem";
 
 const statusSchema = z.object({
-  phase: z.enum(["idle", "recording", "transcribing", "done", "skipped"]),
+  phase: z.enum([
+    "idle",
+    "recording",
+    "transcribing",
+    "done",
+    "copied",
+    "skipped",
+  ]),
   error: problemSchema.nullable(),
   notice: z.string().nullable().default(null),
 });

@@ -1,4 +1,4 @@
-export type TakeStatus = "pasted" | "skipped" | "failed";
+export type TakeStatus = "pasted" | "copied" | "skipped" | "failed";
 export type HistoryEntry = {
   id: number;
   text: string;

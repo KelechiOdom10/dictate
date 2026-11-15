@@ -23,6 +23,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-log = "2"
+log = "0.4"
 
 # Added by you during the spike, not before:
 cpal = "0.16"

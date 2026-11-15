@@ -40,6 +40,22 @@ pub enum OverlayPosition {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+pub enum PasteMethod {
+    #[default]
+    Paste,
+    CopyOnly,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MicMode {
+    #[default]
+    OnDemand,
+    Warm,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
 pub enum HistoryRetention {
     Day,
     #[default]
@@ -82,6 +98,24 @@ pub struct Settings {
     pub history_retention: HistoryRetention,
     #[serde(default)]
     pub speech_model: SpeechModel,
+    #[serde(default)]
+    pub paste_method: PasteMethod,
+    #[serde(default = "enabled")]
+    pub restore_clipboard: bool,
+    #[serde(default)]
+    pub trailing_space: bool,
+    #[serde(default)]
+    pub capitalize_first: bool,
+    #[serde(default)]
+    pub mic_mode: MicMode,
+    #[serde(default)]
+    pub sound_feedback: bool,
+    #[serde(default)]
+    pub debug_recordings: bool,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 const CURRENT_VERSION: u32 = 1;
@@ -103,6 +137,13 @@ impl Default for Settings {
             overlay_position: OverlayPosition::Bottom,
             history_retention: HistoryRetention::Week,
             speech_model: SpeechModel::BaseEn,
+            paste_method: PasteMethod::Paste,
+            restore_clipboard: true,
+            trailing_space: false,
+            capitalize_first: false,
+            mic_mode: MicMode::OnDemand,
+            sound_feedback: false,
+            debug_recordings: false,
         }
     }
 }
@@ -244,11 +285,13 @@ mod tests {
     #[test]
     fn typescript_contract_matches_rust_settings() {
         let contract = format!(
-            "import type {{ SpeechModel }} from \"./models.generated\";\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
+            "import type {{ SpeechModel }} from \"./models.generated\";\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
             ShortcutMode::decl(),
             Theme::decl(),
             AppearanceMode::decl(),
             OverlayPosition::decl(),
+            PasteMethod::decl(),
+            MicMode::decl(),
             HistoryRetention::decl(),
             Settings::decl()
         );
@@ -276,6 +319,13 @@ mod tests {
             overlay_position: OverlayPosition::Top,
             history_retention: HistoryRetention::Forever,
             speech_model: SpeechModel::SmallEn,
+            paste_method: PasteMethod::CopyOnly,
+            restore_clipboard: false,
+            trailing_space: true,
+            capitalize_first: true,
+            mic_mode: MicMode::Warm,
+            sound_feedback: true,
+            debug_recordings: true,
             ..Settings::default()
         };
         save(&path, &settings).unwrap();
@@ -300,6 +350,13 @@ mod tests {
         assert_eq!(settings.overlay_position, OverlayPosition::Bottom);
         assert_eq!(settings.history_retention, HistoryRetention::Week);
         assert_eq!(settings.speech_model, SpeechModel::BaseEn);
+        assert_eq!(settings.paste_method, PasteMethod::Paste);
+        assert!(settings.restore_clipboard);
+        assert!(!settings.trailing_space);
+        assert!(!settings.capitalize_first);
+        assert_eq!(settings.mic_mode, MicMode::OnDemand);
+        assert!(!settings.sound_feedback);
+        assert!(!settings.debug_recordings);
         fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.version, 2);

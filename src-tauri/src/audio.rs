@@ -1,9 +1,13 @@
 use crate::problem::Problem;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rubato::{FftFixedInOut, Resampler};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 const OUTPUT_RATE: usize = 16_000;
+/// Audio a warm microphone keeps from just before the shortcut, so the first
+/// word is not clipped while the take starts.
+const PREROLL_MS: usize = 300;
 type Reply<T> = mpsc::Sender<Result<T, String>>;
 
 enum Command {
@@ -14,6 +18,8 @@ enum Command {
     RecordingLevel(Reply<f32>),
     Stop(mpsc::Sender<Result<Vec<f32>, Problem>>),
     Status(mpsc::Sender<bool>),
+    /// `Some(device)` keeps that microphone open between takes; `None` closes it.
+    Warm(Option<Option<String>>, Reply<()>),
 }
 
 #[derive(Default)]
@@ -22,6 +28,8 @@ struct Captured {
     error: Option<String>,
     level: f32,
     retain: bool,
+    preroll: VecDeque<f32>,
+    preroll_frames: usize,
 }
 
 struct Recording {
@@ -29,6 +37,7 @@ struct Recording {
     captured: Arc<Mutex<Captured>>,
     rate: usize,
     fallback: bool,
+    preference: Option<String>,
 }
 
 fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
@@ -41,6 +50,8 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                 .spawn(move || {
                     let mut recording: Option<Recording> = None;
                     let mut monitor: Option<Recording> = None;
+                    let mut warm_device: Option<Option<String>> = None;
+                    let mut warm: Option<Recording> = None;
                     for command in receiver {
                         match command {
                             Command::Start(device, reply) => {
@@ -49,17 +60,49 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                                         |data| data.error.clone().map_or(Ok(active.fallback), Err),
                                     )
                                 } else {
-                                    open_recording(device.as_deref(), true).map(|active| {
-                                        let fallback = active.fallback;
-                                        recording = Some(active);
-                                        fallback
-                                    })
+                                    let armed = warm
+                                        .take()
+                                        .filter(|idle| idle.preference == device)
+                                        .and_then(|idle| idle.arm().ok());
+                                    armed
+                                        .map(Ok)
+                                        .unwrap_or_else(|| {
+                                            open_recording(device.as_deref(), Mode::Take)
+                                        })
+                                        .map(|active| {
+                                            let fallback = active.fallback;
+                                            recording = Some(active);
+                                            fallback
+                                        })
+                                };
+                                let _ = reply.send(result);
+                            }
+                            Command::Warm(device, reply) => {
+                                warm_device = device;
+                                let result = match &warm_device {
+                                    None => {
+                                        warm = None;
+                                        Ok(())
+                                    }
+                                    Some(device) => {
+                                        if warm.as_ref().is_some_and(|idle| {
+                                            idle.preference != *device || idle.failed()
+                                        }) {
+                                            warm = None;
+                                        }
+                                        if warm.is_none() && recording.is_none() {
+                                            open_recording(device.as_deref(), Mode::Warm)
+                                                .map(|idle| warm = Some(idle))
+                                        } else {
+                                            Ok(())
+                                        }
+                                    }
                                 };
                                 let _ = reply.send(result);
                             }
                             Command::Monitor(device, reply) => {
                                 monitor = None;
-                                let result = open_recording(device.as_deref(), false)
+                                let result = open_recording(device.as_deref(), Mode::Monitor)
                                     .map(|active| monitor = Some(active));
                                 let _ = reply.send(result);
                             }
@@ -82,16 +125,28 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                                 let _ = reply.send(result);
                             }
                             Command::Stop(reply) => {
-                                let result = recording
-                                    .take()
-                                    .ok_or_else(|| {
-                                        Problem::new(
-                                            "Recording already stopped",
-                                            "Hold the shortcut and speak again.",
-                                        )
-                                    })
-                                    .and_then(Recording::finish);
+                                let result = match recording.take() {
+                                    None => Err(Problem::new(
+                                        "Recording already stopped",
+                                        "Hold the shortcut and speak again.",
+                                    )),
+                                    Some(active)
+                                        if warm_device.as_ref() == Some(&active.preference)
+                                            && !active.failed() =>
+                                    {
+                                        let samples = active.drain();
+                                        warm = Some(active);
+                                        samples
+                                    }
+                                    Some(active) => active.finish(),
+                                };
                                 let _ = reply.send(result);
+                                if let (None, Some(device)) = (&warm, &warm_device) {
+                                    match open_recording(device.as_deref(), Mode::Warm) {
+                                        Ok(idle) => warm = Some(idle),
+                                        Err(error) => log::warn!("[audio] keep warm: {error}"),
+                                    }
+                                }
                             }
                             Command::Status(reply) => {
                                 let active = recording.as_ref().is_some_and(|active| {
@@ -219,6 +274,13 @@ fn selected_device(
         .transpose()
 }
 
+/// Keeps `device` open between takes (`Some`), or closes it (`None`).
+pub fn keep_warm(device: Option<Option<String>>) -> Result<(), String> {
+    let (reply, result) = mpsc::channel();
+    send(Command::Warm(device, reply))?;
+    result.recv().map_err(|e| e.to_string())?
+}
+
 pub fn monitor_start(device: Option<String>) -> Result<(), String> {
     let (reply, result) = mpsc::channel();
     send(Command::Monitor(device, reply))?;
@@ -241,7 +303,18 @@ pub fn recording_level() -> Result<f32, String> {
     result.recv().map_err(|e| e.to_string())?
 }
 
-fn open_recording(name: Option<&str>, retain: bool) -> Result<Recording, String> {
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    /// Keep every sample for transcription.
+    Take,
+    /// Report the level only.
+    Monitor,
+    /// Stay open between takes, keeping only the pre-roll.
+    Warm,
+}
+
+fn open_recording(name: Option<&str>, mode: Mode) -> Result<Recording, String> {
+    let preference = name.map(str::to_owned);
     let host = cpal::default_host();
     let selected = name.map(selected_device).transpose()?.flatten();
     let fallback = name.is_some() && selected.is_none();
@@ -256,14 +329,20 @@ fn open_recording(name: Option<&str>, retain: bool) -> Result<Recording, String>
         }
     };
     let name = device.name().map_err(|e| format!("Microphone name: {e}"))?;
-    println!(
+    log::info!(
         "[audio] device={name:?} rate={} channels={} format={:?}",
         config.sample_rate().0,
         config.channels(),
         config.sample_format()
     );
+    let rate = config.sample_rate().0 as usize;
     let captured = Arc::new(Mutex::new(Captured {
-        retain,
+        retain: mode == Mode::Take,
+        preroll_frames: if mode == Mode::Warm {
+            rate * PREROLL_MS / 1000
+        } else {
+            0
+        },
         ..Captured::default()
     }));
     let stream = match config.sample_format() {
@@ -278,8 +357,9 @@ fn open_recording(name: Option<&str>, retain: bool) -> Result<Recording, String>
     Ok(Recording {
         stream,
         captured,
-        rate: config.sample_rate().0 as usize,
+        rate,
         fallback,
+        preference,
     })
 }
 
@@ -333,6 +413,11 @@ where
         squares += mono * mono;
         if captured.retain {
             captured.samples.push(mono);
+        } else if captured.preroll_frames > 0 {
+            if captured.preroll.len() == captured.preroll_frames {
+                captured.preroll.pop_front();
+            }
+            captured.preroll.push_back(mono);
         }
     }
     captured.level = (squares / count as f32).sqrt();
@@ -354,42 +439,71 @@ where
 }
 
 impl Recording {
+    fn failed(&self) -> bool {
+        self.captured
+            .lock()
+            .map_or(true, |captured| captured.error.is_some())
+    }
+
+    /// Turns an idle warm stream into a take, starting with its pre-roll.
+    fn arm(self) -> Result<Self, String> {
+        {
+            let mut captured = self.captured.lock().map_err(|e| e.to_string())?;
+            if let Some(error) = captured.error.clone() {
+                return Err(error);
+            }
+            let preroll = std::mem::take(&mut captured.preroll);
+            captured.samples.clear();
+            captured.samples.extend(preroll);
+            captured.retain = true;
+        }
+        Ok(self)
+    }
+
+    /// Ends a take but keeps the stream open, back in pre-roll mode.
+    fn drain(&self) -> Result<Vec<f32>, Problem> {
+        let samples = {
+            let mut captured = self
+                .captured
+                .lock()
+                .map_err(|e| recording_failed(e.to_string()))?;
+            captured.retain = false;
+            captured.preroll.clear();
+            std::mem::take(&mut captured.samples)
+        };
+        Self::check(samples, self.rate, None)
+    }
+
     fn finish(self) -> Result<Vec<f32>, Problem> {
         drop(self.stream);
         let mut captured = self
             .captured
             .lock()
             .map_err(|e| recording_failed(e.to_string()))?;
-        if let Some(error) = captured.error.take() {
+        let error = captured.error.take();
+        let samples = std::mem::take(&mut captured.samples);
+        Self::check(samples, self.rate, error)
+    }
+
+    fn check(samples: Vec<f32>, rate: usize, error: Option<String>) -> Result<Vec<f32>, Problem> {
+        if let Some(error) = error {
             return Err(Problem::new(
                 "Microphone disconnected",
                 "Reconnect it or choose another microphone in Settings.",
             )
             .because(error));
         }
-        let samples = std::mem::take(&mut captured.samples);
         if samples.is_empty() {
             return Err(no_samples());
         }
-        let samples = resample(samples, self.rate).map_err(recording_failed)?;
-        if std::env::var_os("DICTATE_DEBUG_WAV").is_some_and(|value| value == "1") {
-            match dump_wav(&samples) {
-                Ok(path) => println!("[audio] debug WAV: {}", path.display()),
-                Err(error) => eprintln!("[audio] debug WAV: {error}"),
-            }
-        }
-        Ok(samples)
+        resample(samples, rate).map_err(recording_failed)
     }
 }
 
-fn dump_wav(samples: &[f32]) -> Result<std::path::PathBuf, String> {
-    let file = tempfile::Builder::new()
-        .prefix("dictate-capture-")
-        .suffix(".wav")
-        .tempfile()
-        .map_err(|e| e.to_string())?;
-    let mut writer = hound::WavWriter::new(
-        file.as_file(),
+/// Writes 16 kHz mono samples as a 32-bit float WAV at `path`.
+pub fn save_wav(path: &std::path::Path, samples: &[f32]) -> Result<(), String> {
+    let mut writer = hound::WavWriter::create(
+        path,
         hound::WavSpec {
             channels: 1,
             sample_rate: OUTPUT_RATE as u32,
@@ -401,8 +515,7 @@ fn dump_wav(samples: &[f32]) -> Result<std::path::PathBuf, String> {
     for sample in samples {
         writer.write_sample(*sample).map_err(|e| e.to_string())?;
     }
-    writer.finalize().map_err(|e| e.to_string())?;
-    file.keep().map(|(_, path)| path).map_err(|e| e.to_string())
+    writer.finalize().map_err(|e| e.to_string())
 }
 
 fn resample(samples: Vec<f32>, rate: usize) -> Result<Vec<f32>, String> {
@@ -515,9 +628,10 @@ mod tests {
     }
 
     #[test]
-    fn debug_wav_retains_normalized_samples_in_temp_directory() {
-        let path = dump_wav(&[-0.5, 0.0, 0.5]).unwrap();
-        assert!(path.starts_with(std::env::temp_dir()));
+    fn debug_wav_retains_normalized_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("take.wav");
+        save_wav(&path, &[-0.5, 0.0, 0.5]).unwrap();
         let mut reader = hound::WavReader::open(&path).unwrap();
         assert_eq!(reader.spec().sample_rate, 16_000);
         assert_eq!(reader.spec().channels, 1);
@@ -529,7 +643,47 @@ mod tests {
                 .unwrap(),
             [-0.5, 0.0, 0.5]
         );
-        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn warm_stream_keeps_only_the_latest_preroll_and_hands_it_to_the_take() {
+        let mut warm = Captured {
+            preroll_frames: 3,
+            ..Captured::default()
+        };
+        capture_block(&mut warm, &[0.1_f32, 0.2, 0.3, 0.4, 0.5], 1);
+        assert!(warm.samples.is_empty());
+        assert_eq!(warm.preroll, [0.3, 0.4, 0.5]);
+        warm.samples = warm.preroll.drain(..).collect();
+        warm.retain = true;
+        capture_block(&mut warm, &[0.6_f32], 1);
+        assert_eq!(warm.samples, [0.3, 0.4, 0.5, 0.6]);
+        assert!(warm.preroll.is_empty());
+    }
+
+    #[test]
+    #[ignore = "Opens the real microphone and keeps it warm; run explicitly"]
+    fn warm_microphone_starts_takes_with_preroll_and_stays_open() {
+        keep_warm(Some(None)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let started = std::time::Instant::now();
+        start_device(None).unwrap();
+        let start_ms = started.elapsed().as_secs_f64() * 1000.0;
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let first = stop().unwrap();
+        // 200 ms of take plus up to 300 ms of pre-roll.
+        assert!(first.len() > 16_000 * 4 / 10, "{} samples", first.len());
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        start_device(None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let second = stop().unwrap();
+        assert!(second.len() > 16_000 * 4 / 10, "{} samples", second.len());
+        keep_warm(None).unwrap();
+        println!(
+            "warm_start_ms={start_ms:.3} first_samples={} second_samples={}",
+            first.len(),
+            second.len()
+        );
     }
 
     #[test]

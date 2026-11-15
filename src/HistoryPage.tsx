@@ -44,11 +44,13 @@ type Retention = Settings["historyRetention"];
 const filters: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "pasted", label: "Pasted" },
+  { value: "copied", label: "Copied" },
   { value: "skipped", label: "Skipped" },
   { value: "failed", label: "Failed" },
 ];
 const statusLabels: Record<TakeStatus, string> = {
   pasted: "Pasted",
+  copied: "Copied",
   skipped: "Skipped",
   failed: "Failed",
 };

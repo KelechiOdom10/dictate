@@ -11,7 +11,7 @@ pub fn transcribe(samples: &[f32], model: &Path) -> Result<String, Problem> {
         return Err(failed("Expected nonempty, finite 16 kHz mono audio"));
     }
     let _guard = TRANSCRIPTION.try_lock().map_err(|_| {
-        eprintln!("[transcribe] rejected: transcription is already running");
+        log::warn!("[transcribe] rejected: transcription is already running");
         Problem::new(
             "Still transcribing",
             "Wait for the last dictation to finish.",
