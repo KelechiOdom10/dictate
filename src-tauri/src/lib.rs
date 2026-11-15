@@ -5,6 +5,7 @@
 //!
 //!   audio::start / audio::stop  ->  Vec<f32>  (16 kHz, mono, in memory)
 //!   transcribe::transcribe      ->  String
+//!   transcribe::transcribe_timed -> Vec<Word>  (ms times, for Annotate)
 //!   insert::paste               ->  ()       (into the focused app)
 //!
 //! Keep them separate. A pipeline that only works end to end is a pipeline
@@ -15,8 +16,13 @@
 //! receives status and small scalar levels, never raw samples.
 
 mod audio;
+#[cfg(target_os = "macos")]
+pub mod frames;
 mod insert;
-mod transcribe;
+pub mod package;
+#[cfg(target_os = "macos")]
+pub mod screen;
+pub mod transcribe;
 
 mod focus;
 mod history;
