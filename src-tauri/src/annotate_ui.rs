@@ -14,6 +14,7 @@
 //! `CGEvent::location` on a fresh event object that is never posted.
 
 use std::sync::Mutex;
+use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -58,6 +59,22 @@ impl Live {
 /// The session's ink, while one records.
 #[derive(Default)]
 pub struct State(Mutex<Option<Live>>);
+
+/// The pen states to put on screen, in the order the ink decided them.
+/// One thread (`apply_pens`) owns click-through and the Esc registration,
+/// so no two callers can interleave them and leave the overlay blocking
+/// clicks with pen mode off.
+struct PenQueue(Mutex<Sender<Pen>>);
+
+/// Queues `pen`. Callers hold the `State` lock, so the queue order is the
+/// order the ink changed.
+fn queue_pen(app: &AppHandle, pen: Pen) {
+    let queue = app.state::<PenQueue>();
+    let sender = queue.0.lock().unwrap_or_else(|e| e.into_inner());
+    if sender.send(pen).is_err() {
+        log::warn!("[annotate] pen thread gone");
+    }
+}
 
 fn with_live<T>(app: &AppHandle, f: impl FnOnce(&mut Live) -> T) -> Option<T> {
     let state = app.state::<State>();
@@ -105,6 +122,10 @@ pub fn pointer() -> Option<(f64, f64)> {
 /// which is where the spike converted its window.
 pub fn setup(app: &App) -> tauri::Result<()> {
     app.manage(State::default());
+    let (pens, queued) = mpsc::channel();
+    app.manage(PenQueue(Mutex::new(pens)));
+    let handle = app.handle().clone();
+    std::thread::spawn(move || apply_pens(handle, queued));
     let handle = app.handle();
     for (label, query, level) in [(INK, "ink", 1000), (BAR, "annotate-bar", 1001)] {
         let window = WebviewWindowBuilder::new(
@@ -187,21 +208,15 @@ pub fn begin(app: &AppHandle, display: Display, clock: Instant, started_at_ms: i
 /// The session stopped: every stroke, with pen mode off, Esc released and
 /// both panels hidden.
 pub fn end(app: &AppHandle) -> Vec<Stroke> {
-    let live = app
-        .state::<State>()
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    let strokes = match live {
-        Some(live) => {
+    let strokes = {
+        let state = app.state::<State>();
+        let mut live = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        let strokes = live.take().map(|live| {
             let now = live.now();
-            let pen = live.ink.pen();
-            let strokes = live.ink.finish(now);
-            apply_pen(app, pen, Pen::Off);
-            strokes
-        }
-        None => Vec::new(),
+            live.ink.finish(now)
+        });
+        queue_pen(app, Pen::Off);
+        strokes.unwrap_or_default()
     };
     let handle = app.clone();
     let hidden = app.run_on_main_thread(move || {
@@ -248,6 +263,10 @@ pub fn released(app: &AppHandle) -> bool {
             emit(app, INK, "ink-end", id);
             false
         }
+        Some(Release::Shadowed { id }) => {
+            emit(app, INK, "ink-discard", id);
+            false
+        }
         Some(Release::Nothing) | None => false,
     }
 }
@@ -275,12 +294,16 @@ pub fn pen_up(app: &AppHandle) {
     }
 }
 
-/// The pen button, Esc, or the backstop's tick.
+/// The pen button, Esc, or the backstop's tick. The new state is queued for
+/// `apply_pens` while the state lock is still held.
 pub fn pen(app: &AppHandle, input: impl FnOnce(u64) -> PenInput) {
     let Some((before, after, closed)) = with_live(app, |live| {
         let now = live.now();
         let before = live.ink.pen();
         let (after, closed) = live.ink.set_pen(input(now), now);
+        if after != before {
+            queue_pen(app, after);
+        }
         (before, after, closed)
     }) else {
         return;
@@ -288,7 +311,6 @@ pub fn pen(app: &AppHandle, input: impl FnOnce(u64) -> PenInput) {
     if let Some(id) = closed {
         emit(app, INK, "ink-end", id);
     }
-    apply_pen(app, before, after);
     if let Pen::On { since_ms } = after
         && before.click_through()
     {
@@ -297,32 +319,38 @@ pub fn pen(app: &AppHandle, input: impl FnOnce(u64) -> PenInput) {
     }
 }
 
-/// Makes the windows and Esc match the pen state. Called without the state
-/// lock held, because the window and shortcut calls wait on the main thread.
-fn apply_pen(app: &AppHandle, before: Pen, after: Pen) {
-    if before.click_through() != after.click_through()
-        && let Some(window) = app.get_webview_window(INK)
-        && let Err(error) = window.set_ignore_cursor_events(after.click_through())
-    {
-        log::warn!("[annotate] click-through: {error}");
-    }
-    if before.wants_escape() != after.wants_escape() {
-        let shortcuts = app.global_shortcut();
-        let result = if after.wants_escape() {
-            shortcuts.register(escape())
-        } else {
-            shortcuts.unregister(escape())
-        };
-        if let Err(error) = result {
-            log::warn!("[annotate] Esc: {error}");
+/// The only caller of the click-through and Esc calls. Each queued pen state
+/// is compared with what is on screen, so a repeated or stale state changes
+/// nothing. These calls wait on the main thread, which is why they run here
+/// and not under the `State` lock.
+fn apply_pens(app: AppHandle, queued: mpsc::Receiver<Pen>) {
+    let mut shown = Pen::Off;
+    for pen in queued {
+        if pen.click_through() != shown.click_through()
+            && let Some(window) = app.get_webview_window(INK)
+            && let Err(error) = window.set_ignore_cursor_events(pen.click_through())
+        {
+            log::warn!("[annotate] click-through: {error}");
         }
-    }
-    if before != after {
-        log::info!(
-            "[annotate] pen {}",
-            if after.click_through() { "off" } else { "on" }
-        );
-        emit_bar(app);
+        if pen.wants_escape() != shown.wants_escape() {
+            let shortcuts = app.global_shortcut();
+            let result = if pen.wants_escape() {
+                shortcuts.register(escape())
+            } else {
+                shortcuts.unregister(escape())
+            };
+            if let Err(error) = result {
+                log::warn!("[annotate] Esc: {error}");
+            }
+        }
+        if pen.click_through() != shown.click_through() {
+            log::info!(
+                "[annotate] pen {}",
+                if pen.click_through() { "off" } else { "on" }
+            );
+        }
+        shown = pen;
+        emit_bar(&app);
     }
 }
 

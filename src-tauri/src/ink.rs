@@ -9,6 +9,16 @@
 //! - **Pen mode.** The pen on the floating bar makes the overlay take the
 //!   mouse, so a drag draws. Esc, the pen again, or a timeout backstop end it.
 //!
+//! Only one of the two records at a time. A press of the shortcut while a
+//! drag is open (or a drag that starts while the shortcut is held) would
+//! otherwise follow the same pointer into two strokes, so the held stroke is
+//! *shadowed*: it stops recording, still decides tap-or-hold, and is dropped
+//! on release.
+//!
+//! Every point handed to the overlay carries a sequence number, because the
+//! press and the pointer poll emit from different threads and can arrive out
+//! of order. The overlay draws each stroke in sequence order.
+//!
 //! Everything here is pure: the shell in `annotate_ui.rs` reads the pointer
 //! and the session clock and passes them in. Times are ms on the session
 //! clock, positions are global display points (as `CGEvent::location` gives
@@ -53,6 +63,9 @@ struct OpenStroke {
     start: (f64, f64),
     max_move: f64,
     points: Vec<(f64, f64, u64)>,
+    /// A held stroke that a pen drag overlapped: it records nothing more and
+    /// is dropped on release, so one pointer path never becomes two strokes.
+    shadowed: bool,
 }
 
 impl OpenStroke {
@@ -63,22 +76,24 @@ impl OpenStroke {
             start: (x, y),
             max_move: 0.0,
             points: vec![(x, y, t)],
+            shadowed: false,
         }
     }
 
     /// Adds a sample. Returns false when the pointer has not moved, so a still
     /// pointer does not fill the stroke with copies.
     fn push(&mut self, x: f64, y: f64, t: u64) -> bool {
-        if self
-            .points
-            .last()
-            .is_some_and(|&(lx, ly, _)| lx == x && ly == y)
-        {
-            return false;
-        }
         self.max_move = self
             .max_move
             .max((x - self.start.0).hypot(y - self.start.1));
+        if self.shadowed
+            || self
+                .points
+                .last()
+                .is_some_and(|&(lx, ly, _)| lx == x && ly == y)
+        {
+            return false;
+        }
         self.points.push((x, y, t.max(self.t0)));
         true
     }
@@ -155,6 +170,8 @@ pub fn pen(pen: Pen, input: PenInput) -> Pen {
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct InkPoint {
     pub id: u64,
+    /// Order across every point of the session. The overlay sorts by it.
+    pub seq: u64,
     pub x: f64,
     pub y: f64,
 }
@@ -167,6 +184,9 @@ pub enum Release {
     Tap { id: u64 },
     /// A hold: stroke `id` is kept.
     Kept { id: u64 },
+    /// A hold that a pen drag overlapped: the drag has the path, so stroke
+    /// `id` is dropped and the session goes on.
+    Shadowed { id: u64 },
 }
 
 /// Ink for one session.
@@ -178,6 +198,7 @@ pub struct Ink {
     pen: Pen,
     strokes: Vec<Stroke>,
     next_id: u64,
+    next_seq: u64,
 }
 
 impl Ink {
@@ -189,6 +210,7 @@ impl Ink {
             pen: Pen::Off,
             strokes: Vec::new(),
             next_id: 0,
+            next_seq: 0,
         }
     }
 
@@ -205,25 +227,30 @@ impl Ink {
         OpenStroke::new(self.next_id, t, x, y)
     }
 
-    fn point(&self, id: u64, x: f64, y: f64) -> InkPoint {
+    fn point(&mut self, id: u64, x: f64, y: f64) -> InkPoint {
         let (px, py) = self.display.stroke_point(x, y);
+        self.next_seq += 1;
         InkPoint {
             id,
+            seq: self.next_seq,
             x: f64::from(px) / crate::package::POINT_SCALE,
             y: f64::from(py) / crate::package::POINT_SCALE,
         }
     }
 
     /// The shortcut went down. Opens a provisional stroke, unless one is open
-    /// already: key auto-repeat must not start a second stroke.
+    /// already: key auto-repeat must not start a second stroke. During a pen
+    /// drag the stroke opens shadowed and draws nothing, since the drag is
+    /// already recording the pointer.
     pub fn press(&mut self, t: u64, x: f64, y: f64) -> Option<InkPoint> {
         if self.held.is_some() {
             return None;
         }
-        let stroke = self.open(t, x, y);
-        let point = self.point(stroke.id, x, y);
+        let mut stroke = self.open(t, x, y);
+        stroke.shadowed = self.dragged.is_some();
+        let point = (!stroke.shadowed).then(|| self.point(stroke.id, x, y));
         self.held = Some(stroke);
-        Some(point)
+        point
     }
 
     /// The shortcut came up: keep the stroke, or drop it because it was a tap.
@@ -234,6 +261,7 @@ impl Ink {
         let id = stroke.id;
         match classify(t.saturating_sub(stroke.t0), stroke.max_move) {
             Press::Tap => Release::Tap { id },
+            Press::Hold if stroke.shadowed => Release::Shadowed { id },
             Press::Hold => {
                 let stroke = stroke.finish(&self.display, t);
                 self.strokes.push(stroke);
@@ -246,6 +274,9 @@ impl Ink {
     pub fn pen_down(&mut self, t: u64, x: f64, y: f64) -> Option<InkPoint> {
         if self.pen.click_through() || self.dragged.is_some() {
             return None;
+        }
+        if let Some(held) = self.held.as_mut() {
+            held.shadowed = true;
         }
         let stroke = self.open(t, x, y);
         let point = self.point(stroke.id, x, y);
@@ -439,6 +470,7 @@ mod tests {
             drawn,
             vec![InkPoint {
                 id: 1,
+                seq: 2,
                 x: 0.75,
                 y: 0.0
             }]
@@ -646,5 +678,54 @@ mod tests {
         let strokes = ink.finish(900);
         assert_eq!(strokes.len(), 1);
         assert_eq!(strokes[0].t1, 900);
+    }
+
+    #[test]
+    fn holding_the_shortcut_during_a_pen_drag_records_the_path_once() {
+        let mut ink = Ink::new(main());
+        ink.set_pen(PenInput::Button { now_ms: 0 }, 0);
+        let drag = ink.pen_down(100, 10.0, 10.0).unwrap();
+        // The shortcut goes down mid-drag: nothing new is drawn.
+        assert_eq!(ink.press(150, 20.0, 20.0), None);
+        let drawn = ink.sample(158, 40.0, 40.0);
+        assert_eq!(drawn.iter().map(|p| p.id).collect::<Vec<_>>(), [drag.id]);
+        ink.sample(400, 80.0, 80.0);
+        assert!(matches!(ink.release(450), Release::Shadowed { .. }));
+        ink.pen_up(500);
+        assert_eq!(ink.finish(600).len(), 1);
+    }
+
+    #[test]
+    fn a_drag_that_starts_while_the_shortcut_is_held_takes_over_the_path() {
+        let mut ink = Ink::new(main());
+        ink.set_pen(PenInput::Button { now_ms: 0 }, 0);
+        let held = ink.press(100, 10.0, 10.0).unwrap();
+        ink.sample(108, 20.0, 20.0);
+        let drag = ink.pen_down(150, 20.0, 20.0).unwrap();
+        let drawn = ink.sample(158, 60.0, 60.0);
+        assert_eq!(drawn.iter().map(|p| p.id).collect::<Vec<_>>(), [drag.id]);
+        assert_eq!(ink.release(500), Release::Shadowed { id: held.id });
+        ink.pen_up(520);
+        let strokes = ink.finish(600);
+        assert_eq!(strokes.len(), 1);
+        assert_eq!(strokes[0].t0, 150);
+    }
+
+    #[test]
+    fn a_quick_tap_during_a_pen_drag_still_stops_the_session() {
+        let mut ink = Ink::new(main());
+        ink.set_pen(PenInput::Button { now_ms: 0 }, 0);
+        ink.pen_down(100, 10.0, 10.0);
+        ink.press(200, 10.0, 10.0);
+        assert!(matches!(ink.release(300), Release::Tap { .. }));
+    }
+
+    #[test]
+    fn every_point_carries_a_rising_sequence_number() {
+        let mut ink = Ink::new(main());
+        let first = ink.press(0, 10.0, 10.0).unwrap();
+        let next = ink.sample(8, 20.0, 20.0);
+        let later = ink.sample(16, 30.0, 30.0);
+        assert!(first.seq < next[0].seq && next[0].seq < later[0].seq);
     }
 }
