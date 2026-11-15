@@ -2,16 +2,43 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+type WindowLabel = "main" | "settings" | "ink" | "annotate-bar";
+
+// The app's own commands each window's capability file grants, so the mock
+// rejects a command the real webview would be denied.
+async function grantedCommands() {
+  const granted: Record<string, string[]> = {};
+  for (const file of ["default.json", "annotate.json", "annotate-bar.json"]) {
+    const capability = JSON.parse(
+      await readFile(
+        path.join(process.cwd(), "src-tauri/capabilities", file),
+        "utf8",
+      ),
+    ) as { windows: string[]; permissions: unknown[] };
+    const commands = capability.permissions
+      .filter((p): p is string => typeof p === "string")
+      .filter((p) => p.startsWith("allow-"))
+      .map((p) => p.slice("allow-".length).replaceAll("-", "_"));
+    for (const label of capability.windows)
+      granted[label] = [...(granted[label] ?? []), ...commands];
+  }
+  return granted;
+}
+
 async function openSettings(
   page: import("@playwright/test").Page,
   {
     failLoad = false,
     startupError = null,
     overlay = false,
+    window: label = overlay ? "main" : "settings",
+    stored = {},
   }: {
     failLoad?: boolean;
     startupError?: { title: string; fix: string; detail: string | null } | null;
     overlay?: boolean;
+    window?: WindowLabel;
+    stored?: Record<string, unknown>;
   } = {},
 ) {
   await page.route("http://dictate.test/**", async (route) => {
@@ -37,8 +64,11 @@ async function openSettings(
       ? { ...model, active: true, state: { kind: "installed" } }
       : model,
   );
+  const granted = (await grantedCommands())[label];
   await page.addInitScript(
-    ({ failLoad, startupError, models }) => {
+    ({ failLoad, startupError, models, label, granted, stored }) => {
+      const denied: string[] = [];
+      Object.defineProperty(window, "__deniedCommands", { value: denied });
       let status = { phase: "idle", error: startupError };
       const callbacks = new Map<number, (response: unknown) => void>();
       const listeners = new Map<string, { id: number; handler: number }[]>();
@@ -80,6 +110,7 @@ async function openSettings(
         annotateShortcut: "Alt+Shift+KeyS",
         annotateEnabled: true,
         annotateShowInRecordings: false,
+        ...stored,
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
         value: { unregisterListener: () => {} },
@@ -87,8 +118,8 @@ async function openSettings(
       Object.defineProperty(window, "__TAURI_INTERNALS__", {
         value: {
           metadata: {
-            currentWindow: { label: "settings" },
-            currentWebview: { label: "settings" },
+            currentWindow: { label },
+            currentWebview: { label },
           },
           transformCallback: (callback: (response: unknown) => void) => {
             const id = ++nextId;
@@ -104,6 +135,10 @@ async function openSettings(
               handler?: number;
             },
           ) => {
+            if (!command.startsWith("plugin:") && !granted.includes(command)) {
+              denied.push(command);
+              throw `${command} not allowed on window \`${label}\``;
+            }
             if (command === "pipeline_status") return status;
             if (command === "get_settings") {
               if (failLoad) throw "Settings file could not be read";
@@ -145,10 +180,12 @@ async function openSettings(
         },
       });
     },
-    { failLoad, startupError, models },
+    { failLoad, startupError, models, label, granted, stored },
   );
   await page.goto(
-    overlay ? "http://dictate.test/" : "http://dictate.test/?window=settings",
+    label === "main"
+      ? "http://dictate.test/"
+      : `http://dictate.test/?window=${label}`,
   );
 }
 
@@ -608,6 +645,55 @@ test("invalid appearance events show a recoverable overlay error", async ({
     "Settings couldn’t refreshOpen Settings and save again.",
   );
 });
+
+for (const label of ["ink", "annotate-bar"] as const) {
+  test(`the ${label} panel keeps the stored theme and follows changes`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await openSettings(page, {
+      window: label,
+      stored: { theme: "paper", appearanceMode: "dark" },
+    });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
+    await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+    const send = (payload: unknown) =>
+      page.evaluate(
+        (payload) =>
+          window.postMessage(
+            { type: "dictate-test", event: "settings-changed", payload },
+            "*",
+          ),
+        payload,
+      );
+    const current = await page.evaluate(() =>
+      (
+        window as unknown as {
+          __TAURI_INTERNALS__: { invoke: (command: string) => unknown };
+        }
+      ).__TAURI_INTERNALS__.invoke("get_settings"),
+    );
+    await send({
+      ...(current as object),
+      theme: "ember",
+      appearanceMode: "light",
+    });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "ember");
+    await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
+    // An invalid event must not call a command the panel isn't granted; the
+    // valid one after it proves the invalid one has been handled.
+    await send({ theme: "invalid" });
+    await send({ ...(current as object), theme: "paper" });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as { __deniedCommands: string[] })
+            .__deniedCommands,
+      ),
+    ).toEqual([]);
+  });
+}
 
 test("capsule state screenshots cover every theme and fit a narrow overlay", async ({
   page,

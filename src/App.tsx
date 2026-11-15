@@ -147,8 +147,10 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
 
 function Appearance({
   onError,
+  canReportRefreshError,
 }: {
   onError: (problem: Problem | null) => void;
+  canReportRefreshError: boolean;
 }) {
   const query = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   useEffect(() => {
@@ -167,7 +169,8 @@ function Appearance({
             result.error,
           ),
         );
-        void invoke("report_settings_refresh_error").catch(console.error);
+        if (canReportRefreshError)
+          void invoke("report_settings_refresh_error").catch(console.error);
       }
     });
     void subscription
@@ -180,7 +183,7 @@ function Appearance({
       disposed = true;
       void subscription.then((stop) => stop()).catch(console.error);
     };
-  }, [onError]);
+  }, [onError, canReportRefreshError]);
   useEffect(() => {
     const system = matchMedia("(prefers-color-scheme: dark)");
     const root = document.documentElement;
@@ -209,12 +212,16 @@ function Appearance({
 }
 
 const windowKind = new URLSearchParams(location.search).get("window");
+const isAnnotatePanel = windowKind === "ink" || windowKind === "annotate-bar";
 
 export default function App() {
   const [appearanceError, setAppearanceError] = useState<Problem | null>(null);
   return (
     <QueryClientProvider client={client}>
-      <Appearance onError={setAppearanceError} />
+      <Appearance
+        onError={setAppearanceError}
+        canReportRefreshError={!isAnnotatePanel}
+      />
       {windowKind === "settings" ? (
         <SettingsWindow />
       ) : windowKind === "ink" ? (

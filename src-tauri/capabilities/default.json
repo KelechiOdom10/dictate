@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the dictation pill and the settings window: every app command except the Annotate panels' own.",
+  "description": "Capability for the dictation pill and the settings window: every app command except the Annotate panels' own. get_settings is the one command shared with the panels.",
   "windows": [
     "main",
     "settings"

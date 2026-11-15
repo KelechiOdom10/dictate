@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "annotate-ink",
-  "description": "Annotate's ink panel: core defaults and events, and the two commands that mark a pen-mode drag. No plugins.",
+  "description": "Annotate's ink panel: core defaults and events, read-only settings for the theme, and the two commands that mark a pen-mode drag. No plugins.",
   "windows": ["ink"],
   "permissions": [
     "core:default",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    "allow-get-settings",
     "allow-annotate-pen-down",
     "allow-annotate-pen-up"
   ]

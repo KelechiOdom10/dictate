@@ -1923,11 +1923,15 @@ mod take_tests {
         let (bar_windows, bar) = grants(include_str!("../capabilities/annotate-bar.json"));
         let (default_windows, default) = grants(include_str!("../capabilities/default.json"));
         assert_eq!(ink_windows, ["ink"]);
-        assert_eq!(ink, set(&["annotate_pen_down", "annotate_pen_up"]));
+        assert_eq!(
+            ink,
+            set(&["get_settings", "annotate_pen_down", "annotate_pen_up"])
+        );
         assert_eq!(bar_windows, ["annotate-bar"]);
         assert_eq!(
             bar,
             set(&[
+                "get_settings",
                 "annotate_bar_state",
                 "annotate_pen",
                 "annotate_stop",
@@ -1936,7 +1940,12 @@ mod take_tests {
             ])
         );
         assert_eq!(default_windows, ["main", "settings"]);
-        assert!(default.is_disjoint(&ink) && default.is_disjoint(&bar));
+        // Every window themes itself from the stored settings, so get_settings is
+        // the one read-only command the panels share with main and settings.
+        let shared = set(&["get_settings"]);
+        assert_eq!(&default & &ink, shared);
+        assert_eq!(&default & &bar, shared);
+        assert_eq!(&ink & &bar, shared);
         let granted: BTreeSet<String> = default.union(&ink).chain(&bar).cloned().collect();
         assert_eq!(granted, declared);
     }
