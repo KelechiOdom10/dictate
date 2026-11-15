@@ -1,7 +1,8 @@
 use crate::problem::Problem;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Mutex, mpsc};
+use std::time::{Duration, Instant};
 use transcribe_cpp::TimestampKind;
 
 static TRANSCRIPTION: Mutex<()> = Mutex::new(());
@@ -121,7 +122,7 @@ pub fn prepare(model: &Path) -> Result<(), Problem> {
             Engine::WhisperCli => Ok(()),
         };
     }
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     held::run(model, &[0.0; SAMPLE_RATE], TimestampKind::None)?;
     log::info!(
         "[transcribe] ready {} in {} ms",
@@ -129,6 +130,206 @@ pub fn prepare(model: &Path) -> Result<(), Problem> {
         started.elapsed().as_millis()
     );
     Ok(())
+}
+
+/// Takes shorter than this are transcribed in one batch when they end:
+/// streaming dropped the first word of a 2.7 s clip that batch got right, and
+/// batch on a short take already returns in about 50 ms.
+pub const STREAM_MIN_SAMPLES: usize = 4 * SAMPLE_RATE;
+/// After `LiveTake::finish`, how long the worker waits for the last frames.
+const LAST_FRAMES_WAIT: Duration = Duration::from_secs(1);
+/// How often a waiting worker checks whether its take was discarded.
+const DISCARD_CHECK: Duration = Duration::from_millis(100);
+
+/// Whether `model` can decode a take while it records. Only the in-process
+/// engine streams; whisper-cli models stay batch-only.
+pub fn streams(model: &Path) -> bool {
+    engine(model) == Engine::InProcess
+}
+
+/// A take decoded while it records. A worker thread feeds each 16 kHz frame
+/// from `frames` to a stream on the held model, so at release only the last
+/// fraction of a second is left to decode. `finish` returns the text.
+/// Dropping a `LiveTake` discards the stream.
+///
+/// The worker holds the transcription turn and the held model until the take
+/// ends, so nothing else transcribes in the meantime.
+pub struct LiveTake {
+    model: PathBuf,
+    finish: Option<mpsc::Sender<mpsc::Sender<Result<Streamed, String>>>>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+/// Which path produced a `LiveTake`'s text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Decoded {
+    Streamed,
+    Batch,
+}
+
+#[derive(Debug)]
+struct Streamed {
+    text: String,
+    /// Samples the stream decoded, to check it heard the whole take.
+    samples: usize,
+}
+
+impl LiveTake {
+    /// Starts decoding `frames` with `model`, or returns `None` for a model
+    /// that doesn't stream.
+    pub fn start(model: &Path, frames: mpsc::Receiver<Vec<f32>>) -> Option<Self> {
+        if !streams(model) {
+            return None;
+        }
+        let (finish, requests) = mpsc::channel();
+        let path = model.to_path_buf();
+        let worker = std::thread::Builder::new()
+            .name("live-transcription".into())
+            .spawn(move || {
+                if let Err(error) = decode_live(&path, &frames, &requests) {
+                    log::warn!("[transcribe] stream stopped: {error}");
+                }
+            })
+            .map_err(|error| log::warn!("[transcribe] stream thread: {error}"))
+            .ok()?;
+        Some(Self {
+            model: model.to_path_buf(),
+            finish: Some(finish),
+            worker: Some(worker),
+        })
+    }
+
+    /// The take's text. `samples` is the whole take, as `audio::stop` returned
+    /// it; call this after the take has stopped. Takes under
+    /// `STREAM_MIN_SAMPLES`, a stream that failed, and a stream that heard a
+    /// different length of audio are transcribed again from `samples` in one
+    /// batch, so the result is never worse than `transcribe`.
+    pub fn finish(self, samples: &[f32]) -> Result<String, Problem> {
+        self.finish_by(samples).map(|(text, _)| text)
+    }
+
+    fn finish_by(mut self, samples: &[f32]) -> Result<(String, Decoded), Problem> {
+        validate(samples)?;
+        let batch = |model: &Path| transcribe(samples, model).map(|text| (text, Decoded::Batch));
+        if samples.len() < STREAM_MIN_SAMPLES {
+            self.discard();
+            log::info!(
+                "[transcribe] batch: short take of {} ms",
+                samples.len() / 16
+            );
+            return batch(&self.model);
+        }
+        let started = Instant::now();
+        let (reply, result) = mpsc::channel();
+        let streamed = self
+            .finish
+            .take()
+            .ok_or_else(|| "already finished".to_string())
+            .and_then(|finish| finish.send(reply).map_err(|_| "worker ended".to_string()))
+            .and_then(|()| result.recv().map_err(|_| "worker ended".to_string()))
+            .and_then(|streamed| streamed);
+        self.discard();
+        match streamed {
+            Ok(streamed) if streamed.samples.abs_diff(samples.len()) <= SAMPLE_RATE / 10 => {
+                log::info!(
+                    "[transcribe] streamed: finish_ms={} audio_ms={}",
+                    started.elapsed().as_millis(),
+                    samples.len() / 16
+                );
+                Ok((streamed.text.trim().to_string(), Decoded::Streamed))
+            }
+            Ok(streamed) => {
+                log::warn!(
+                    "[transcribe] batch: stream heard {} of {} samples",
+                    streamed.samples,
+                    samples.len()
+                );
+                batch(&self.model)
+            }
+            Err(error) => {
+                log::warn!("[transcribe] batch: stream failed: {error}");
+                batch(&self.model)
+            }
+        }
+    }
+
+    /// Ends the worker and waits for it, which lets go of the transcription
+    /// turn and the held model.
+    fn discard(&mut self) {
+        self.finish = None;
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            log::warn!("[transcribe] stream thread panicked");
+        }
+    }
+}
+
+impl Drop for LiveTake {
+    fn drop(&mut self) {
+        self.discard();
+    }
+}
+
+/// The worker's whole life: feed frames until they end, then finalize when
+/// asked. Returns early, and so drops the request, on any error, or when the
+/// take is discarded.
+fn decode_live(
+    model: &Path,
+    frames: &mpsc::Receiver<Vec<f32>>,
+    requests: &mpsc::Receiver<mpsc::Sender<Result<Streamed, String>>>,
+) -> Result<(), String> {
+    let _guard = TRANSCRIPTION
+        .try_lock()
+        .map_err(|_| "a transcription is already running".to_string())?;
+    if !model.is_file() {
+        return Err(format!("no model at {}", model.display()));
+    }
+    held::with_session(model, |session| {
+        let mut stream = session
+            .stream(
+                &transcribe_cpp::RunOptions::default(),
+                &transcribe_cpp::StreamOptions::default(),
+            )
+            .map_err(|e| format!("begin: {e}"))?;
+        let mut fed = 0;
+        let mut reply = None;
+        loop {
+            if reply.is_none() {
+                match requests.try_recv() {
+                    Ok(request) => reply = Some(request),
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
+                }
+            }
+            let wait = if reply.is_some() {
+                LAST_FRAMES_WAIT
+            } else {
+                DISCARD_CHECK
+            };
+            match frames.recv_timeout(wait) {
+                Ok(frame) => {
+                    stream.feed(&frame).map_err(|e| format!("feed: {e}"))?;
+                    fed += frame.len();
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) if reply.is_some() => {
+                    return Err("the take's last frames never arrived".into());
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        let Some(reply) = reply.or_else(|| requests.recv().ok()) else {
+            return Ok(());
+        };
+        stream.finalize().map_err(|e| format!("finalize: {e}"))?;
+        let _ = reply.send(Ok(Streamed {
+            text: stream.text().full,
+            samples: fed,
+        }));
+        Ok(())
+    })
+    .map_err(|problem| problem.to_string())?
 }
 
 /// The model file the in-process engine holds, if any.
@@ -166,6 +367,7 @@ mod held {
     use super::{Problem, failed};
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
+    use std::time::Instant;
     use transcribe_cpp::{Model, RunOptions, Session, TimestampKind, Transcript};
 
     struct Held {
@@ -196,6 +398,18 @@ mod held {
         samples: &[f32],
         timestamps: TimestampKind,
     ) -> Result<Transcript, Problem> {
+        let options = RunOptions {
+            timestamps,
+            ..RunOptions::default()
+        };
+        with_session(model, |session| {
+            session.run(samples, &options).map_err(failed)
+        })?
+    }
+
+    /// Calls `f` with the session of `model`, loading it first if another
+    /// model, or none, is held. The slot stays locked until `f` returns.
+    pub fn with_session<R>(model: &Path, f: impl FnOnce(&mut Session) -> R) -> Result<R, Problem> {
         // The engine and ggml print every Metal kernel they compile. Send it
         // through `log`, where the app keeps warnings and errors only.
         static LOGGING: std::sync::Once = std::sync::Once::new();
@@ -205,7 +419,7 @@ mod held {
             if let Some(old) = slot.take() {
                 log::info!("[transcribe] unloaded {}", old.path.display());
             }
-            let started = std::time::Instant::now();
+            let started = Instant::now();
             let session = Model::load(model)
                 .and_then(|loaded| loaded.session())
                 .map_err(|e| failed(format!("Load {}: {e}", model.display())))?;
@@ -219,12 +433,7 @@ mod held {
                 session,
             });
         }
-        let held = slot.as_mut().expect("loaded above");
-        let options = RunOptions {
-            timestamps,
-            ..RunOptions::default()
-        };
-        held.session.run(samples, &options).map_err(failed)
+        Ok(f(&mut slot.as_mut().expect("loaded above").session))
     }
 }
 
@@ -1097,6 +1306,143 @@ That is everything for this page, thank you.";
         assert_eq!(held_model(), Some(model));
         prepare(Path::new("/models/deleted.gguf")).unwrap_err();
         assert_eq!(held_model(), None);
+    }
+
+    /// About 19 s of dictation with names, numbers and a product word.
+    const MEMO: &str = "Hi Sarah, quick update on the launch. \
+We moved the release to Thursday the twelfth, and Daniel will run the Kubernetes \
+upgrade the night before. Can we meet on Thursday at three to go through the hiring \
+plan? Also, please send me the budget numbers for the second quarter, and remind \
+Priya that the design review is now on Friday morning. Thanks.";
+
+    /// Feeds `samples` to a `LiveTake` as capture would, one 100 ms frame
+    /// every `pace`, then finishes it. Returns the text, which path made it,
+    /// and the ms from `finish` to text.
+    fn paced_take(samples: &[f32], model: &Path, pace: Duration) -> (String, Decoded, u128) {
+        let (sender, frames) = mpsc::channel();
+        let live = LiveTake::start(model, frames).expect("Parakeet streams");
+        for frame in samples.chunks(SAMPLE_RATE / 10) {
+            sender.send(frame.to_vec()).unwrap();
+            std::thread::sleep(pace);
+        }
+        drop(sender);
+        let started = Instant::now();
+        let (text, decoded) = live.finish_by(samples).unwrap();
+        (text, decoded, started.elapsed().as_millis())
+    }
+
+    /// The words, lowercased, without punctuation: streaming and batch can
+    /// place commas and full stops differently on the same audio.
+    fn spoken_words(text: &str) -> Vec<String> {
+        text.split(|c: char| !c.is_alphanumeric() && c != '\'')
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    }
+
+    fn word_count(text: &str) -> usize {
+        text.split_whitespace().count()
+    }
+
+    #[test]
+    fn whisper_models_do_not_stream() {
+        let (_sender, frames) = mpsc::channel();
+        assert!(LiveTake::start(Path::new("/m/ggml-base.en.bin"), frames).is_none());
+        assert!(!streams(Path::new("/m/ggml-base.en.bin")));
+        assert!(streams(Path::new("/m/parakeet.gguf")));
+    }
+
+    #[test]
+    fn parakeet_streams_the_memo_in_real_time_and_matches_batch() {
+        let _turn = transcription_turn();
+        let Some(memo) = parakeet_speech("parakeet streamed memo", MEMO) else {
+            return;
+        };
+        let model = parakeet_model();
+        prepare(&model).unwrap();
+        let batch = transcribe(&memo, &model).unwrap();
+        let (text, decoded, finish_ms) = paced_take(&memo, &model, Duration::from_millis(100));
+        eprintln!(
+            "parakeet memo: audio_ms={} finish_ms={finish_ms} streamed={text:?} batch={batch:?}",
+            memo.len() / 16
+        );
+        assert_eq!(decoded, Decoded::Streamed);
+        assert_eq!(spoken_words(&text), spoken_words(&batch));
+        assert!(finish_ms <= 150, "finish took {finish_ms} ms");
+    }
+
+    #[test]
+    fn parakeet_streams_a_minute_and_keeps_every_word() {
+        let _turn = transcription_turn();
+        let Some(memo) = parakeet_speech("parakeet streamed minute", MEMO) else {
+            return;
+        };
+        let long: Vec<f32> = memo.iter().chain(&memo).chain(&memo).copied().collect();
+        let model = parakeet_model();
+        prepare(&model).unwrap();
+        let (text, decoded, finish_ms) = paced_take(&long, &model, Duration::from_millis(25));
+        eprintln!(
+            "parakeet minute: audio_ms={} finish_ms={finish_ms} words={} text={text:?}",
+            long.len() / 16,
+            word_count(&text)
+        );
+        assert_eq!(decoded, Decoded::Streamed);
+        assert_eq!(word_count(&text), 3 * word_count(MEMO));
+    }
+
+    #[test]
+    fn a_short_take_goes_through_batch_and_keeps_its_first_word() {
+        let _turn = transcription_turn();
+        let Some(fox) = parakeet_speech("parakeet short take", FOX) else {
+            return;
+        };
+        let model = parakeet_model();
+        prepare(&model).unwrap();
+        let (text, decoded, _) = paced_take(&fox, &model, Duration::ZERO);
+        assert_eq!(decoded, Decoded::Batch);
+        assert_eq!(text, FOX);
+    }
+
+    #[test]
+    fn a_stream_that_missed_audio_falls_back_to_batch() {
+        let _turn = transcription_turn();
+        let Some(memo) = parakeet_speech("parakeet partial stream", MEMO) else {
+            return;
+        };
+        let model = parakeet_model();
+        prepare(&model).unwrap();
+        let (sender, frames) = mpsc::channel();
+        let live = LiveTake::start(&model, frames).unwrap();
+        sender.send(memo[..memo.len() / 2].to_vec()).unwrap();
+        drop(sender);
+        let (text, decoded) = live.finish_by(&memo).unwrap();
+        assert_eq!(decoded, Decoded::Batch);
+        assert_eq!(text, transcribe(&memo, &model).unwrap());
+    }
+
+    #[test]
+    fn dropping_a_live_take_discards_it_and_frees_the_engine() {
+        let _turn = transcription_turn();
+        let Some(fox) = parakeet_speech("parakeet discarded stream", FOX) else {
+            return;
+        };
+        let model = parakeet_model();
+        prepare(&model).unwrap();
+        let (sender, frames) = mpsc::channel();
+        let live = LiveTake::start(&model, frames).unwrap();
+        for frame in fox.chunks(SAMPLE_RATE / 10).take(10) {
+            sender.send(frame.to_vec()).unwrap();
+        }
+        let started = Instant::now();
+        drop(live);
+        eprintln!("discard_ms={}", started.elapsed().as_millis());
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(
+            sender.send(vec![0.0; 1600]).is_err(),
+            "frames receiver is gone"
+        );
+        assert_eq!(held_model(), Some(model.clone()));
+        assert_eq!(transcribe(&fox, &model).unwrap(), FOX);
     }
 
     /// Warm Parakeet on the fox clip (n = 11) and on `measure_catalog_models`'

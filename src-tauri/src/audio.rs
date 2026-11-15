@@ -17,6 +17,7 @@ enum Command {
     Level(Reply<f32>),
     RecordingLevel(Reply<f32>),
     Stop(mpsc::Sender<Result<Vec<f32>, Problem>>),
+    Frames(Reply<mpsc::Receiver<Vec<f32>>>),
     Status(mpsc::Sender<bool>),
     /// `Some(device)` keeps that microphone open between takes; `None` closes it.
     Warm(Option<Option<String>>, Reply<()>),
@@ -24,6 +25,7 @@ enum Command {
 
 #[derive(Default)]
 struct Captured {
+    rate: usize,
     samples: Vec<f32>,
     error: Option<String>,
     level: f32,
@@ -33,7 +35,21 @@ struct Captured {
     /// Frames a take records as silence, so the start sound is not in it but
     /// the timing after it is unchanged.
     mute_frames: usize,
+    /// Set by `frames`: where the take's audio goes, 16 kHz, while it records.
+    tap: Option<Tap>,
 }
+
+/// Sends a take's audio on as 16 kHz frames of about `FRAME_MS` while it
+/// records, so speech can be decoded before the take ends.
+struct Tap {
+    sender: mpsc::Sender<Vec<f32>>,
+    converter: To16k,
+    /// How many of the take's samples, at the device rate, have been sent.
+    sent: usize,
+}
+
+/// Length of the frames `frames` delivers.
+pub const FRAME_MS: usize = 100;
 
 struct Recording {
     stream: cpal::Stream,
@@ -154,6 +170,13 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                                     }
                                 }
                             }
+                            Command::Frames(reply) => {
+                                let result = recording
+                                    .as_ref()
+                                    .ok_or_else(|| "Recording is stopped".to_string())
+                                    .and_then(Recording::tap);
+                                let _ = reply.send(result);
+                            }
                             Command::Status(reply) => {
                                 let active = recording.as_ref().is_some_and(|active| {
                                     active
@@ -212,6 +235,18 @@ pub fn stop() -> Result<Vec<f32>, Problem> {
     result
         .recv()
         .map_err(|e| recording_failed(format!("Audio stop reply: {e}")))?
+}
+
+/// The running take's audio as 16 kHz mono frames of about `FRAME_MS`,
+/// starting from its first sample (pre-roll included). The receiver ends when
+/// the take stops, after the last partial frame. Together the frames hold the
+/// same audio `stop` returns.
+pub fn frames() -> Result<mpsc::Receiver<Vec<f32>>, String> {
+    let (reply, result) = mpsc::channel();
+    send(Command::Frames(reply))?;
+    result
+        .recv()
+        .map_err(|e| format!("Audio frames reply: {e}"))?
 }
 
 pub fn no_samples() -> Problem {
@@ -377,6 +412,7 @@ fn open_recording(name: Option<&str>, mode: Mode) -> Result<Recording, String> {
     );
     let rate = config.sample_rate().0 as usize;
     let captured = Arc::new(Mutex::new(Captured {
+        rate,
         retain: mode == Mode::Take,
         preroll_frames: if mode == Mode::Warm {
             rate * PREROLL_MS / 1000
@@ -465,6 +501,54 @@ where
         }
     }
     captured.level = (squares / count as f32).sqrt();
+    let frame = captured.rate * FRAME_MS / 1000;
+    if captured
+        .tap
+        .as_ref()
+        .is_some_and(|tap| captured.samples.len() - tap.sent >= frame)
+    {
+        send_new(captured);
+    }
+}
+
+/// Converts and sends the samples recorded since the last frame. A tap that
+/// fails is dropped, which ends its receiver early.
+fn send_new(captured: &mut Captured) {
+    let Some(tap) = captured.tap.as_mut() else {
+        return;
+    };
+    let new = &captured.samples[tap.sent..];
+    tap.sent = captured.samples.len();
+    let sent = tap
+        .converter
+        .push(new)
+        .and_then(|frame| deliver(&tap.sender, frame));
+    if let Err(error) = sent {
+        log::warn!("[audio] frames stopped: {error}");
+        captured.tap = None;
+    }
+}
+
+/// Sends the rest of the take and closes the frames receiver.
+fn close_tap(captured: &mut Captured) {
+    send_new(captured);
+    if let Some(tap) = captured.tap.take()
+        && let Err(error) = tap
+            .converter
+            .finish()
+            .and_then(|rest| deliver(&tap.sender, rest))
+    {
+        log::warn!("[audio] frames stopped: {error}");
+    }
+}
+
+fn deliver(sender: &mpsc::Sender<Vec<f32>>, frame: Vec<f32>) -> Result<(), String> {
+    if frame.is_empty() {
+        return Ok(());
+    }
+    sender
+        .send(frame)
+        .map_err(|_| "frames receiver dropped".to_string())
 }
 
 #[cfg(test)]
@@ -505,6 +589,19 @@ impl Recording {
             .map_or(true, |captured| captured.error.is_some())
     }
 
+    /// Starts sending this take's audio, from its first sample, as frames.
+    fn tap(&self) -> Result<mpsc::Receiver<Vec<f32>>, String> {
+        let (sender, receiver) = mpsc::channel();
+        let mut captured = self.captured.lock().map_err(|e| e.to_string())?;
+        captured.tap = Some(Tap {
+            sender,
+            converter: To16k::new(self.rate)?,
+            sent: 0,
+        });
+        send_new(&mut captured);
+        Ok(receiver)
+    }
+
     /// Turns an idle warm stream into a take, starting with its pre-roll.
     fn arm(self) -> Result<Self, String> {
         {
@@ -527,6 +624,7 @@ impl Recording {
                 .captured
                 .lock()
                 .map_err(|e| recording_failed(e.to_string()))?;
+            close_tap(&mut captured);
             captured.retain = false;
             captured.mute_frames = 0;
             captured.preroll.clear();
@@ -541,6 +639,7 @@ impl Recording {
             .captured
             .lock()
             .map_err(|e| recording_failed(e.to_string()))?;
+        close_tap(&mut captured);
         let error = captured.error.take();
         let samples = std::mem::take(&mut captured.samples);
         Self::check(samples, self.rate, error)
@@ -580,30 +679,91 @@ pub fn save_wav(path: &std::path::Path, samples: &[f32]) -> Result<(), String> {
 }
 
 fn resample(samples: Vec<f32>, rate: usize) -> Result<Vec<f32>, String> {
-    if rate == OUTPUT_RATE {
-        return Ok(samples);
+    let mut converter = To16k::new(rate)?;
+    let mut output = converter.push(&samples)?;
+    output.extend(converter.finish()?);
+    Ok(output)
+}
+
+/// Converts mono audio at `rate` to 16 kHz a block at a time. Pushing a take in
+/// any number of pieces, then `finish`, gives the same samples as one push:
+/// the resampler's start-up delay is dropped and the end is flushed and cut to
+/// the take's length.
+struct To16k {
+    /// `None` when the device already records at 16 kHz.
+    resampler: Option<FftFixedInOut<f32>>,
+    rate: usize,
+    pending: Vec<f32>,
+    /// Output samples still to drop for the resampler's delay.
+    delay: usize,
+    received: usize,
+    emitted: usize,
+}
+
+impl To16k {
+    fn new(rate: usize) -> Result<Self, String> {
+        let resampler = (rate != OUTPUT_RATE)
+            .then(|| {
+                FftFixedInOut::<f32>::new(rate, OUTPUT_RATE, 1024, 1)
+                    .map_err(|e| format!("Create resampler: {e}"))
+            })
+            .transpose()?;
+        Ok(Self {
+            delay: resampler.as_ref().map_or(0, |r| r.output_delay()),
+            resampler,
+            rate,
+            pending: Vec::new(),
+            received: 0,
+            emitted: 0,
+        })
     }
-    let length = samples.len() * OUTPUT_RATE / rate;
-    let mut resampler = FftFixedInOut::<f32>::new(rate, OUTPUT_RATE, 1024, 1)
-        .map_err(|e| format!("Create resampler: {e}"))?;
-    let delay = resampler.output_delay();
-    let chunk = resampler.input_frames_next();
-    let mut output = Vec::new();
-    for block in samples.chunks(chunk) {
-        let mut padded = vec![0.0; chunk];
-        padded[..block.len()].copy_from_slice(block);
+
+    fn push(&mut self, input: &[f32]) -> Result<Vec<f32>, String> {
+        self.received += input.len();
+        let Some(resampler) = self.resampler.as_ref() else {
+            self.emitted += input.len();
+            return Ok(input.to_vec());
+        };
+        let chunk = resampler.input_frames_next();
+        self.pending.extend_from_slice(input);
+        let mut output = Vec::new();
+        while self.pending.len() >= chunk {
+            let block: Vec<f32> = self.pending.drain(..chunk).collect();
+            self.convert(block, &mut output)?;
+        }
+        self.emitted += output.len();
+        Ok(output)
+    }
+
+    fn finish(mut self) -> Result<Vec<f32>, String> {
+        let Some(resampler) = self.resampler.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let chunk = resampler.input_frames_next();
+        let length = (self.received * OUTPUT_RATE / self.rate).saturating_sub(self.emitted);
+        let mut output = Vec::new();
+        let mut block = std::mem::take(&mut self.pending);
+        while output.len() < length {
+            block.resize(chunk, 0.0);
+            self.convert(std::mem::take(&mut block), &mut output)?;
+        }
+        output.truncate(length);
+        Ok(output)
+    }
+
+    fn convert(&mut self, block: Vec<f32>, output: &mut Vec<f32>) -> Result<(), String> {
+        let resampler = self
+            .resampler
+            .as_mut()
+            .expect("only called when resampling");
         let converted = resampler
-            .process(&[padded], None)
+            .process(&[block], None)
             .map_err(|e| format!("Resample audio: {e}"))?;
-        output.extend_from_slice(&converted[0]);
+        let skip = self.delay.min(converted[0].len());
+        self.delay -= skip;
+        output.extend_from_slice(&converted[0][skip..]);
+        Ok(())
     }
-    while output.len() < length + delay {
-        let converted = resampler
-            .process(&[vec![0.0; chunk]], None)
-            .map_err(|e| format!("Flush resampler: {e}"))?;
-        output.extend_from_slice(&converted[0]);
-    }
-    Ok(output[delay..delay + length].to_vec())
 }
 
 #[cfg(test)]
@@ -814,6 +974,68 @@ mod tests {
         capture_block(&mut take, &[0.9_f32, 0.9, 0.3, 0.4], 1);
         assert_eq!(take.samples, [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
         assert_eq!(take.mute_frames, 0);
+    }
+
+    fn sine(rate: usize, seconds: f32) -> Vec<f32> {
+        (0..(rate as f32 * seconds) as usize)
+            .map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 0.5)
+            .collect()
+    }
+
+    #[test]
+    fn converting_in_pieces_matches_converting_the_whole_take() {
+        for rate in [16_000, 44_100, 48_000] {
+            let input = sine(rate, 1.37);
+            let whole = resample(input.clone(), rate).unwrap();
+            let mut converter = To16k::new(rate).unwrap();
+            let mut pieces = Vec::new();
+            for block in input.chunks(rate / 10 + 7) {
+                pieces.extend(converter.push(block).unwrap());
+            }
+            pieces.extend(converter.finish().unwrap());
+            assert_eq!(
+                pieces.len(),
+                input.len() * OUTPUT_RATE / rate,
+                "rate {rate}"
+            );
+            assert_eq!(pieces, whole, "rate {rate}");
+        }
+    }
+
+    #[test]
+    fn tapped_take_sends_100_ms_frames_that_add_up_to_the_take() {
+        let rate = 48_000;
+        let mut take = Captured {
+            rate,
+            retain: true,
+            samples: vec![0.25; 4_800 * 3],
+            ..Captured::default()
+        };
+        let (sender, frames) = mpsc::channel();
+        take.tap = Some(Tap {
+            sender,
+            converter: To16k::new(rate).unwrap(),
+            sent: 0,
+        });
+        send_new(&mut take);
+        for block in sine(rate, 2.0).chunks(480) {
+            capture_block(&mut take, block, 1);
+        }
+        let streamed: Vec<Vec<f32>> = frames.try_iter().collect();
+        assert!(streamed.len() >= 20, "got {} frames", streamed.len());
+        assert!(streamed[0].len() > 4_000, "the 300 ms pre-roll goes first");
+        assert!(
+            streamed[1..]
+                .iter()
+                .all(|f| (1_200..=1_800).contains(&f.len())),
+            "then about 100 ms each: {:?}",
+            streamed.iter().map(Vec::len).collect::<Vec<_>>()
+        );
+        close_tap(&mut take);
+        assert!(take.tap.is_none());
+        let mut all: Vec<f32> = streamed.into_iter().flatten().collect();
+        all.extend(frames.iter().flatten());
+        assert_eq!(all, resample(take.samples, rate).unwrap());
     }
 
     #[test]

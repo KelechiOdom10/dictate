@@ -6,6 +6,8 @@
 //!   audio::start / audio::stop  ->  Vec<f32>  (16 kHz, mono, in memory)
 //!   transcribe::transcribe      ->  String
 //!   transcribe::transcribe_timed -> Vec<Word>  (ms times, for Annotate)
+//!   audio::frames -> transcribe::LiveTake -> String
+//!                               (Parakeet: decode 100 ms frames while recording)
 //!   insert::paste               ->  ()       (into the focused app)
 //!
 //! Keep them separate. A pipeline that only works end to end is a pipeline
@@ -72,6 +74,8 @@ struct Runtime {
     /// Set while an Annotate session records: its clock and what was known at
     /// the start tap.
     annotate_started: Option<(Instant, annotate::Started)>,
+    /// The dictation take being decoded while it records, with Parakeet.
+    live: Option<transcribe::LiveTake>,
 }
 
 /// What we know at key-down: when the take began and which app had focus.
@@ -305,7 +309,7 @@ fn finish_dictation(app: AppHandle) -> Result<String, String> {
         .clone();
     save_debug_recording(&app, &samples, settings.debug_recordings);
     let model = active_model_path(&app)?;
-    let text = output_text(&dictation_text(&samples, &model)?.text, &settings);
+    let text = output_text(&dictation_text(&samples, &model, None)?.text, &settings);
     if !text.is_empty() {
         insert::paste(&app, &text, insert::Delivery::from_settings(&settings))?;
     }
@@ -473,7 +477,13 @@ struct Transcript {
     skip_reason: Option<String>,
 }
 
-fn dictation_text(samples: &[f32], model: &Path) -> Result<Transcript, Problem> {
+/// The take's text, from `live` when the take was decoded while it recorded,
+/// else in one batch. A skipped take discards `live`.
+fn dictation_text(
+    samples: &[f32],
+    model: &Path,
+    live: Option<transcribe::LiveTake>,
+) -> Result<Transcript, Problem> {
     if let Some(reason) = take_skip_reason(samples) {
         log::info!("[hotkey] skipped: {reason}");
         return Ok(Transcript {
@@ -483,7 +493,10 @@ fn dictation_text(samples: &[f32], model: &Path) -> Result<Transcript, Problem> 
         });
     }
     let started = Instant::now();
-    let text = transcribe::transcribe(samples, model)?;
+    let text = match live {
+        Some(live) => live.finish(samples)?,
+        None => transcribe::transcribe(samples, model)?,
+    };
     let inference_ms = Some(started.elapsed().as_millis() as i64);
     if !transcript_has_text(&text) {
         log::info!("[hotkey] skipped: transcript has no letters or numbers");
@@ -987,6 +1000,7 @@ fn hotkey(
             return;
         }
         runtime.phase = Phase::Recording;
+        runtime.live = start_live_take(&model);
         surface::set_phase(app, "recording");
         let take_id = runtime.take_id;
         drop(runtime);
@@ -1024,6 +1038,7 @@ fn hotkey(
         let retention = runtime.settings.history_retention;
         let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
         let settings = runtime.settings.clone();
+        let live = runtime.live.take();
         match audio::stop() {
             Ok(samples) => {
                 if settings.sound_feedback {
@@ -1036,7 +1051,7 @@ fn hotkey(
                 tauri::async_runtime::spawn_blocking(move || {
                     save_debug_recording(&app, &samples, settings.debug_recordings);
                     let delivery = insert::Delivery::from_settings(&settings);
-                    let transcript = dictation_text(&samples, &model).map(|t| Transcript {
+                    let transcript = dictation_text(&samples, &model, live).map(|t| Transcript {
                         text: output_text(&t.text, &settings),
                         ..t
                     });
@@ -1132,6 +1147,7 @@ fn hotkey(
                 runtime.phase = Phase::Idle;
                 surface::set_phase(app, "idle");
                 drop(runtime);
+                drop(live);
                 record_take(
                     app,
                     &failed_capture(
@@ -1144,6 +1160,21 @@ fn hotkey(
                 );
                 report_error(app, &error);
             }
+        }
+    }
+}
+
+/// Starts decoding the take that just started recording, when `model` streams.
+/// Without it the take is transcribed in one batch at release.
+fn start_live_take(model: &Path) -> Option<transcribe::LiveTake> {
+    if !transcribe::streams(model) {
+        return None;
+    }
+    match audio::frames() {
+        Ok(frames) => transcribe::LiveTake::start(model, frames),
+        Err(error) => {
+            log::warn!("[dictate] no live frames, will transcribe at release: {error}");
+            None
         }
     }
 }
@@ -1824,6 +1855,7 @@ pub fn run() {
                     annotate: annotate::Phase::Idle,
                     annotate_registered,
                     annotate_started: None,
+                    live: None,
                 },
             );
             if let Some(model) = pending {
@@ -1930,6 +1962,7 @@ mod take_tests {
             annotate: annotate::Phase::Idle,
             annotate_registered: false,
             annotate_started: None,
+            live: None,
         }
     }
 
@@ -2382,7 +2415,7 @@ mod take_tests {
         assert!(take_skip_reason(&vec![0.002; 16_000]).is_some());
         assert!(take_skip_reason(&[]).is_some());
         for samples in [vec![0.0; 32_000], vec![0.2; 2_400]] {
-            let transcript = dictation_text(&samples, Path::new("/nonexistent.bin")).unwrap();
+            let transcript = dictation_text(&samples, Path::new("/nonexistent.bin"), None).unwrap();
             assert_eq!(transcript.text, "");
             assert_eq!(transcript.inference_ms, None);
             assert!(transcript.skip_reason.is_some());
