@@ -77,12 +77,7 @@ export default function SettingsWindow({
   }, []);
   useEffect(() => {
     if (!navigationReady || !settings.isFetched) return;
-    let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(
-        () => void invoke("settings_ready").catch(console.error),
-      );
-    });
-    return () => cancelAnimationFrame(frame);
+    void invoke("settings_ready").catch(console.error);
   }, [navigationReady, settings.isFetched]);
   const version = useQuery({ queryKey: ["version"], queryFn: getVersion });
   return (

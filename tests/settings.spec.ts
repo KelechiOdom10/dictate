@@ -35,6 +35,7 @@ async function openSettings(
     stored = {},
     pendingPage = null,
     delayCapture = false,
+    suspendFrames = false,
   }: {
     failLoad?: boolean;
     startupError?: { title: string; fix: string; detail: string | null } | null;
@@ -43,6 +44,7 @@ async function openSettings(
     stored?: Record<string, unknown>;
     pendingPage?: string | null;
     delayCapture?: boolean;
+    suspendFrames?: boolean;
   } = {},
 ) {
   await page.route("http://dictate.test/**", async (route) => {
@@ -79,7 +81,9 @@ async function openSettings(
       stored,
       pendingPage,
       delayCapture,
+      suspendFrames,
     }) => {
+      if (suspendFrames) window.requestAnimationFrame = () => 1;
       const denied: string[] = [];
       Object.defineProperty(window, "__deniedCommands", { value: denied });
       let status = { phase: "idle", error: startupError };
@@ -126,7 +130,7 @@ async function openSettings(
         micMode: "onDemand",
         soundFeedback: false,
         debugRecordings: false,
-        annotateShortcut: "Alt+Shift+KeyS",
+        annotateShortcut: "Alt+Shift+KeyA",
         annotateEnabled: true,
         annotateShowInRecordings: false,
         ...stored,
@@ -193,6 +197,13 @@ async function openSettings(
               });
             }
             if (command === "settings_ready") {
+              Object.defineProperty(window, "__readyAppearance", {
+                value: {
+                  theme: document.documentElement.dataset.theme,
+                  mode: document.documentElement.dataset.mode,
+                },
+                configurable: true,
+              });
               if (!listeners.get("settings-page")?.length)
                 throw "Navigation is not listening";
               if (pendingPage) emit("settings-page", pendingPage);
@@ -247,6 +258,7 @@ async function openSettings(
       stored,
       pendingPage,
       delayCapture,
+      suspendFrames,
     },
   );
   await page.goto(
@@ -432,7 +444,7 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           micMode: "onDemand",
           soundFeedback: false,
           debugRecordings: false,
-          annotateShortcut: "Alt+Shift+KeyS",
+          annotateShortcut: "Alt+Shift+KeyA",
           annotateEnabled: true,
           annotateShowInRecordings: false,
         },
@@ -608,7 +620,7 @@ test("overlay applies appearance events live, including System changes", async (
                 micMode: "onDemand",
                 soundFeedback: false,
                 debugRecordings: false,
-                annotateShortcut: "Alt+Shift+KeyS",
+                annotateShortcut: "Alt+Shift+KeyA",
                 annotateEnabled: true,
                 annotateShowInRecordings: false,
               },
@@ -798,7 +810,7 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 micMode: "onDemand",
                 soundFeedback: false,
                 debugRecordings: false,
-                annotateShortcut: "Alt+Shift+KeyS",
+                annotateShortcut: "Alt+Shift+KeyA",
                 annotateEnabled: true,
                 annotateShowInRecordings: false,
               },
@@ -906,7 +918,55 @@ for (const exit of ["tab", "window-blur", "navigation"]) {
   });
 }
 
-test("wrapped History selection keeps the thumb on the selected row", async ({
+for (const mode of ["light", "dark"] as const) {
+  test(`normal-width History shows the default Annotate shortcut in ${mode}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 720, height: 580 });
+    await page.emulateMedia({ colorScheme: mode, reducedMotion: "reduce" });
+    await openSettings(page);
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    const annotations = page.getByRole("radio", {
+      name: "Annotations",
+      exact: true,
+    });
+    await annotations.check();
+    await expect(
+      page.getByText("No annotations yet", { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("main .ui-keycaps kbd")).toHaveText([
+      "⌥",
+      "⇧",
+      "A",
+    ]);
+    expect(
+      await annotations.evaluate((input) => input.parentElement!.offsetTop),
+    ).toBe(
+      await page
+        .getByRole("radio", { name: "Dictations", exact: true })
+        .evaluate((input) => input.parentElement!.offsetTop),
+    );
+    await page.evaluate(() => document.fonts.ready);
+    await page.screenshot({
+      path: `target/visibility-fix/history-default-${mode}.png`,
+    });
+  });
+}
+
+test("History preserves an explicitly saved Annotate shortcut", async ({
+  page,
+}) => {
+  await openSettings(page, { stored: { annotateShortcut: "Alt+Shift+KeyS" } });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("radio", { name: "Annotations", exact: true }).check();
+  await expect(page.locator("main .ui-keycaps kbd")).toHaveText([
+    "⌥",
+    "⇧",
+    "S",
+  ]);
+});
+
+test("forced 140px stress case keeps the wrapped History thumb on the selected row", async ({
   page,
 }) => {
   await openSettings(page);
@@ -936,6 +996,35 @@ test("wrapped History selection keeps the thumb on the selected row", async ({
   ).toBeVisible();
   await page.screenshot({ path: "target/independent-qa/wrapped-history.png" });
 });
+
+for (const failLoad of [false, true]) {
+  test(`Settings readiness does not wait for hidden animation frames, load failure ${failLoad}`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await openSettings(page, {
+      suspendFrames: true,
+      failLoad,
+      stored: { theme: "paper", appearanceMode: "dark" },
+      pendingPage: "Annotate",
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as { __readyAppearance?: unknown })
+              .__readyAppearance,
+        ),
+      )
+      .toEqual({
+        theme: failLoad ? "ember" : "paper",
+        mode: failLoad ? "light" : "dark",
+      });
+    await expect(
+      page.getByRole("heading", { name: "Annotate", level: 1, exact: true }),
+    ).toBeVisible();
+  });
+}
 
 test("Settings readiness receives queued notice navigation and retains the recovery problem", async ({
   page,

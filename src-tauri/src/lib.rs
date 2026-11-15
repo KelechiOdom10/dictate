@@ -954,14 +954,21 @@ fn show_settings(app: &AppHandle) {
     let state = app.state::<Mutex<SettingsVisibility>>();
     let mut visibility = state.lock().unwrap_or_else(|error| error.into_inner());
     visibility.requested = true;
+    log::info!("[settings] show requested, ready={}", visibility.ready);
     if visibility.ready
         && let Some(window) = app.get_webview_window("settings")
     {
         if let Some(page) = visibility.page.take() {
             let _ = window.emit("settings-page", page);
         }
-        let _ = window.show();
-        let _ = window.set_focus();
+        if let Err(error) = window.show() {
+            log::warn!("[settings] show failed: {error}");
+            return;
+        }
+        log::info!("[settings] window shown");
+        if let Err(error) = window.set_focus() {
+            log::warn!("[settings] focus failed: {error}");
+        }
     }
 }
 
@@ -974,6 +981,10 @@ fn settings_ready(app: AppHandle) {
             return;
         }
         visibility.ready = true;
+        log::info!(
+            "[settings] webview ready, requested={}",
+            visibility.requested
+        );
         visibility.requested
     };
     if requested {

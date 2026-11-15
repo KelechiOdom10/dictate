@@ -1,9 +1,11 @@
 # QA round 3 walkthrough
 
 Settings starts hidden. Once the stored theme has loaded (or loading has failed),
-React waits for the navigation listener and a paint, then tells Rust it is ready.
-Rust shows the window only
-if launch or activation requested it. This avoids the initial white frame and
+React applies the theme in a layout effect, then announces readiness after
+settings have settled and the navigation listener is attached. Readiness never
+waits for an animation frame: a hidden native webview may suspend frames until
+it is shown. Rust shows the window only if launch or activation requested it.
+This prepares the theme before the first visible frame and
 preserves silent login launch. Closing hides Settings; reopening from the Dock,
 Finder or Spotlight requests it again. Its default size is 720 × 580; content
 scrolls rather than shrinking the controls.
@@ -48,6 +50,20 @@ releasing the take lock and joins the discarded decoder off the UI thread.
 The shortcut recorder enters capture state before awaiting native confirmation,
 so Tab, blur and navigation can cancel a pending request without a late success
 reopening it. Wrapped segmented controls track both axes of their selected row.
+
+The first native attempt left Settings hidden. The earlier readiness gate had
+a circular dependency: the hidden window waited for two animation frames before
+allowing Rust to show it. A suspended-frame browser regression fails that earlier code and
+checks that readiness now completes with the stored theme, or the fallback
+theme when settings loading fails. This is regression evidence, not a native
+pass. The native log now records Settings show requests, webview readiness and
+show success/failure to make the next owner check diagnosable.
+
+The earlier wrapped-History screenshot deliberately injected a 140px maximum
+width and used an old saved-shortcut fixture. Normal History keeps both tabs
+on one row at the 720px default window width. The default fixture now matches
+Rust's new Annotate shortcut, ⌥⇧A; a separate test preserves an explicitly saved
+⌥⇧S setting. Existing user shortcuts are not changed.
 
 ## Manual verification
 
@@ -96,7 +112,7 @@ server. These commands have not been used to launch a native instance by the
 reviewer; port 1437 must be free, and Vite will fail rather than choose another:
 
 ```sh
-cd /Users/kelechiodom/.capy/worktrees/jam_01M7GEN019XF8W6HQQD5ADDRNJ/dictate
+cd /Users/kelechiodom/.capy/worktrees/jam_01M7GEN019XF8W6HQQD5ADDRNJ/dictate-settings-visibility
 export PATH="$HOME/.nvm/versions/node/v24.22.2/bin:/opt/homebrew/bin:$PATH"
 source "$HOME/.cargo/env"
 export CARGO_TARGET_DIR="$HOME/Projects/dictate/target"

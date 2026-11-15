@@ -1,4 +1,10 @@
-import { useEffect, useState, useRef, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useRef,
+  type CSSProperties,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { listen } from "@tauri-apps/api/event";
@@ -202,7 +208,7 @@ function Appearance({
       void subscription.then((stop) => stop()).catch(console.error);
     };
   }, [onError, canReportRefreshError]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const system = matchMedia("(prefers-color-scheme: dark)");
     const root = document.documentElement;
     let frame = 0;
