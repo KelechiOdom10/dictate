@@ -333,6 +333,9 @@ p {
   .ui-spin {
     animation: none;
   }
+  .ui-level-bars span {
+    transition: none;
+  }
 }
 .story-stack {
   display: grid;

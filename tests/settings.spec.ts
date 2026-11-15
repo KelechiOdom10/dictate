@@ -268,7 +268,8 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
       "*",
     ),
   );
-  await expect(page.locator("kbd")).toHaveText(["⌃", "D"]);
+  await expect(page.getByRole("alert")).toContainText("Shortcut unavailable");
+  await expect(page.locator("kbd")).toHaveCount(0);
   await page.evaluate(() =>
     window.postMessage(
       {
@@ -291,6 +292,17 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
     ),
   );
   await expect(page.getByRole("status")).toHaveText("Transcribing…");
+  await page.evaluate(() =>
+    window.postMessage(
+      {
+        type: "dictate-test",
+        event: "dictation-state",
+        payload: { phase: "idle", error: null },
+      },
+      "*",
+    ),
+  );
+  await expect(page.locator("kbd")).toHaveText(["⌃", "D"]);
   await page.evaluate(() =>
     window.postMessage(
       {
@@ -545,6 +557,12 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
           phase,
         );
         await expect(page.locator(`.ui-capsule-${phase}`)).toBeVisible();
+        if (phase === "error") await expect(page.locator("kbd")).toHaveCount(0);
+        if (phase === "recording")
+          await expect(page.locator(".ui-level-bars span").first()).toHaveCSS(
+            "transition-duration",
+            "0s",
+          );
         if (phase === "recording") {
           await page.evaluate(() =>
             window.postMessage(

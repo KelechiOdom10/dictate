@@ -111,7 +111,7 @@ function Overlay({ appearanceError }: { appearanceError: string | null }) {
               : undefined
           }
           shortcut={
-            status.phase === "idle" ? (
+            status.phase === "idle" && !error ? (
               <KeyboardShortcut value={settings.data?.shortcut ?? ""} />
             ) : undefined
           }
