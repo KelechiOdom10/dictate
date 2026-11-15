@@ -12,9 +12,8 @@ comparison panels.
 
 Import components from `src/ui`. `App.css` loads the shared stylesheet and tokens.
 The library has no Tauri imports. Settings still own native commands, query data,
-shortcut registration, microphone polling and saving. The overlay keeps its
-existing status/shortcut display; its timer and live pipeline states are stories
-until a later task supplies those values.
+shortcut registration, microphone polling and saving. The overlay renders real pipeline states, a per-take timer and RMS input levels.
+See [recording-overlay.md](recording-overlay.md) for its native boundary and manual checks.
 
 ## Contracts
 
@@ -33,7 +32,7 @@ until a later task supplies those values.
 | DetailPanel                | Title, metadata rows and body children keep transcript formatting out of the primitive.                                                                                                               |
 | SearchField                | Label/value/onChange supports filtering. Clear restores input focus.                                                                                                                                  |
 | LevelMeter                 | A normalized 0–1 value drives bars and a labelled native meter. The caller supplies live readings.                                                                                                    |
-| RecordingCapsule           | A discriminated state requires timer/level only while recording and a message only for ready/error. Caller owns timing; status announcements never include a live timer. An optional notice is a secondary line that preserves the phase and timer.                              |
+| RecordingCapsule           | A discriminated state requires timer/level only while recording and a message only for ready/error; skipped supplies a quiet retry instruction. Caller owns timing; status announcements never include a live timer. An optional notice is a secondary line that preserves the phase and timer.                              |
 | ModelCard                  | Name, description, illustrative ratings, size and badge describe the model. A status union requires download/retry callbacks or progress only when relevant.                                          |
 | ProgressBar                | A labelled 0–100 value; omit value for indeterminate work.                                                                                                                                            |
 | EmptyState                 | Title/body and optional action children cover empty results and first use.                                                                                                                            |

@@ -11,6 +11,7 @@ export const settingsSchema = z
     microphone: z.string().nullable(),
     launchAtLogin: z.boolean(),
     theme: z.enum(["ember", "paper"]),
+    overlayPosition: z.enum(["top", "bottom"]),
     appearanceMode: z.enum(["system", "light", "dark"]),
   })
   .strict() satisfies z.ZodType<Settings>;

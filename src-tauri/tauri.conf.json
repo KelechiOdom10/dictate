@@ -14,15 +14,18 @@
       {
         "label": "main",
         "title": "dictate",
-        "width": 460,
-        "height": 132,
+        "width": 360,
+        "height": 72,
         "resizable": false,
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "focus": false,
         "visible": false,
-        "center": true
+        "center": true,
+        "transparent": true,
+        "focusable": false,
+        "shadow": false
       },
       {
         "label": "settings",
@@ -38,7 +41,8 @@
     ],
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

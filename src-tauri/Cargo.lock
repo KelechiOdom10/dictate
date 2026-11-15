@@ -844,6 +844,7 @@ dependencies = [
 name = "dictate"
 version = "0.1.0"
 dependencies = [
+ "core-foundation",
  "core-graphics",
  "cpal",
  "hound",

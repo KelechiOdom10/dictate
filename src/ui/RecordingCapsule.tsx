@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Check, CircleAlert, LoaderCircle, Mic } from "lucide-react";
+import { Check, CircleAlert, LoaderCircle, Mic, MicOff } from "lucide-react";
 
 export function LevelMeter({
   level,
@@ -30,6 +30,7 @@ export type RecordingState =
   | { kind: "recording"; seconds: number; level?: number }
   | { kind: "transcribing" }
   | { kind: "done" }
+  | { kind: "skipped" }
   | { kind: "error"; message: string }
   | { kind: "ready"; message: string };
 export function RecordingCapsule({
@@ -46,6 +47,7 @@ export function RecordingCapsule({
     recording: "Recording",
     transcribing: "Transcribing…",
     done: "Text inserted",
+    skipped: "No speech captured",
     error: "Something went wrong",
   };
   const icons: Record<RecordingState["kind"], ReactNode> = {
@@ -53,6 +55,7 @@ export function RecordingCapsule({
     recording: <span className="ui-record-dot" />,
     transcribing: <LoaderCircle size={18} className="ui-spin" />,
     done: <Check size={18} />,
+    skipped: <MicOff size={18} />,
     error: <CircleAlert size={18} />,
   };
   return (
@@ -63,6 +66,11 @@ export function RecordingCapsule({
         role={state.kind === "error" ? "alert" : "status"}
       >
         <span>{labels[state.kind]}</span>
+        {state.kind === "skipped" && (
+          <span className="ui-capsule-message">
+            Hold the shortcut and speak a little longer.
+          </span>
+        )}
         {notice && <span className="ui-capsule-message">{notice}</span>}
         {(state.kind === "ready" || state.kind === "error") && (
           <span className="ui-capsule-message">{state.message}</span>
