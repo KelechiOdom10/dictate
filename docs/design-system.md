@@ -1,7 +1,7 @@
 # The dictate design system
 
 The chosen direction is warm and quiet: Paper’s off-white and charcoal surfaces,
-ink actions, and Instrument Sans. Ember is the default; its orange only means
+ink actions, and Geist. Ember is the default; its orange only means
 recording, live input or an enabled switch. Paper uses ink for those same roles.
 General › Appearance saves Theme (Ember / Paper) and Mode (System / Light / Dark)
 in the Rust settings file. Both webviews consume the same settings event. App
@@ -94,7 +94,7 @@ control heights are 28 / 32 / 40px, type 12 / 13 / 14px, horizontal padding
 use the default `md`. The “Controls side by side” story measures the rendered
 height, font size, horizontal padding and gaps as well as showing the comparison.
 
-Instrument Sans is bundled as a local variable WOFF2 face for weights 400/500/600,
+Geist is bundled as a local variable WOFF2 face for weights 400/500/600,
 with -apple-system and system-ui fallbacks. Its OFL licence and pinned download
 source are beside the font. No runtime font request leaves the app. Labels and md
 controls use 13px; helper text and section headings use 12px; page titles use 22px.

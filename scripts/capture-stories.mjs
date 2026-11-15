@@ -140,14 +140,13 @@ try {
         await page.evaluate(async () => {
           await document.fonts.ready;
           for (const weight of [400, 500, 600]) {
-            await document.fonts.load(`${weight} 13px "Instrument Sans"`);
-            if (!document.fonts.check(`${weight} 13px "Instrument Sans"`))
+            await document.fonts.load(`${weight} 13px "Geist"`);
+            if (!document.fonts.check(`${weight} 13px "Geist"`))
               throw new Error(`Font weight ${weight} unavailable`);
           }
           if (
             ![...document.fonts].some(
-              (face) =>
-                face.family === "Instrument Sans" && face.status === "loaded",
+              (face) => face.family === "Geist" && face.status === "loaded",
             )
           )
             throw new Error("Bundled font did not load");

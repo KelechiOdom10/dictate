@@ -171,7 +171,7 @@ export const ControlsSideBySide: Story = {
       <div className="control-comparison">
         <h1>Controls side by side</h1>
         <p className="ui-preview">
-          One scale · Instrument Sans · height / text / icon / gap
+          One scale · Geist · height / text / icon / gap
         </p>
         {(["sm", "md", "lg"] as const).map((size) => (
           <section key={size}>

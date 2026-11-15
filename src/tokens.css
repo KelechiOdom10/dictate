@@ -1,13 +1,13 @@
 @font-face {
-  font-family: "Instrument Sans";
-  src: url("./assets/fonts/instrument-sans-latin.woff2") format("woff2");
+  font-family: "Geist";
+  src: url("./assets/fonts/geist-latin.woff2") format("woff2");
   font-style: normal;
   font-weight: 400 600;
   font-display: swap;
 }
 :root {
   font-family:
-    "Instrument Sans",
+    "Geist",
     -apple-system,
     system-ui,
     sans-serif;
