@@ -101,13 +101,15 @@ export default function General({
   const settings = query.data;
   const busy = mutation.isPending;
   const installed = (models.data ?? []).filter(
-    (model) => model.state.kind === "installed" || model.active,
+    (model) => model.state.kind === "installed",
   );
-  const modelMissing =
+  const activeMissing =
     models.data !== undefined &&
-    !models.data.some(
-      (model) => model.active && model.state.kind === "installed",
-    );
+    !installed.some((model) => model.id === settings.speechModel);
+  const noneInstalled = models.data !== undefined && installed.length === 0;
+  const activeName =
+    models.data?.find((model) => model.id === settings.speechModel)?.name ??
+    settings.speechModel;
   return (
     <>
       <SettingsGroup
@@ -155,13 +157,19 @@ export default function General({
           id="speech-model"
           label="Speech model"
           help={
-            modelMissing ? (
+            noneInstalled ? (
               <span className="row-warning">
                 No speech model yet. Download one to start dictating.
               </span>
             ) : (
               <>
-                Used for every dictation.{" "}
+                {activeMissing ? (
+                  <span className="row-warning">
+                    {activeName} isn’t installed. Choose another model.
+                  </span>
+                ) : (
+                  "Used for every dictation."
+                )}{" "}
                 <button
                   type="button"
                   className="row-link"
@@ -173,7 +181,7 @@ export default function General({
             )
           }
         >
-          {modelMissing ? (
+          {noneInstalled ? (
             <Button
               id="speech-model"
               aria-label="Download a model"
@@ -188,16 +196,18 @@ export default function General({
               id="speech-model"
               aria-describedby="speech-model-help"
               value={settings.speechModel}
-              disabled={busy || recording || installed.length < 2}
+              disabled={
+                busy || recording || (!activeMissing && installed.length < 2)
+              }
               onChange={(e) =>
                 void save({
                   speechModel: speechModelSchema.parse(e.target.value),
                 })
               }
             >
-              {installed.length === 0 && (
-                <option value={settings.speechModel}>
-                  {settings.speechModel}
+              {activeMissing && (
+                <option value={settings.speechModel} disabled>
+                  {activeName} (not installed)
                 </option>
               )}
               {installed.map((model) => (

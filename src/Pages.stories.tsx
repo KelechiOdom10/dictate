@@ -303,6 +303,26 @@ export const GeneralNoModel: Story = {
     ).toBeVisible();
   },
 };
+export const GeneralActiveModelMissing: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], { states: { "small.en": { kind: "installed" } } }),
+  render: () => <GeneralPage />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(
+      await c.findByText("Base English isn’t installed. Choose another model."),
+    ).toBeVisible();
+    await expect(
+      c.queryByRole("button", { name: "Download a model" }),
+    ).not.toBeInTheDocument();
+    const select = c.getByRole("combobox", { name: "Speech model" });
+    await expect(select).toBeEnabled();
+    await userEvent.selectOptions(select, "small.en");
+    await waitFor(() => expect(select).toHaveValue("small.en"));
+    await expect(c.queryByText(/isn’t installed/)).not.toBeInTheDocument();
+  },
+};
+
 export const GeneralLoading: Story = {
   beforeEach: () => {
     mockWindows("settings");
