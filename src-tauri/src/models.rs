@@ -150,6 +150,8 @@ pub enum ModelState {
         total: u64,
         cancelling: bool,
     },
+    /// Copying a model dictate used before the Models page existed.
+    Preparing,
     Installed,
     Failed {
         message: String,
@@ -207,6 +209,7 @@ enum Job {
         total: u64,
         cancel: Arc<AtomicBool>,
     },
+    Preparing,
     Failed(String),
 }
 
@@ -232,6 +235,12 @@ impl Downloads {
             },
         );
         Ok(cancel)
+    }
+
+    /// Marks `model` as being adopted from a legacy file, which owns its
+    /// destination like a download does. `finish` ends it.
+    pub fn prepare(&mut self, model: SpeechModel) {
+        self.jobs.insert(model, Job::Preparing);
     }
 
     pub fn progress(&mut self, model: SpeechModel, bytes: u64) {
@@ -266,7 +275,10 @@ impl Downloads {
     }
 
     pub fn is_running(&self, model: SpeechModel) -> bool {
-        matches!(self.jobs.get(&model), Some(Job::Running { .. }))
+        matches!(
+            self.jobs.get(&model),
+            Some(Job::Running { .. } | Job::Preparing)
+        )
     }
 
     pub fn state(&self, model: SpeechModel, installed: bool) -> ModelState {
@@ -280,6 +292,7 @@ impl Downloads {
                 total: *total,
                 cancelling: cancel.load(Ordering::Relaxed),
             },
+            Some(Job::Preparing) => ModelState::Preparing,
             Some(Job::Failed(message)) if !installed => ModelState::Failed {
                 message: message.clone(),
             },
@@ -482,6 +495,9 @@ fn download(
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_recv_response(Some(stall))
+        // Just past `stall`, so `Watched` reports the stall first, and the
+        // reader thread then lets go of the socket after a cancel or stall.
+        .timeout_per_read(Some(stall + Duration::from_secs(1)))
         .build()
         .into();
     let response = agent
@@ -526,6 +542,21 @@ pub fn legacy_candidates() -> Vec<PathBuf> {
         .into_iter()
         .chain(CATALOG.iter().map(|info| checkout.join(info.file_name)))
         .collect()
+}
+
+/// The model `adopt_legacy` will most likely adopt, judged by file size alone
+/// so it is instant: `None` when a model is installed or no candidate fits.
+pub fn legacy_pending(dir: &Path, candidates: &[PathBuf]) -> Option<SpeechModel> {
+    if CATALOG.iter().any(|info| path(dir, info.id).is_file()) {
+        return None;
+    }
+    candidates.iter().find_map(|candidate| {
+        let len = fs::metadata(candidate).ok()?.len();
+        CATALOG
+            .iter()
+            .find(|info| info.bytes == len)
+            .map(|info| info.id)
+    })
 }
 
 /// When no model is installed, copies the first legacy file whose size and
@@ -869,6 +900,64 @@ mod tests {
     }
 
     #[test]
+    fn preparing_a_legacy_model_blocks_downloading_it_until_finished() {
+        let mut downloads = Downloads::default();
+        downloads.prepare(SpeechModel::BaseEn);
+        assert_eq!(
+            downloads.state(SpeechModel::BaseEn, false),
+            ModelState::Preparing
+        );
+        assert!(downloads.is_running(SpeechModel::BaseEn));
+        assert!(downloads.begin(SpeechModel::BaseEn).is_err());
+        assert!(!downloads.cancel(SpeechModel::BaseEn));
+        downloads.finish(SpeechModel::BaseEn, &Ok(()));
+        assert_eq!(
+            downloads.state(SpeechModel::BaseEn, true),
+            ModelState::Installed
+        );
+    }
+
+    #[test]
+    fn a_cancelled_download_closes_its_connection_once_the_read_times_out() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/model.bin", listener.local_addr().unwrap());
+        let (closed, closed_at) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhe").unwrap();
+            stream.flush().unwrap();
+            let mut rest = [0; 16];
+            let _ = closed.send(stream.read(&mut rest).map(|read| read == 0));
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            flag.store(true, Ordering::Relaxed);
+        });
+        let stall = Duration::from_millis(400);
+        let result = download(
+            &url,
+            5,
+            HELLO_SHA256,
+            &dir.path().join("model.bin"),
+            &cancel,
+            stall,
+            |_| {},
+        );
+        assert_eq!(result, Err(DownloadError::Cancelled));
+        assert!(
+            closed_at
+                .recv_timeout(Duration::from_secs(3))
+                .is_ok_and(|eof| eof.unwrap_or(true)),
+            "the reader thread still holds the socket"
+        );
+    }
+
+    #[test]
     fn watched_reader_passes_bytes_through_in_order() {
         let source: Vec<u8> = (0..=255).cycle().take(600_000).collect();
         let mut read = Vec::new();
@@ -904,14 +993,20 @@ mod tests {
         assert_eq!(adopt_legacy(&models, &[missing, wrong.clone()]), None);
         assert!(!models.exists() || files(&models).is_empty());
         assert!(wrong.is_file(), "the original stays put");
+        assert_eq!(
+            legacy_pending(&models, &[checkout.path().join("missing"), wrong.clone()]),
+            Some(SpeechModel::TinyEn),
+            "a size match is pending until its checksum is checked"
+        );
 
         fs::create_dir_all(&models).unwrap();
         fs::write(path(&models, SpeechModel::SmallEn), b"x").unwrap();
         assert_eq!(
-            adopt_legacy(&models, &[wrong]),
+            adopt_legacy(&models, std::slice::from_ref(&wrong)),
             None,
             "a model is installed"
         );
+        assert_eq!(legacy_pending(&models, &[wrong]), None);
     }
 
     /// Adopts the real base.en from this checkout's `models/` when present.

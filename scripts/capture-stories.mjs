@@ -31,6 +31,8 @@ const modelsReady = {
     page.getByText(/Download a model to start dictating/).waitFor(),
   "pages--models-downloading": (page) =>
     page.getByText("205 MB of 488 MB").waitFor(),
+  "pages--models-preparing": (page) =>
+    page.getByText("Preparing your model…").waitFor(),
   "pages--models-installed": (page) =>
     page.getByRole("button", { name: "Use Small English" }).waitFor(),
   "pages--models-error": (page) =>

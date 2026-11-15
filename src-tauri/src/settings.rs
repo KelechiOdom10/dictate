@@ -372,6 +372,28 @@ mod tests {
         assert_eq!(value["launchAtLogin"], true);
     }
 
+    /// "Unload model after N minutes idle" was dropped because whisper-cli
+    /// runs once per take, so no model stays loaded. A file that has the key
+    /// still loads.
+    #[test]
+    fn a_dropped_unload_model_setting_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"version":1,"soundFeedback":true,"unloadModelAfterMinutes":5}"#,
+        )
+        .unwrap();
+        let settings = load(&path).unwrap();
+        assert!(settings.sound_feedback);
+        assert_eq!(
+            serde_json::to_value(&settings)
+                .unwrap()
+                .get("unloadModelAfterMinutes"),
+            None
+        );
+    }
+
     #[test]
     fn corrupt_or_invalid_settings_are_backed_up_before_using_defaults() {
         let dir = tempfile::tempdir().unwrap();

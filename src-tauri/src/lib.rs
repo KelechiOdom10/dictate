@@ -541,6 +541,42 @@ fn download_model(app: AppHandle, model: SpeechModel) -> Result<(), String> {
     Ok(())
 }
 
+/// Copies and verifies a model from before the Models page, off the launch
+/// path (it hashes up to 1.6 GB). The Models page shows it as preparing.
+fn adopt_legacy_model(app: &AppHandle, pending: SpeechModel, dir: &Path, candidates: &[PathBuf]) {
+    let adopted = models::adopt_legacy(dir, candidates);
+    if let Ok(mut downloads) = app.state::<Models>().downloads.lock() {
+        downloads.finish(pending, &Ok(()));
+    }
+    if let Some(model) = adopted {
+        let state = app.state::<Mutex<Runtime>>();
+        let saved = state
+            .lock()
+            .map_err(|e| e.to_string())
+            .and_then(|mut runtime| {
+                if models::path(dir, runtime.settings.speech_model).is_file() {
+                    return Ok(None);
+                }
+                let mut settings = runtime.settings.clone();
+                settings.speech_model = model;
+                app.persist(&settings)?;
+                runtime.settings = settings.clone();
+                Ok(Some(settings))
+            });
+        match saved {
+            Ok(Some(mut settings)) => {
+                settings.launch_at_login = app.autolaunch().is_enabled().unwrap_or(false);
+                if let Err(error) = app.emit("settings-changed", &settings) {
+                    log::warn!("[models] emit adopted model: {error}");
+                }
+            }
+            Ok(None) => {}
+            Err(error) => log::warn!("[models] save adopted model: {error}"),
+        }
+    }
+    models_changed(app);
+}
+
 #[tauri::command]
 fn cancel_download(app: AppHandle, model: SpeechModel) -> Result<(), String> {
     app.state::<Models>()
@@ -596,10 +632,23 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
     let previous = runtime.settings.clone();
     let shortcut_changed = runtime.save_settings(settings.clone(), &app)?;
     drop(runtime);
-    if (previous.mic_mode, &previous.microphone) != (settings.mic_mode, &settings.microphone)
-        && let Err(problem) = apply_mic_mode(&settings)
-    {
-        report_error(&app, &problem);
+    if (previous.mic_mode, &previous.microphone) != (settings.mic_mode, &settings.microphone) {
+        let app = app.clone();
+        // Opening the microphone takes 60–80 ms; keep the save responsive.
+        // Reading the settings again means the last toggle wins, whatever
+        // order these threads run in.
+        std::thread::spawn(move || {
+            let latest = app
+                .state::<Mutex<Runtime>>()
+                .lock()
+                .map(|runtime| runtime.settings.clone())
+                .map_err(|e| e.to_string());
+            if let Ok(latest) = latest
+                && let Err(problem) = apply_mic_mode(&latest)
+            {
+                report_error(&app, &problem);
+            }
+        });
     }
     if shortcut_changed {
         surface::clear_error(&app);
@@ -733,9 +782,19 @@ fn hotkey(
             app: focus::frontmost_app(),
         });
         surface::clear_error(app);
-        let result = audio::start_device(runtime.settings.microphone.clone()).map(|fallback| {
-            surface::set_notice(app, microphone_notice(fallback));
-        });
+        let sound_feedback = runtime.settings.sound_feedback;
+        let skip = if sound_feedback {
+            sound::START_SKIP
+        } else {
+            std::time::Duration::ZERO
+        };
+        let result =
+            audio::start_device(runtime.settings.microphone.clone(), skip).map(|fallback| {
+                if sound_feedback {
+                    sound::play(sound::Cue::Start);
+                }
+                surface::set_notice(app, microphone_notice(fallback));
+            });
         if let Err(error) = result {
             drop(runtime);
             report_error(app, &error);
@@ -743,9 +802,6 @@ fn hotkey(
         }
         runtime.phase = Phase::Recording;
         surface::set_phase(app, "recording");
-        if runtime.settings.sound_feedback {
-            sound::play(sound::Cue::Start);
-        }
         let take_id = runtime.take_id;
         drop(runtime);
         if let Err(error) = overlay::show(app) {
@@ -976,19 +1032,15 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let data_dir = app.path().app_data_dir()?;
-            let (mut settings, mut startup_error) =
+            let (settings, mut startup_error) =
                 settings::load_or_default(&data_dir.join("settings.json"));
             let models_dir = data_dir.join("models");
             let removed = models::remove_partials(&models_dir);
             if removed > 0 {
                 log::info!("[models] removed {removed} unfinished download(s)");
             }
-            if let Some(model) = models::adopt_legacy(&models_dir, &models::legacy_candidates()) {
-                settings.speech_model = model;
-                if let Err(error) = settings::save(&data_dir.join("settings.json"), &settings) {
-                    log::warn!("[models] save adopted model: {error}");
-                }
-            }
+            let legacy = models::legacy_candidates();
+            let pending = models::legacy_pending(&models_dir, &legacy);
             let store = history::Store::open(&data_dir.join("history.sqlite3")).and_then(|store| {
                 store
                     .prune(settings.history_retention, history::now_ms())
@@ -1005,10 +1057,18 @@ pub fn run() {
                 message
             });
             app.manage::<History>(Mutex::new(store));
+            let mut downloads = models::Downloads::default();
+            if let Some(model) = pending {
+                downloads.prepare(model);
+            }
             app.manage(Models {
-                dir: models_dir,
-                downloads: Mutex::default(),
+                dir: models_dir.clone(),
+                downloads: Mutex::new(downloads),
             });
+            if let Some(model) = pending {
+                let app = app.handle().clone();
+                std::thread::spawn(move || adopt_legacy_model(&app, model, &models_dir, &legacy));
+            }
             let shortcut_registered = match settings.chord().and_then(|chord| {
                 app.global_shortcut()
                     .register(chord)

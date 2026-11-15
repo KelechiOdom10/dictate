@@ -22,6 +22,7 @@ const modelStateSchema = z.discriminatedUnion("kind", [
       cancelling: z.boolean(),
     })
     .strict(),
+  z.object({ kind: z.literal("preparing") }).strict(),
   z.object({ kind: z.literal("installed") }).strict(),
   z.object({ kind: z.literal("failed"), message: z.string() }).strict(),
 ]) satisfies z.ZodType<ModelState>;
