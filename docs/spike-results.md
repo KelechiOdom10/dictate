@@ -169,3 +169,144 @@ reason; speak a sentence and confirm it pastes. Listen to the logged WAV and
 delete it afterward. Repeat with quiet speech and normal room noise. Physical
 hotkey, real-mic gate behavior, first/last phonemes, and focused-app insertion
 were not verified in this run; the seven-check gate remains open.
+
+## Annotate S1: overlay focus safety (R1), 15 November 2026
+
+Question (`docs/annotate-design.md` §3, §6 R1): can a full-screen overlay take
+mouse drags in pen mode without taking focus from the app being annotated?
+
+Spike: `src-tauri/examples/overlay_focus.rs`. One transparent Tauri webview
+window covers the main display (1512×982 pt). `tauri-nspanel` 2.1.1 turns it
+into an `NSPanel` subclass with `canBecomeKeyWindow = NO`, the
+`NonactivatingPanel` style bit (style mask 32900), level 1000 (screen saver),
+and `canJoinAllSpaces | fullScreenAuxiliary | stationary`. Every 3 s it
+switches between click-through (`set_ignore_cursor_events(true)`) and pen
+(`false`), for 60 s. A main-thread probe reads `NSApp.isActive`, the frontmost
+app, the panel's `isKeyWindow` and the mouse button at 60 Hz (about 3,180
+samples per run). The page reports every pointer event back through
+`document.title`, so the log shows whether the webview received the drag.
+
+**Why `tauri-nspanel` and not an `objc2` class swap.** Both do the same thing:
+`object_setClass` on Tauri's `NSWindow`, swapping it for an `NSPanel`
+subclass. `tauri-nspanel` is on crates.io, uses the same `objc2` 0.6 as this
+repo, and Handy (a Tauri dictation app) uses it in production (checked in
+Handy's `src-tauri/Cargo.toml`). It also handles two traps we would have to
+rediscover ourselves: it keeps the original class so the window can be swapped
+back before Tauri closes it, and `set_style_mask` syncs the private
+prevents-activation flag when the nonactivating bit changes. Doing the swap
+ourselves would mean about 40 lines of `unsafe` code to get the same result.
+
+**How it was driven.** Kelechi was not at the keyboard, so input was synthetic:
+CGEvents posted at the HID tap from a throwaway driver process. Every 100 ms it
+typed one character into a scratch TextEdit document. In each pen phase it drew
+two 120 pt circles on the overlay at 120 Hz. In each click-through phase it
+clicked TextEdit's title bar. At the end it saved the document and compared the
+text with what it typed. The driver is not committed (see the incident below).
+
+### Run 1: Tauri's default launch activation
+
+| Measure | Result |
+|---|---|
+| Pen phases: webview pointer events | 1,431 (10 phases, 20 drags, about 146 per phase) |
+| Pen phases: native drag points logged | 738 |
+| Pen phases: samples with `NSApp.isActive` true | **0** |
+| Any phase: samples with the panel as key window | **0** |
+| Click-through phases: webview pointer events | **0** (10 clicks, all landed on TextEdit) |
+| Frontmost app from 1.94 s to the end | TextEdit throughout |
+| Launch: `isActive` true | 101 samples, 0 to 1.92 s, until the first click on TextEdit |
+| Characters typed / arrived in TextEdit | 563 / 554 |
+
+Of the 9 missing characters, 3 were typed during the launch activation, so they
+went to the spike app. Each of the other **6** went missing during the second
+circle of a pen phase (about 4.7, 16.9, 29.0, 35.1, 47.2 and 53.3 s). Those
+times are estimates: run 1 did not timestamp each character. No character went
+missing during a click on TextEdit, or while nothing else was happening.
+
+### Run 2: `activate_ignoring_other_apps(false)`, overlay started 4 s after TextEdit
+
+`isActive` was **false in all samples from 23 ms onwards**, and TextEdit stayed
+frontmost through launch. This fixes the launch steal from run 1. The production
+app has the same default today (`lib.rs` never sets it), so launching dictate
+takes focus once. Set `activate_ignoring_other_apps(false)` in the real builder.
+
+The rest of run 2 is invalid. The driver picked the wrong TextEdit window
+(a 280×168 window at -15, 75), so its first title-bar click landed on iTerm2.
+iTerm2 became frontmost, which shows the click passed through the overlay to the
+app below. Across all 20 phases `isActive` stayed false and the panel was never
+key, but the typing went to iTerm2, not TextEdit.
+
+**Incident.** That misdirected input reached Kelechi's iTerm2: 576 characters
+(`abc…`, no Return key), then ⌘S and ⌘W. Afterwards no iTerm2 window was visible
+on the current Space. Synthetic runs stopped there, and the driver was deleted
+instead of committed. Check iTerm2 for a closed tab or stray input.
+
+### Verdict
+
+**R1 passes on focus and activation with `NSPanel`.** Pen mode as designed does
+not need a redesign. In 20 drags on a screen-saver-level non-activating panel,
+dictate never became active, the panel never became key, the frontmost app never
+changed, and the webview received every drag. In click-through, every click
+reached the app below and the webview received none.
+
+Two follow-ups before task 5 (pen mode):
+
+1. Set `activate_ignoring_other_apps(false)` (run 2), or every launch takes focus.
+2. The 6 characters lost during drags (about 1 per 3 drags, all near the end of
+   a drag) are **unexplained**. They may come from the synthetic input, since
+   the typing and the drag ran in two threads of one process, or AppKit may drop
+   keys while a mouse drag is tracked on another window. Settle it by hand with
+   the run below. If typing while dragging loses keys with real hands, pen mode
+   still works: you rarely type mid-stroke. Write it down either way.
+
+Manual check (one command, about 60 s): open TextEdit, click into a document, then
+
+```sh
+source "$HOME/.cargo/env"; cargo run --manifest-path src-tauri/Cargo.toml --example overlay_focus
+```
+
+Click back into TextEdit if needed. A badge at the top of the overlay names the
+current phase:
+
+- **PEN** (red edge): drag circles anywhere and type at the same time.
+- **CLICK-THROUGH** (green edge): click and type in TextEdit.
+
+At exit, the summary table should show `isActive` 0 and `key` 0, `webview` > 0
+in pen rows and 0 in click-through rows, and `R1 automatic checks: PASS`. Then
+check by eye that every character you typed reached TextEdit, including the ones
+typed mid-drag.
+
+## Annotate S2: ⌥⇧S tap or hold (R2), 15 November 2026
+
+**Not measured.** The spike is built and compiles:
+`src-tauri/examples/hotkey_tap_hold.rs` registers ⌥⇧S through
+`tauri-plugin-global-shortcut`, the same plugin and Carbon `RegisterEventHotKey`
+path (`global-hotkey` 0.8) as the dictation chord. It logs every Pressed and
+Released with ms times and the pointer position, and classifies each release
+with the 250 ms / 6 pt rule. A Pressed while one is already open counts as
+auto-repeat. A Released with no open Pressed counts as an orphan. It expects 20
+taps, then 10 holds of about 2 s, prints the confusion matrix and exits. A unit
+test covers the rule's edges (249 ms is a tap; 250 ms or 6.0 pt is a hold).
+
+It was not run with synthetic keys, for two reasons. The driver had just sent
+input to the wrong app (above). And synthetic key-downs do not show what real
+auto-repeat does, which is half of what R2 asks. It needs Kelechi's keyboard.
+
+Manual check (one command, about 2 minutes): focus a TextEdit document, so
+stray letters would show up there, then
+
+```sh
+source "$HOME/.cargo/env"; cargo run --manifest-path src-tauri/Cargo.toml --example hotkey_tap_hold
+```
+
+Follow the prompts: 20 quick taps, then 10 holds of about 2 s each, keeping the
+pointer still. Watch for:
+
+- `REPEAT while held` lines during the holds. Any of them mean auto-repeat sends
+  extra Pressed events, and the feature must ignore Pressed while a stroke is
+  open, as the design already says.
+- `MISMATCH` lines, or any `Released (no open Pressed)`.
+- `Í` or `S` appearing in TextEdit. That would mean the chord leaks to the
+  focused app.
+
+Pass: `R2: 30/30 correct -> PASS`, with 0 extra Pressed and 0 orphans. Put the
+matrix and the tap and hold duration ranges from the summary here.
