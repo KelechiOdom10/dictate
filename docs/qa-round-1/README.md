@@ -39,25 +39,52 @@ Tauri's development mode selects terminal-specific permission guidance.
 
 ## Manual checks for Kelechi
 
-No synthetic desktop input was used. Native menu screenshots are still missing.
+No synthetic desktop input was used, so these need your hands. Each step says
+what to look for. Attach the screenshots to PR #34.
 
-1. Run the app, click its menu bar icon, and capture the open menu in macOS
-   light and dark appearances. Repeat with Ember/Paper selected. Expand Speech
-   Model, choose an installed model, reopen it and check its tick and Settings.
-2. Dictate a sentence with History enabled. With a disposable document focused,
-   open the menu and choose Paste Last Dictation. Confirm text lands in that
-   document and the previous clipboard contents return. Choose Copy Last
-   Transcript and paste manually to verify it. No automatic desktop driver runs.
-3. Use Settings… and Quit dictate, including Command-comma and Command-Q.
-   Check for Updates… should show the coming-later notice.
-4. In a bundled app without Screen Recording permission, turn Annotate on.
-   Confirm macOS asks and lists dictate. Grant access, restart, and confirm the
-   status says Allowed. Repeat via Open System Settings when access is denied.
-5. In a dev run, confirm denied-access help names the parent terminal. Enable
-   that terminal in Screen Recording and restart. Do not reset existing TCC grants
-   just to test this branch.
-6. Compare the three sets below. Choose whether to keep the optional all-card
-   borders before merging.
+1. **Open menu screenshot.** Run `pnpm tauri dev`, click the menu bar icon, and
+   press ⌘⇧4 then Space to capture the open menu. Repeat in light and dark
+   appearance, with Ember and with Paper selected.
+   Look for: the version header, Paste Last Dictation, Copy Last Transcript,
+   Speech Model ▸, Settings… ⌘,, Check for Updates…, Quit dictate ⌘Q, in that
+   order, legible in both appearances.
+2. **Model switch from the menu.** With two models installed, open Speech Model
+   ▸ and choose the one without a tick.
+   Look for: the tick moves when you reopen the submenu, and General › Speech
+   model in Settings shows the same model.
+3. **Model switch when the active model is missing.** Install two models, select
+   one, then delete it from Models (or delete its file under the app's models
+   folder) and open General.
+   Look for: the Speech model select still lists the other installed model, the
+   warning reads "<model> isn't installed. Choose another model.", and picking
+   the installed model clears the warning. With no models installed, the row
+   shows a Download a model button instead.
+4. **Paste and focus.** Dictate a sentence with History enabled. Copy something
+   unrelated, focus a disposable TextEdit document, open the menu and choose
+   Paste Last Dictation.
+   Look for: the sentence lands in that document, focus stays in it, and ⌘V
+   afterwards pastes your unrelated clipboard text, not the sentence.
+5. **Copy last transcript.** Choose Copy Last Transcript, then press ⌘V in the
+   same document.
+   Look for: the last sentence pastes. With History off or empty, the menu
+   action shows the "Menu action failed" error in Settings instead.
+6. **Settings, Quit and updates.** Choose Settings… and press ⌘, from the menu,
+   then Check for Updates…, then Quit dictate (and ⌘Q on a second run).
+   Look for: Settings opens and comes forward; Check for Updates… shows a
+   native alert titled "Updates aren't set up yet" that closes with OK; Quit
+   exits the app and removes the menu bar icon.
+7. **Bundled permission prompt.** Build with `pnpm tauri build`, open the
+   bundled app without Screen Recording permission, and turn Annotate on.
+   Look for: macOS asks for Screen Recording and lists dictate (not a
+   terminal). Grant it, restart, and confirm the Annotate status reads Allowed.
+   Deny it once and confirm Open System Settings opens the right pane.
+8. **Dev permission help.** In a dev run without Screen Recording access, open
+   Annotate.
+   Look for: the help names the parent terminal app. Do not reset existing TCC
+   grants just to test this branch.
+9. **Card borders.** Compare the three screenshot sets below.
+   Look for: whether the optional all-card borders (fd44b21) read better than
+   model-only borders. Drop or keep that commit before merging.
 
 ## Screenshots
 
@@ -65,20 +92,20 @@ No synthetic desktop input was used. Native menu screenshots are still missing.
 
 **general-no-model**
 
-| Before | After |
-| --- | --- |
+| Before                                             | After                                            |
+| -------------------------------------------------- | ------------------------------------------------ |
 | ![Before](before-general-no-model-ember-light.png) | ![After](after-general-no-model-ember-light.png) |
 
 **models-installed**
 
-| Before | After |
-| --- | --- |
+| Before                                             | After                                            |
+| -------------------------------------------------- | ------------------------------------------------ |
 | ![Before](before-models-installed-ember-light.png) | ![After](after-models-installed-ember-light.png) |
 
 **history**
 
-| Before | After |
-| --- | --- |
+| Before                                    | After                                   |
+| ----------------------------------------- | --------------------------------------- |
 | ![Before](before-history-ember-light.png) | ![After](after-history-ember-light.png) |
 
 Models-only borders, before the optional all-card commit:
@@ -93,20 +120,20 @@ Models-only borders, before the optional all-card commit:
 
 **general-no-model**
 
-| Before | After |
-| --- | --- |
+| Before                                            | After                                           |
+| ------------------------------------------------- | ----------------------------------------------- |
 | ![Before](before-general-no-model-ember-dark.png) | ![After](after-general-no-model-ember-dark.png) |
 
 **models-installed**
 
-| Before | After |
-| --- | --- |
+| Before                                            | After                                           |
+| ------------------------------------------------- | ----------------------------------------------- |
 | ![Before](before-models-installed-ember-dark.png) | ![After](after-models-installed-ember-dark.png) |
 
 **history**
 
-| Before | After |
-| --- | --- |
+| Before                                   | After                                  |
+| ---------------------------------------- | -------------------------------------- |
 | ![Before](before-history-ember-dark.png) | ![After](after-history-ember-dark.png) |
 
 Models-only borders, before the optional all-card commit:
@@ -121,20 +148,20 @@ Models-only borders, before the optional all-card commit:
 
 **general-no-model**
 
-| Before | After |
-| --- | --- |
+| Before                                             | After                                            |
+| -------------------------------------------------- | ------------------------------------------------ |
 | ![Before](before-general-no-model-paper-light.png) | ![After](after-general-no-model-paper-light.png) |
 
 **models-installed**
 
-| Before | After |
-| --- | --- |
+| Before                                             | After                                            |
+| -------------------------------------------------- | ------------------------------------------------ |
 | ![Before](before-models-installed-paper-light.png) | ![After](after-models-installed-paper-light.png) |
 
 **history**
 
-| Before | After |
-| --- | --- |
+| Before                                    | After                                   |
+| ----------------------------------------- | --------------------------------------- |
 | ![Before](before-history-paper-light.png) | ![After](after-history-paper-light.png) |
 
 Models-only borders, before the optional all-card commit:
@@ -149,20 +176,20 @@ Models-only borders, before the optional all-card commit:
 
 **general-no-model**
 
-| Before | After |
-| --- | --- |
+| Before                                            | After                                           |
+| ------------------------------------------------- | ----------------------------------------------- |
 | ![Before](before-general-no-model-paper-dark.png) | ![After](after-general-no-model-paper-dark.png) |
 
 **models-installed**
 
-| Before | After |
-| --- | --- |
+| Before                                            | After                                           |
+| ------------------------------------------------- | ----------------------------------------------- |
 | ![Before](before-models-installed-paper-dark.png) | ![After](after-models-installed-paper-dark.png) |
 
 **history**
 
-| Before | After |
-| --- | --- |
+| Before                                   | After                                  |
+| ---------------------------------------- | -------------------------------------- |
 | ![Before](before-history-paper-dark.png) | ![After](after-history-paper-dark.png) |
 
 Models-only borders, before the optional all-card commit:
@@ -172,4 +199,3 @@ Models-only borders, before the optional all-card commit:
 ![Models](models-only-models-installed-paper-dark.png)
 
 ![History](models-only-history-paper-dark.png)
-
