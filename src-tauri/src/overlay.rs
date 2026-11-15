@@ -4,28 +4,43 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition};
 
 static VISIBILITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+fn show_is_current(expected: &crate::surface::Status, current: &crate::surface::Status) -> bool {
+    if expected.error.is_some() {
+        expected.error == current.error
+    } else {
+        expected == current
+    }
+}
+
 pub fn hide(app: &AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    let generation = VISIBILITY.fetch_add(1, Ordering::SeqCst) + 1;
-    app.emit("overlay-hiding", ())
-        .map_err(|error| error.to_string())?;
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        std::thread::sleep(std::time::Duration::from_millis(180));
-        if VISIBILITY.load(Ordering::SeqCst) == generation
-            && let Some(window) = app.get_webview_window("main")
-            && let Err(error) = window.hide()
-        {
-            log::warn!("[overlay] hide: {error}");
+    let expected = crate::surface::status(app);
+    let hiding = app.clone();
+    app.run_on_main_thread(move || {
+        if expected.phase != "idle" || crate::surface::status(&hiding) != expected {
+            return;
         }
-    });
-    Ok(())
+        let generation = VISIBILITY.fetch_add(1, Ordering::SeqCst) + 1;
+        let _ = hiding.emit("overlay-hiding", ());
+        tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_millis(180));
+            let app = hiding.clone();
+            let _ = hiding.run_on_main_thread(move || {
+                if VISIBILITY.load(Ordering::SeqCst) == generation
+                    && crate::surface::status(&app).phase == "idle"
+                    && let Some(window) = app.get_webview_window("main")
+                    && let Err(error) = window.hide()
+                {
+                    log::warn!("[overlay] hide: {error}");
+                }
+            });
+        });
+    })
+    .map_err(|error| error.to_string())
 }
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
-    VISIBILITY.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    app.emit("overlay-showing", ())
-        .map_err(|error| error.to_string())?;
+    let expected = crate::surface::status(app);
     let position = *app
         .state::<Mutex<OverlayPosition>>()
         .lock()
@@ -55,6 +70,11 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
         let native = window.clone();
         window
             .run_on_main_thread(move || {
+                if !show_is_current(&expected, &crate::surface::status(native.app_handle())) {
+                    return;
+                }
+                VISIBILITY.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = native.emit("overlay-showing", ());
                 if let Ok(pointer) = native.ns_window() {
                     // SAFETY: Tauri owns this NSWindow; the clone keeps it alive on the main thread.
                     let window = unsafe { &*pointer.cast::<objc2_app_kit::NSWindow>() };
@@ -64,7 +84,18 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
             .map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "macos"))]
-    window.show().map_err(|e| e.to_string())
+    {
+        let native = window.clone();
+        window
+            .run_on_main_thread(move || {
+                if show_is_current(&expected, &crate::surface::status(native.app_handle())) {
+                    VISIBILITY.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = native.emit("overlay-showing", ());
+                    let _ = native.show();
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
 }
 
 pub fn resize(app: &AppHandle, width: f64, height: f64) -> Result<(), String> {
@@ -182,4 +213,42 @@ fn focused_window_center() -> Option<(f64, f64)> {
         point.x + dimensions.width / 2.0,
         point.y + dimensions.height / 2.0,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::show_is_current;
+    use crate::{problem::Problem, surface::Status};
+
+    #[test]
+    fn error_show_survives_worker_completion_but_not_dismissal_or_replacement() {
+        let expected = Status {
+            phase: "transcribing".into(),
+            error: Some(Problem::new("Couldn’t paste", "Copy from History.")),
+            notice: None,
+        };
+        let mut current = expected.clone();
+        current.phase = "idle".into();
+        assert!(show_is_current(&expected, &current));
+        current.error = None;
+        assert!(!show_is_current(&expected, &current));
+        current.error = Some(Problem::new("Another problem", "Open Settings."));
+        assert!(!show_is_current(&expected, &current));
+    }
+
+    #[test]
+    fn a_recording_show_cannot_reopen_a_completed_or_discarded_take() {
+        let expected = Status {
+            phase: "recording".into(),
+            ..Status::default()
+        };
+        assert!(show_is_current(&expected, &expected));
+        for phase in ["idle", "transcribing", "done", "copied"] {
+            let current = Status {
+                phase: phase.into(),
+                ..Status::default()
+            };
+            assert!(!show_is_current(&expected, &current));
+        }
+    }
 }

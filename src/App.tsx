@@ -219,14 +219,6 @@ function Appearance({
       );
     };
     update();
-    if (windowKind === "settings" && query.isFetched) {
-      frame = requestAnimationFrame(() => {
-        root.classList.remove("appearance-changing");
-        frame = requestAnimationFrame(
-          () => void invoke("settings_ready").catch(console.error),
-        );
-      });
-    }
     system.addEventListener("change", update);
     return () => {
       system.removeEventListener("change", update);

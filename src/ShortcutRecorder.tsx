@@ -1,5 +1,5 @@
 import { useDictationStatus } from "./useDictationStatus";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { SettingsRow, ShortcutRecorder as Recorder } from "./ui";
 
@@ -32,17 +32,32 @@ export default function ShortcutRecorder({
       ? "Annotate shortcut unavailable"
       : "Shortcut unavailable");
   const [conflict, setConflict] = useState("");
+  const request = useRef(0);
+  useEffect(() => {
+    if (!recording) request.current += 1;
+  }, [recording]);
+  useEffect(
+    () => () => {
+      request.current += 1;
+    },
+    [],
+  );
   async function capture() {
+    const generation = ++request.current;
     setConflict("");
     onError("");
+    onRecordingChange(true);
     try {
       await invoke("capture_shortcut", { enabled: true });
-      onRecordingChange(true);
     } catch (e) {
-      onError(String(e));
+      if (request.current === generation) {
+        onRecordingChange(false);
+        onError(String(e));
+      }
     }
   }
   async function cancel() {
+    request.current += 1;
     onRecordingChange(false);
     try {
       await invoke("capture_shortcut", { enabled: false });

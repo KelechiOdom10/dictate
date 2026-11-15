@@ -105,6 +105,7 @@ export function SegmentedControl({
         node.querySelector<HTMLInputElement>("input:checked")?.parentElement;
       if (!selected) return;
       node.style.setProperty("--thumb-x", `${selected.offsetLeft}px`);
+      node.style.setProperty("--thumb-y", `${selected.offsetTop}px`);
       node.style.setProperty("--thumb-width", `${selected.offsetWidth}px`);
       node.style.setProperty("--thumb-height", `${selected.offsetHeight}px`);
     };

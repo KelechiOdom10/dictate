@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { RecordingCapsule, LevelMeter } from "./RecordingCapsule";
 import { KeyboardShortcut } from "./ShortcutRecorder";
-import { expect, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import problems from "../problems.fixture.json";
 const meta = {
   title: "Components/RecordingCapsule",
@@ -25,6 +25,38 @@ export const Error: Story = {
       title: problems.accessibility.title,
       fix: problems.accessibility.fix,
     },
+  },
+};
+export const NoticeSettings: Story = {
+  args: {
+    state: {
+      kind: "error",
+      title: problems.accessibility.title,
+      fix: problems.accessibility.fix,
+    },
+    onOpenSettings: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", {
+        name: "Open relevant settings",
+      }),
+    );
+    await expect(args.onOpenSettings).toHaveBeenCalledOnce();
+  },
+};
+export const RecordingActions: Story = {
+  args: {
+    state: { kind: "recording", seconds: 14, level: 0.5 },
+    onFinish: fn(),
+    onCancel: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement);
+    await userEvent.click(c.getByRole("button", { name: "Finish dictation" }));
+    await expect(args.onFinish).toHaveBeenCalledOnce();
+    await userEvent.click(c.getByRole("button", { name: "Discard dictation" }));
+    await expect(args.onCancel).toHaveBeenCalledOnce();
   },
 };
 export const RealErrors: Story = {

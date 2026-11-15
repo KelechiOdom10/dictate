@@ -23,6 +23,7 @@ import {
   PenLine,
 } from "lucide-react";
 import { useDictationStatus } from "./useDictationStatus";
+import { readSettings } from "./settings";
 
 const subtitles: Record<string, string> = {
   General: "Make dictate feel like second nature.",
@@ -53,7 +54,10 @@ export default function SettingsWindow({
 }) {
   const status = useDictationStatus();
   const [page, setPage] = useState(initialPage);
+  const [navigationReady, setNavigationReady] = useState(false);
+  const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   useEffect(() => {
+    let disposed = false;
     const subscription = listen("settings-page", ({ payload }) => {
       if (
         typeof payload === "string" &&
@@ -61,10 +65,25 @@ export default function SettingsWindow({
       )
         setPage(payload);
     });
+    void subscription
+      .then(() => {
+        if (!disposed) setNavigationReady(true);
+      })
+      .catch(console.error);
     return () => {
+      disposed = true;
       void subscription.then((stop) => stop()).catch(console.error);
     };
   }, []);
+  useEffect(() => {
+    if (!navigationReady || !settings.isFetched) return;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(
+        () => void invoke("settings_ready").catch(console.error),
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [navigationReady, settings.isFetched]);
   const version = useQuery({ queryKey: ["version"], queryFn: getVersion });
   return (
     <div className="settings-shell">

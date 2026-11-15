@@ -1,7 +1,8 @@
 # QA round 3 walkthrough
 
 Settings starts hidden. Once the stored theme has loaded (or loading has failed),
-React waits for a paint and tells Rust it is ready. Rust shows the window only
+React waits for the navigation listener and a paint, then tells Rust it is ready.
+Rust shows the window only
 if launch or activation requested it. This avoids the initial white frame and
 preserves silent login launch. Closing hides Settings; reopening from the Dock,
 Finder or Spotlight requests it again. Its default size is 720 × 580; content
@@ -25,6 +26,8 @@ No new settings format or migration is needed for this single-user app.
 
 Error capsules show a title and Settings action, then fade out after six seconds.
 The underlying error remains in Settings and the tray until dismissed or fixed.
+Opening a notice's Settings action preserves its recovery instructions in
+Settings and queues the relevant page until the window is ready.
 Closing Settings hides an idle capsule; a newly granted screen permission clears
 its corresponding error when checked again. Dismissal generations prevent an old
 fade from hiding a newer recording. The shortcut recorder shows Press shortcut
@@ -37,13 +40,23 @@ Motion uses 150–200 ms ease-out transitions: a sliding segmented thumb, sideba
 page crossfade where View Transitions are supported, subtle list/notice entry
 and overlay dismissal. Reduced motion keeps the state cues and removes motion.
 
+Independent review also moved overlay visibility effects and dismissal
+generations onto the main thread. A delayed dismissal checks the current idle
+state before fading or hiding, and an error show remains valid across the
+worker's transcribing-to-idle transition. Discard schedules its fade before
+releasing the take lock and joins the discarded decoder off the UI thread.
+The shortcut recorder enters capture state before awaiting native confirmation,
+so Tab, blur and navigation can cancel a pending request without a late success
+reopening it. Wrapped segmented controls track both axes of their selected row.
+
 ## Manual verification
 
 No desktop input was automated. Browser screenshots and tests use an isolated
 Chromium harness with mocked Tauri IPC. They prove rendering and command wiring,
 not native focus, activation or paste delivery.
 
-1. Run `pnpm tauri dev` from this worktree with the shared `CARGO_TARGET_DIR`.
+1. Quit the existing dictate instance and stop its old dev task yourself first;
+   do not run two instances. Run the command below from this reviewed worktree.
    Open Settings in dark and light. Check that there is no white flash, the
    default window is compact, and every section remains reachable by scrolling.
 2. Close Settings. Reopen dictate from Spotlight, then repeat using Dock/Finder.
@@ -74,3 +87,22 @@ not native focus, activation or paste delivery.
    `audio_stop_ms`, `stop_to_worker_ms`, `debug_save_ms`, inference and restore
    log values. The offline conversion result is in `spike-results.md`; native
    end-to-end improvement remains unmeasured until this check.
+10. Complete one real Annotate session: record, draw, stop, then inspect the
+    copied summary and saved package/contact sheet. Generated-video tests do
+    not establish native capture, drawing or focus behavior.
+
+The owner can launch this checkout without reusing another worktree's frontend
+server. These commands have not been used to launch a native instance by the
+reviewer; port 1437 must be free, and Vite will fail rather than choose another:
+
+```sh
+cd /Users/kelechiodom/.capy/worktrees/jam_01M7GEN019XF8W6HQQD5ADDRNJ/dictate
+export PATH="$HOME/.nvm/versions/node/v24.22.2/bin:/opt/homebrew/bin:$PATH"
+source "$HOME/.cargo/env"
+export CARGO_TARGET_DIR="$HOME/Projects/dictate/target"
+pnpm tauri dev --no-watch --config '{"build":{"devUrl":"http://localhost:1437","beforeDevCommand":"pnpm dev --host 127.0.0.1 --port 1437 --strictPort"}}'
+```
+
+For the separate silent-launch check, append `-- -- --autostart` to the same
+command after stopping its previous instance. No TCC reset or settings-file
+change is part of this handoff.

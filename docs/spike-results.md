@@ -674,3 +674,7 @@ The stop path now logs audio-stop, worker-queue and debug-WAV-save durations, so
 a hands-on take can distinguish device shutdown from conversion and file I/O.
 The original log does not separate these stages. A fresh native end-to-end take
 is still required to measure the full improvement.
+
+Independent Capy review on this Mac reran the same offline test on 15 Nov 2026:
+**10 ms**, with the same exact 222,976 output samples. This is one fresh
+conversion run, not native dictation latency, an end-to-end improvement or p95.

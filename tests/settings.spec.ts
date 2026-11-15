@@ -33,12 +33,16 @@ async function openSettings(
     overlay = false,
     window: label = overlay ? "main" : "settings",
     stored = {},
+    pendingPage = null,
+    delayCapture = false,
   }: {
     failLoad?: boolean;
     startupError?: { title: string; fix: string; detail: string | null } | null;
     overlay?: boolean;
     window?: WindowLabel;
     stored?: Record<string, unknown>;
+    pendingPage?: string | null;
+    delayCapture?: boolean;
   } = {},
 ) {
   await page.route("http://dictate.test/**", async (route) => {
@@ -66,12 +70,23 @@ async function openSettings(
   );
   const granted = (await grantedCommands())[label];
   await page.addInitScript(
-    ({ failLoad, startupError, models, label, granted, stored }) => {
+    ({
+      failLoad,
+      startupError,
+      models,
+      label,
+      granted,
+      stored,
+      pendingPage,
+      delayCapture,
+    }) => {
       const denied: string[] = [];
       Object.defineProperty(window, "__deniedCommands", { value: denied });
       let status = { phase: "idle", error: startupError };
       const callbacks = new Map<number, (response: unknown) => void>();
       const listeners = new Map<string, { id: number; handler: number }[]>();
+      const commands: string[] = [];
+      Object.defineProperty(window, "__commands", { value: commands });
       let nextId = 0;
       function emit(event: string, payload: unknown) {
         for (const listener of listeners.get(event) ?? []) {
@@ -86,7 +101,11 @@ async function openSettings(
         if (data.type !== "dictate-test") return;
         if (data.event === "settings-changed")
           Object.assign(settings, data.payload);
-        else if (data.event !== "recording-level") status = data.payload;
+        else if (
+          data.event === "dictation-state" ||
+          data.event === "dictation-error"
+        )
+          status = data.payload;
         emit(data.event, data.payload);
       });
       const settings = {
@@ -113,7 +132,16 @@ async function openSettings(
         ...stored,
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
-        value: { unregisterListener: () => {} },
+        value: {
+          unregisterListener: (event: string, id: number) => {
+            listeners.set(
+              event,
+              (listeners.get(event) ?? []).filter(
+                (listener) => listener.id !== id,
+              ),
+            );
+          },
+        },
       });
       Object.defineProperty(window, "__TAURI_INTERNALS__", {
         value: {
@@ -135,6 +163,7 @@ async function openSettings(
               handler?: number;
             },
           ) => {
+            commands.push(command);
             if (!command.startsWith("plugin:") && !granted.includes(command)) {
               denied.push(command);
               throw `${command} not allowed on window \`${label}\``;
@@ -151,6 +180,23 @@ async function openSettings(
               emit("dictation-state", "idle");
             }
             if (command === "pipeline_status") return status;
+            if (
+              command === "capture_shortcut" &&
+              args.enabled &&
+              delayCapture
+            ) {
+              await new Promise<void>((resolve) => {
+                Object.defineProperty(window, "__finishCapture", {
+                  value: resolve,
+                  configurable: true,
+                });
+              });
+            }
+            if (command === "settings_ready") {
+              if (!listeners.get("settings-page")?.length)
+                throw "Navigation is not listening";
+              if (pendingPage) emit("settings-page", pendingPage);
+            }
             if (command === "get_settings") {
               if (failLoad) throw "Settings file could not be read";
               return settings;
@@ -168,6 +214,7 @@ async function openSettings(
             if (command === "plugin:app|version") return "0.1.0";
             if (command === "list_history")
               return { entries: [], hasMore: false };
+            if (command === "list_annotations") return [];
             if (command === "list_models") return models;
             if (command === "whisper_status") return null;
             if (command === "dismiss_error") {
@@ -191,7 +238,16 @@ async function openSettings(
         },
       });
     },
-    { failLoad, startupError, models, label, granted, stored },
+    {
+      failLoad,
+      startupError,
+      models,
+      label,
+      granted,
+      stored,
+      pendingPage,
+      delayCapture,
+    },
   );
   await page.goto(
     label === "main"
@@ -817,6 +873,94 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
         await page.setViewportSize({ width: 436, height: 200 });
       }
     }
+});
+
+for (const exit of ["tab", "window-blur", "navigation"]) {
+  test(`pending shortcut capture stays canceled after ${exit}`, async ({
+    page,
+  }) => {
+    await openSettings(page, { delayCapture: true });
+    const recorder = page.getByRole("button", {
+      name: "Shortcut",
+      exact: true,
+    });
+    await recorder.click();
+    await expect(recorder).toContainText("Press shortcut");
+    if (exit === "tab") await page.keyboard.press("Tab");
+    else if (exit === "navigation")
+      await page.getByRole("button", { name: "Output", exact: true }).click();
+    else
+      await page.evaluate(() =>
+        window.postMessage(
+          { type: "dictate-test", event: "tauri://blur", payload: false },
+          "*",
+        ),
+      );
+    await expect(page.getByText("Press shortcut")).toHaveCount(0);
+    await page.evaluate(() =>
+      (window as unknown as { __finishCapture: () => void }).__finishCapture(),
+    );
+    if (exit === "navigation")
+      await page.getByRole("button", { name: "General", exact: true }).click();
+    await expect(recorder).not.toContainText("Press shortcut");
+  });
+}
+
+test("wrapped History selection keeps the thumb on the selected row", async ({
+  page,
+}) => {
+  await openSettings(page);
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.addStyleTag({ content: ".ui-segments { max-width: 140px; }" });
+  const option = page.getByRole("radio", { name: "Annotations", exact: true });
+  await option.check();
+  await expect
+    .poll(() =>
+      option.evaluate((input) => {
+        const label = input.parentElement!;
+        const thumb = new DOMMatrixReadOnly(
+          getComputedStyle(label.parentElement!, "::before").transform,
+        );
+        return (
+          label.offsetTop > 3 &&
+          Math.abs(thumb.f - label.offsetTop) < 0.1 &&
+          Math.abs(thumb.e - label.offsetLeft) < 0.1 &&
+          label.parentElement!.style.getPropertyValue("--thumb-y") ===
+            `${label.offsetTop}px`
+        );
+      }),
+    )
+    .toBe(true);
+  await expect(
+    page.getByText("No annotations yet", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: "target/independent-qa/wrapped-history.png" });
+});
+
+test("Settings readiness receives queued notice navigation and retains the recovery problem", async ({
+  page,
+}) => {
+  await openSettings(page, {
+    pendingPage: "Annotate",
+    stored: { appearanceMode: "dark", theme: "paper" },
+    startupError: {
+      title: "Annotate needs Screen Recording",
+      fix: "Open System Settings to allow access.",
+      detail: null,
+    },
+  });
+  await expect(
+    page.getByRole("heading", { name: "Annotate", exact: true, level: 1 }),
+  ).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+  await expect(page.getByRole("alert")).toContainText(
+    "Open System Settings to allow access.",
+  );
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __commands: string[] }).__commands,
+    ),
+  ).not.toContain("dismiss_error");
 });
 
 for (const mode of ["light", "dark"]) {

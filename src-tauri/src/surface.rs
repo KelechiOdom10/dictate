@@ -10,7 +10,7 @@ use tauri::{
 use serde::Serialize;
 use std::sync::Mutex;
 
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Default, PartialEq, Serialize)]
 pub struct Status {
     pub phase: String,
     pub error: Option<Problem>,

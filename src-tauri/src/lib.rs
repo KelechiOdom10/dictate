@@ -938,15 +938,16 @@ fn dictation_cancel(app: AppHandle) {
     runtime.take_start = None;
     runtime.phase = Phase::Idle;
     surface::set_phase(&app, "idle");
-    drop(runtime);
-    drop(live);
     let _ = overlay::hide(&app);
+    drop(runtime);
+    tauri::async_runtime::spawn_blocking(move || drop(live));
 }
 
 #[derive(Default)]
 struct SettingsVisibility {
     ready: bool,
     requested: bool,
+    page: Option<&'static str>,
 }
 
 fn show_settings(app: &AppHandle) {
@@ -956,6 +957,9 @@ fn show_settings(app: &AppHandle) {
     if visibility.ready
         && let Some(window) = app.get_webview_window("settings")
     {
+        if let Some(page) = visibility.page.take() {
+            let _ = window.emit("settings-page", page);
+        }
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -987,12 +991,13 @@ fn open_notice_settings(app: AppHandle) {
     } else {
         "General"
     };
-    if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        let _ = app.emit("settings-page", page);
+    {
+        let state = app.state::<Mutex<SettingsVisibility>>();
+        let mut visibility = state.lock().unwrap_or_else(|error| error.into_inner());
+        visibility.page = Some(page);
     }
-    let _ = dismiss_error(app);
+    show_settings(&app);
+    let _ = overlay::hide(&app);
 }
 
 #[tauri::command]
