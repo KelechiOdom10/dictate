@@ -103,6 +103,11 @@ export default function General({
   const installed = (models.data ?? []).filter(
     (model) => model.state.kind === "installed" || model.active,
   );
+  const modelMissing =
+    models.data !== undefined &&
+    !models.data.some(
+      (model) => model.active && model.state.kind === "installed",
+    );
   return (
     <>
       <SettingsGroup
@@ -149,7 +154,15 @@ export default function General({
         <Row
           id="speech-model"
           label="Speech model"
-          help="Used for every dictation. Download others in Models."
+          help={
+            modelMissing ? (
+              <span className="row-warning">
+                Download a speech model in Settings › Models.
+              </span>
+            ) : (
+              "Used for every dictation. Download others in Models."
+            )
+          }
         >
           <div className="ui-actions general-model">
             <Select
@@ -176,8 +189,12 @@ export default function General({
                 </option>
               ))}
             </Select>
-            <Button size="sm" variant="ghost" onClick={onOpenModels}>
-              Manage models
+            <Button
+              size="sm"
+              variant={modelMissing ? "primary" : "ghost"}
+              onClick={onOpenModels}
+            >
+              {modelMissing ? "Download a model" : "Manage models"}
             </Button>
           </div>
         </Row>

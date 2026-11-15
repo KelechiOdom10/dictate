@@ -16,7 +16,7 @@
   },
   "missingModel": {
     "title": "Speech model missing",
-    "fix": "Download one in Settings → Models.",
+    "fix": "Download a speech model in Settings › Models.",
     "detail": "no file at /Applications/dictate.app/models/ggml-base.en.bin"
   },
   "whisperMissing": {

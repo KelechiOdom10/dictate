@@ -212,6 +212,20 @@ export const General: Story = {
   },
 };
 
+export const GeneralNoModel: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, [], { states: {} }),
+  render: () => <GeneralPage />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(
+      await c.findByText("Download a speech model in Settings › Models."),
+    ).toBeVisible();
+    await userEvent.click(c.getByRole("button", { name: "Download a model" }));
+    await expect(
+      await c.findByRole("heading", { name: "Models" }),
+    ).toBeVisible();
+  },
+};
 export const GeneralLoading: Story = {
   beforeEach: () => {
     mockWindows("settings");

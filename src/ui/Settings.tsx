@@ -8,7 +8,7 @@ export function SettingsRow({
 }: {
   id: string;
   label: string;
-  help: string;
+  help: ReactNode;
   children: ReactNode;
 }) {
   return (

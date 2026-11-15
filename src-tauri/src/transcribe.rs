@@ -95,8 +95,11 @@ pub fn whisper_missing() -> Problem {
 }
 
 pub fn missing_model(path: &Path) -> Problem {
-    Problem::new("Speech model missing", "Download one in Settings → Models.")
-        .because(format!("no file at {}", path.display()))
+    Problem::new(
+        "Speech model missing",
+        "Download a speech model in Settings › Models.",
+    )
+    .because(format!("no file at {}", path.display()))
 }
 
 fn write_wav(path: &Path, samples: &[f32]) -> Result<(), String> {
@@ -168,7 +171,7 @@ mod tests {
         }
         let problem = transcribe(&[0.1], Path::new("/nonexistent/ggml-base.en.bin")).unwrap_err();
         assert_eq!(problem.title, "Speech model missing");
-        assert!(problem.fix.contains("Settings → Models"));
+        assert!(problem.fix.contains("Settings › Models"));
         assert!(
             problem
                 .detail

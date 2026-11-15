@@ -573,6 +573,12 @@ fn hotkey(
         return;
     }
     if next == Phase::Recording {
+        let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
+        if !model.is_file() {
+            drop(runtime);
+            report_error(app, &transcribe::missing_model(&model));
+            return;
+        }
         runtime.take_id += 1;
         runtime.take_start = Some(TakeStart {
             started_at_ms: history::now_ms(),
@@ -793,8 +799,19 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let data_dir = app.path().app_data_dir()?;
-            let (settings, mut startup_error) =
+            let (mut settings, mut startup_error) =
                 settings::load_or_default(&data_dir.join("settings.json"));
+            let models_dir = data_dir.join("models");
+            let removed = models::remove_partials(&models_dir);
+            if removed > 0 {
+                println!("[models] removed {removed} unfinished download(s)");
+            }
+            if let Some(model) = models::adopt_legacy(&models_dir, &models::legacy_candidates()) {
+                settings.speech_model = model;
+                if let Err(error) = settings::save(&data_dir.join("settings.json"), &settings) {
+                    eprintln!("[models] save adopted model: {error}");
+                }
+            }
             let store = history::Store::open(&data_dir.join("history.sqlite3")).and_then(|store| {
                 store
                     .prune(settings.history_retention, history::now_ms())
@@ -812,7 +829,7 @@ pub fn run() {
             });
             app.manage::<History>(Mutex::new(store));
             app.manage(Models {
-                dir: data_dir.join("models"),
+                dir: models_dir,
                 downloads: Mutex::default(),
             });
             let shortcut_registered = match settings.chord().and_then(|chord| {

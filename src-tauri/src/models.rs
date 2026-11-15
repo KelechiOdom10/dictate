@@ -4,6 +4,10 @@
 //! A download streams into `<file>.part`, hashing as it goes. Only a file with
 //! the expected length and SHA-256 is renamed into place, so a model file that
 //! exists is always a complete one.
+//!
+//! Network reads run on their own thread, so a stalled connection can't block
+//! cancelling: the download loop wakes every 100 ms, and fails after 20 s with
+//! no bytes so the card offers Retry.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -15,7 +19,9 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     },
+    time::Duration,
 };
 use ts_rs::TS;
 
@@ -49,10 +55,15 @@ pub struct ModelInfo {
     pub recommended: bool,
 }
 
-const HUGGING_FACE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
+/// Pinned to one commit of `ggerganov/whisper.cpp`, so every URL serves exactly
+/// the bytes the catalog checksums describe, even if upstream re-uploads.
+const HUGGING_FACE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/";
+
+/// How long a download may go without receiving a byte before it fails.
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Sizes and SHA-256 digests are the Git LFS object ids published for
-/// `ggerganov/whisper.cpp` on Hugging Face, checked against downloads.
+/// `ggerganov/whisper.cpp` at the pinned commit, checked against downloads.
 pub const CATALOG: [ModelInfo; 5] = [
     ModelInfo {
         id: SpeechModel::TinyEn,
@@ -361,6 +372,85 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// A reader fed by a background thread, so `read` never blocks longer than
+/// 100 ms. It reports `Interrupted` once `cancel` is set (the download loop
+/// then stops as cancelled) and `TimedOut` after `stall` with no bytes.
+struct Watched<'a> {
+    chunks: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    pending: Vec<u8>,
+    offset: usize,
+    cancel: &'a AtomicBool,
+    stall: Duration,
+}
+
+fn watched(
+    mut source: impl Read + Send + 'static,
+    cancel: &AtomicBool,
+    stall: Duration,
+) -> Watched<'_> {
+    let (sender, chunks) = mpsc::sync_channel(4);
+    std::thread::spawn(move || {
+        loop {
+            let mut buffer = vec![0; 256 * 1024];
+            let chunk = match source.read(&mut buffer) {
+                Ok(read) => {
+                    buffer.truncate(read);
+                    Ok(buffer)
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => Err(e),
+            };
+            let done = !matches!(&chunk, Ok(bytes) if !bytes.is_empty());
+            if sender.send(chunk).is_err() || done {
+                break;
+            }
+        }
+    });
+    Watched {
+        chunks,
+        pending: Vec::new(),
+        offset: 0,
+        cancel,
+        stall,
+    }
+}
+
+impl Read for Watched<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let tick = Duration::from_millis(100);
+        let mut waited = Duration::ZERO;
+        while self.offset == self.pending.len() {
+            if self.cancel.load(Ordering::Relaxed) {
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            match self.chunks.recv_timeout(tick) {
+                Ok(Ok(chunk)) if chunk.is_empty() => return Ok(0),
+                Ok(Ok(chunk)) => {
+                    self.pending = chunk;
+                    self.offset = 0;
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    waited += tick;
+                    if waited >= self.stall {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!("no data for {} s", self.stall.as_secs_f32()),
+                        ));
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(std::io::Error::other("download reader stopped"));
+                }
+            }
+        }
+        let read = buffer.len().min(self.pending.len() - self.offset);
+        buffer[..read].copy_from_slice(&self.pending[self.offset..self.offset + read]);
+        self.offset += read;
+        Ok(read)
+    }
+}
+
 /// Download one catalog model into `dir` over HTTPS.
 pub fn fetch(
     model: SpeechModel,
@@ -369,23 +459,113 @@ pub fn fetch(
     progress: impl FnMut(u64),
 ) -> Result<(), DownloadError> {
     let info = info(model);
-    let url = format!("{HUGGING_FACE}{}", info.file_name);
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(std::time::Duration::from_secs(15)))
-        .build()
-        .into();
-    let response = agent
-        .get(&url)
-        .call()
-        .map_err(|e| DownloadError::Network(format!("{url}: {e}")))?;
-    write_verified(
-        response.into_body().into_reader(),
+    download(
+        &format!("{HUGGING_FACE}{}", info.file_name),
         info.bytes,
         info.sha256,
         &path(dir, model),
         cancel,
+        STALL_TIMEOUT,
         progress,
     )
+}
+
+fn download(
+    url: &str,
+    expected_len: u64,
+    expected_sha256: &str,
+    dest: &Path,
+    cancel: &AtomicBool,
+    stall: Duration,
+    progress: impl FnMut(u64),
+) -> Result<(), DownloadError> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(stall))
+        .build()
+        .into();
+    let response = agent
+        .get(url)
+        .call()
+        .map_err(|e| DownloadError::Network(format!("{url}: {e}")))?;
+    write_verified(
+        watched(response.into_body().into_reader(), cancel, stall),
+        expected_len,
+        expected_sha256,
+        dest,
+        cancel,
+        progress,
+    )
+}
+
+/// Removes `*.part` files left by a download the app quit or crashed during.
+pub fn remove_partials(dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "part"))
+        .filter(|path| match fs::remove_file(path) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("[models] remove {}: {error}", path.display());
+                false
+            }
+        })
+        .count()
+}
+
+/// Where dictate read its model before the Models page existed: the
+/// `DICTATE_WHISPER_MODEL` path, else `models/` in the checkout it was built from.
+pub fn legacy_candidates() -> Vec<PathBuf> {
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../models");
+    std::env::var_os("DICTATE_WHISPER_MODEL")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(CATALOG.iter().map(|info| checkout.join(info.file_name)))
+        .collect()
+}
+
+/// When no model is installed, copies the first legacy file whose size and
+/// SHA-256 match a catalog model into `dir`, and returns that model. The
+/// original stays where it was.
+pub fn adopt_legacy(dir: &Path, candidates: &[PathBuf]) -> Option<SpeechModel> {
+    if CATALOG.iter().any(|info| path(dir, info.id).is_file()) {
+        return None;
+    }
+    for candidate in candidates {
+        let Ok(len) = fs::metadata(candidate).map(|meta| meta.len()) else {
+            continue;
+        };
+        for info in CATALOG.iter().filter(|info| info.bytes == len) {
+            let copied = fs::File::open(candidate)
+                .map_err(|e| DownloadError::Disk(e.to_string()))
+                .and_then(|file| {
+                    write_verified(
+                        file,
+                        info.bytes,
+                        info.sha256,
+                        &path(dir, info.id),
+                        &AtomicBool::new(false),
+                        |_| {},
+                    )
+                });
+            match copied {
+                Ok(()) => {
+                    println!(
+                        "[models] adopted {} from {}",
+                        info.file_name,
+                        candidate.display()
+                    );
+                    return Some(info.id);
+                }
+                Err(error) => eprintln!("[models] skip {}: {error}", candidate.display()),
+            }
+        }
+    }
+    None
 }
 
 pub fn delete(dir: &Path, model: SpeechModel) -> Result<(), String> {
@@ -604,6 +784,152 @@ mod tests {
                 .replace(";}", "}")
         };
         assert_eq!(compact(checked_in), compact(&contract));
+    }
+
+    /// Serves `body` after HTTP headers promising `len` bytes, then holds the
+    /// connection open without sending anything more.
+    fn stalling_server(len: u64, body: &'static [u8]) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nContent-Type: application/octet-stream\r\n\r\n"
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+            stream.flush().unwrap();
+            std::thread::sleep(Duration::from_secs(10));
+        });
+        format!("http://{address}/model.bin")
+    }
+
+    #[test]
+    fn stalled_download_fails_into_retry_and_keeps_nothing() {
+        let url = stalling_server(5, b"he");
+        let dir = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        let mut seen = Vec::new();
+        let result = download(
+            &url,
+            5,
+            HELLO_SHA256,
+            &dir.path().join("model.bin"),
+            &AtomicBool::new(false),
+            Duration::from_millis(300),
+            |received| seen.push(received),
+        );
+        assert!(
+            matches!(&result, Err(DownloadError::Network(cause)) if cause.contains("no data")),
+            "{result:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(seen, [2]);
+        assert!(files(dir.path()).is_empty());
+        let mut downloads = Downloads::default();
+        downloads.begin(SpeechModel::TinyEn).unwrap();
+        downloads.finish(SpeechModel::TinyEn, &result);
+        assert!(matches!(
+            downloads.state(SpeechModel::TinyEn, false),
+            ModelState::Failed { .. }
+        ));
+        downloads.begin(SpeechModel::TinyEn).unwrap();
+    }
+
+    #[test]
+    fn cancel_stops_a_stalled_download_promptly() {
+        let url = stalling_server(5, b"he");
+        let dir = tempfile::tempdir().unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            flag.store(true, Ordering::Relaxed);
+        });
+        let started = std::time::Instant::now();
+        let result = download(
+            &url,
+            5,
+            HELLO_SHA256,
+            &dir.path().join("model.bin"),
+            &cancel,
+            STALL_TIMEOUT,
+            |_| {},
+        );
+        assert_eq!(result, Err(DownloadError::Cancelled));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(files(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn watched_reader_passes_bytes_through_in_order() {
+        let source: Vec<u8> = (0..=255).cycle().take(600_000).collect();
+        let mut read = Vec::new();
+        watched(
+            std::io::Cursor::new(source.clone()),
+            &AtomicBool::new(false),
+            STALL_TIMEOUT,
+        )
+        .read_to_end(&mut read)
+        .unwrap();
+        assert_eq!(read, source);
+    }
+
+    #[test]
+    fn startup_removes_stale_partial_downloads_only() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("ggml-base.en.bin.part"), b"half").unwrap();
+        fs::write(path(dir.path(), SpeechModel::TinyEn), b"x").unwrap();
+        assert_eq!(remove_partials(dir.path()), 1);
+        assert_eq!(files(dir.path()), ["ggml-tiny.en.bin"]);
+        assert_eq!(remove_partials(&dir.path().join("missing")), 0);
+    }
+
+    #[test]
+    fn legacy_model_is_adopted_only_when_its_checksum_matches() {
+        let checkout = tempfile::tempdir().unwrap();
+        let wrong = checkout.path().join("ggml-tiny.en.bin");
+        let junk = vec![7u8; info(SpeechModel::TinyEn).bytes as usize];
+        fs::write(&wrong, &junk).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let models = dir.path().join("models");
+        let missing = checkout.path().join("ggml-base.en.bin");
+        assert_eq!(adopt_legacy(&models, &[missing, wrong.clone()]), None);
+        assert!(!models.exists() || files(&models).is_empty());
+        assert!(wrong.is_file(), "the original stays put");
+
+        fs::create_dir_all(&models).unwrap();
+        fs::write(path(&models, SpeechModel::SmallEn), b"x").unwrap();
+        assert_eq!(
+            adopt_legacy(&models, &[wrong]),
+            None,
+            "a model is installed"
+        );
+    }
+
+    /// Adopts the real base.en from this checkout's `models/` when present.
+    #[test]
+    #[ignore = "Copies the real 148 MB model; run explicitly"]
+    fn legacy_checkout_model_is_adopted() {
+        let candidates = legacy_candidates();
+        let Some(source) = candidates.iter().find(|path| path.is_file()) else {
+            eprintln!("SKIP: no legacy model at {candidates:?}");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let model = adopt_legacy(dir.path(), &candidates).unwrap();
+        println!("adopted {model:?} from {}", source.display());
+        assert_eq!(
+            fs::metadata(path(dir.path(), model)).unwrap().len(),
+            info(model).bytes
+        );
     }
 
     /// Downloads tiny.en (78 MB) from Hugging Face through `fetch`.

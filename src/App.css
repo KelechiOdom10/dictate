@@ -86,6 +86,9 @@ meter {
   line-height: var(--leading-body);
   overflow-wrap: anywhere;
 }
+.row-warning {
+  color: var(--error);
+}
 .save-status {
   color: var(--muted);
   font-size: var(--font-sm);
