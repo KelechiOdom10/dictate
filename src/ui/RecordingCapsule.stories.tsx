@@ -68,7 +68,6 @@ export const AllStates: Story = {
       <RecordingCapsule state={{ kind: "transcribing" }} />
       <RecordingCapsule state={{ kind: "annotating", seconds: 10 }} />
       <RecordingCapsule state={{ kind: "packaging" }} />
-      <RecordingCapsule state={{ kind: "annotated" }} />
       <RecordingCapsule state={{ kind: "done" }} />
       <RecordingCapsule state={{ kind: "copied" }} />
       <RecordingCapsule state={{ kind: "skipped" }} />
@@ -133,7 +132,4 @@ export const AnnotatingDictationBlocked: Story = {
 };
 export const AnnotationPackaging: Story = {
   args: { state: { kind: "packaging" } },
-};
-export const AnnotationSaved: Story = {
-  args: { state: { kind: "annotated" } },
 };

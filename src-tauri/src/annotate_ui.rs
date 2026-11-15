@@ -5,6 +5,8 @@
 //! - `ink`: a transparent, click-through panel over the recorded display. It
 //!   draws the ink and, in pen mode only, takes the mouse.
 //! - `annotate-bar`: the floating bar with the timer, pen and stop buttons.
+//!   After a session it comes back for a few seconds as "Copied", with
+//!   "Copy image" for the contact sheet.
 //!
 //! Both are non-activating `NSPanel`s (`tauri-nspanel`, as in spike #13) that
 //! can never become key, so clicking or drawing on them never activates
@@ -13,7 +15,9 @@
 //! Nothing here sends input to other apps. The pointer is read with
 //! `CGEvent::location` on a fresh event object that is never posted.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
@@ -31,6 +35,8 @@ pub const BAR: &str = "annotate-bar";
 /// The backstop checks pen mode this often, so it ends at most this long
 /// after `ink::PEN_TIMEOUT_MS`.
 const BACKSTOP_TICK: Duration = Duration::from_millis(500);
+/// How long the bar stays up as "Copied" after a session.
+pub const COPIED_VISIBLE: Duration = Duration::from_secs(8);
 
 mod panel {
     tauri_nspanel::tauri_panel! {
@@ -76,6 +82,22 @@ fn queue_pen(app: &AppHandle, pen: Pen) {
     }
 }
 
+/// The package that just finished, while the bar shows "Copied". `id` tells
+/// the hide timer whether a newer one replaced it.
+struct Copied {
+    id: u64,
+    contact_sheet: Option<PathBuf>,
+}
+
+#[derive(Default)]
+struct CopiedState(Mutex<Option<Copied>>);
+
+fn with_copied<T>(app: &AppHandle, f: impl FnOnce(&mut Option<Copied>) -> T) -> T {
+    let state = app.state::<CopiedState>();
+    let mut copied = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut copied)
+}
+
 fn with_live<T>(app: &AppHandle, f: impl FnOnce(&mut Live) -> T) -> Option<T> {
     let state = app.state::<State>();
     let mut live = state.0.lock().unwrap_or_else(|e| e.into_inner());
@@ -90,19 +112,85 @@ pub struct BarState {
     /// Unix ms of the start tap, for the bar's own timer.
     pub started_at_ms: i64,
     pub pen: bool,
+    /// The session finished and its summary is on the clipboard.
+    pub copied: bool,
+    /// The finished session has a contact sheet to copy.
+    pub has_image: bool,
 }
 
 pub fn bar_state(app: &AppHandle) -> BarState {
+    let idle = BarState {
+        recording: false,
+        started_at_ms: 0,
+        pen: false,
+        copied: false,
+        has_image: false,
+    };
     with_live(app, |live| BarState {
         recording: true,
         started_at_ms: live.started_at_ms,
         pen: !live.ink.pen().click_through(),
+        ..idle.clone()
     })
-    .unwrap_or(BarState {
-        recording: false,
-        started_at_ms: 0,
-        pen: false,
+    .or_else(|| {
+        with_copied(app, |copied| {
+            copied.as_ref().map(|copied| BarState {
+                copied: true,
+                has_image: copied.contact_sheet.is_some(),
+                ..idle.clone()
+            })
+        })
     })
+    .unwrap_or(idle)
+}
+
+/// A session's package is on the clipboard: bring the bar back as "Copied"
+/// for `COPIED_VISIBLE`, where it last stood.
+pub fn show_copied(app: &AppHandle, contact_sheet: Option<PathBuf>) {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    with_copied(app, |copied| *copied = Some(Copied { id, contact_sheet }));
+    emit_bar(app);
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        if let Ok(panel) = handle.get_webview_panel(BAR) {
+            panel.order_front_regardless();
+        }
+    }) {
+        log::warn!("[annotate] show copied: {error}");
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(COPIED_VISIBLE);
+        if with_copied(&app, |copied| copied.as_ref().is_some_and(|c| c.id == id)) {
+            dismiss(&app);
+        }
+    });
+}
+
+pub fn copied_contact_sheet(app: &AppHandle) -> Option<PathBuf> {
+    with_copied(app, |copied| {
+        copied
+            .as_ref()
+            .and_then(|copied| copied.contact_sheet.clone())
+    })
+}
+
+/// Hides the "Copied" bar. Never hides the bar of a session that records.
+pub fn dismiss(app: &AppHandle) {
+    with_copied(app, |copied| *copied = None);
+    if with_live(app, |_| ()).is_some() {
+        return;
+    }
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        if let Ok(panel) = handle.get_webview_panel(BAR) {
+            panel.hide();
+        }
+    }) {
+        log::warn!("[annotate] hide copied: {error}");
+    }
+    emit_bar(app);
 }
 
 pub fn escape() -> Shortcut {
@@ -126,6 +214,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     app.manage(PenQueue(Mutex::new(pens)));
     let handle = app.handle().clone();
     std::thread::spawn(move || apply_pens(handle, queued));
+    app.manage(CopiedState::default());
     let handle = app.handle();
     for (label, query, level) in [(INK, "ink", 1000), (BAR, "annotate-bar", 1001)] {
         let window = WebviewWindowBuilder::new(
@@ -165,6 +254,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
 /// A session started: cover `display` with the ink panel, put the bar on it,
 /// and start the pointer poll.
 pub fn begin(app: &AppHandle, display: Display, clock: Instant, started_at_ms: i64) {
+    with_copied(app, |copied| *copied = None);
     let frame = display.frame.clone();
     *app.state::<State>()
         .0

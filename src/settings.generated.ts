@@ -25,4 +25,12 @@ export type Settings = {
   soundFeedback: boolean;
   debugRecordings: boolean;
   annotateShortcut: string;
+  /**
+   * Off: the Annotate shortcut is not registered at all.
+   */
+  annotateEnabled: boolean;
+  /**
+   * On: the recording also shows dictate's ink and floating bar.
+   */
+  annotateShowInRecordings: boolean;
 };

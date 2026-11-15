@@ -114,6 +114,12 @@ pub struct Settings {
     pub debug_recordings: bool,
     #[serde(default = "default_annotate_shortcut")]
     pub annotate_shortcut: String,
+    /// Off: the Annotate shortcut is not registered at all.
+    #[serde(default = "enabled")]
+    pub annotate_enabled: bool,
+    /// On: the recording also shows dictate's ink and floating bar.
+    #[serde(default)]
+    pub annotate_show_in_recordings: bool,
 }
 
 fn enabled() -> bool {
@@ -151,12 +157,17 @@ impl Default for Settings {
             sound_feedback: false,
             debug_recordings: false,
             annotate_shortcut: default_annotate_shortcut(),
+            annotate_enabled: true,
+            annotate_show_in_recordings: false,
         }
     }
 }
 
 pub struct SettingsChanges {
     pub shortcut: Option<(Shortcut, Shortcut)>,
+    /// The Annotate chord that should be registered after the save: `None`
+    /// when Annotate is off. Only set when it differs from before.
+    pub annotate: Option<Option<Shortcut>>,
 }
 
 impl Settings {
@@ -172,9 +183,22 @@ impl Settings {
                 crate::models::info(self.speech_model).name
             ));
         }
-        if self.annotate_shortcut != previous.annotate_shortcut {
-            return Err("The Annotate shortcut can’t be changed yet".into());
-        }
+        let annotate = if (self.annotate_enabled, &self.annotate_shortcut)
+            != (previous.annotate_enabled, &previous.annotate_shortcut)
+        {
+            let chord = self.annotate_chord()?;
+            if self.chord().ok() == Some(chord) {
+                return Err("That shortcut is your dictation shortcut. Choose another.".into());
+            }
+            let old = previous
+                .annotate_enabled
+                .then(|| previous.annotate_chord().ok())
+                .flatten();
+            let new = self.annotate_enabled.then_some(chord);
+            (old != new).then_some(new)
+        } else {
+            None
+        };
         let shortcut = if self.shortcut != previous.shortcut {
             let old = previous.chord()?;
             let new = self.chord()?;
@@ -191,7 +215,7 @@ impl Settings {
         {
             return Err(format!("Microphone unavailable: {name}"));
         }
-        Ok(SettingsChanges { shortcut })
+        Ok(SettingsChanges { shortcut, annotate })
     }
 
     pub fn chord(&self) -> Result<Shortcut, String> {
@@ -456,16 +480,77 @@ mod tests {
     }
 
     #[test]
-    fn the_annotate_shortcut_is_fixed_and_cannot_be_taken_by_dictation() {
+    fn turning_annotate_off_and_on_changes_what_is_registered() {
+        let on = Settings::default();
+        let off = Settings {
+            annotate_enabled: false,
+            ..on.clone()
+        };
+        let no_devices = || Ok(Vec::new());
+        assert_eq!(
+            off.validate_changes(&on, no_devices, |_| true)
+                .unwrap()
+                .annotate,
+            Some(None)
+        );
+        assert_eq!(
+            on.validate_changes(&off, no_devices, |_| true)
+                .unwrap()
+                .annotate,
+            Some(Some(on.annotate_chord().unwrap()))
+        );
+        let screen_only = Settings {
+            annotate_show_in_recordings: true,
+            ..on.clone()
+        };
+        assert_eq!(
+            screen_only
+                .validate_changes(&on, no_devices, |_| true)
+                .unwrap()
+                .annotate,
+            None
+        );
+    }
+
+    #[test]
+    fn settings_saved_before_annotate_options_existed_turn_it_on_and_hide_our_windows() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.annotate_enabled);
+        assert!(!settings.annotate_show_in_recordings);
+    }
+
+    #[test]
+    fn the_annotate_shortcut_can_change_but_never_to_the_dictation_one() {
         let previous = Settings::default();
         let no_devices = || Ok(Vec::new());
         let changed = Settings {
             annotate_shortcut: "Alt+Shift+KeyA".into(),
             ..previous.clone()
         };
-        assert!(
-            changed
+        let changes = changed
+            .validate_changes(&previous, no_devices, |_| true)
+            .unwrap();
+        assert_eq!(
+            changes.annotate,
+            Some(Some(changed.annotate_chord().unwrap()))
+        );
+        let taken = Settings {
+            annotate_shortcut: previous.shortcut.clone(),
+            ..previous.clone()
+        };
+        assert_eq!(
+            taken
                 .validate_changes(&previous, no_devices, |_| true)
+                .err()
+                .as_deref(),
+            Some("That shortcut is your dictation shortcut. Choose another.")
+        );
+        let bare = Settings {
+            annotate_shortcut: "KeyS".into(),
+            ..previous.clone()
+        };
+        assert!(
+            bare.validate_changes(&previous, no_devices, |_| true)
                 .is_err()
         );
         let clash = Settings {

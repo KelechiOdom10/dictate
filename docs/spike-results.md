@@ -499,3 +499,28 @@ whole stop-to-package path is about 1.3–2.4 s.
 cargo test --manifest-path src-tauri/Cargo.toml --test annotate_frames -- --nocapture
 DICTATE_SAMPLE_PACKAGE="$PWD/target/annotate-sample" cargo test --manifest-path src-tauri/Cargo.toml --test annotate_frames
 ```
+
+## Annotate session, stop to package (task 3-in-app + 9)
+
+15 Nov 2026, Apple M4 Pro, debug build, `tests/annotate_session.rs`. The
+session path `annotate::package` runs on a generated 20 s MP4 (2560×1600,
+15 fps) with three circled marks and a fixed word list in place of whisper:
+the MP4 moved into the folder, `audio.wav`, `annotation.json`, `summary.md`,
+`frames/`, `frames-full/` and `contact-sheet.png`.
+
+| Step | Time |
+|---|---:|
+| Stop to package (whole path, no whisper) | 229 ms |
+| Frame extraction, 3 frames | 113 ms |
+| Ink + scale + PNG, 3 frames | 63 ms |
+| Contact sheet (2398×518) | 37 ms |
+
+`packagingMs` in `annotation.json` stores the same measurement for every real
+session, from the stop tap to the finished package, and History shows it as
+"Stop to package". Real sessions add `screen::stop` finalising the MP4 and
+whisper (about 1–2 s for 60 s, above). Not measured yet: a real session on
+this machine, which needs the manual run in the PR.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --test annotate_session -- --nocapture
+```

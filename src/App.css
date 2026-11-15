@@ -89,6 +89,15 @@ meter {
 .row-warning {
   color: var(--error);
 }
+.annotation-actions {
+  flex-wrap: wrap;
+  margin-block-start: var(--space-3);
+}
+.permission-status {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
 .save-status {
   color: var(--muted);
   font-size: var(--font-sm);

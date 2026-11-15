@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { SettingsRow, ShortcutRecorder as Recorder } from "./ui";
 
 type Props = {
+  id?: string;
+  label?: string;
+  idleHelp?: string;
   value: string;
   recording: boolean;
   disabled: boolean;
@@ -10,6 +13,9 @@ type Props = {
   onError: (error: string) => void;
 };
 export default function ShortcutRecorder({
+  id = "shortcut",
+  label = "Shortcut",
+  idleHelp = "Use this shortcut from any app.",
   value,
   recording,
   disabled,
@@ -41,17 +47,13 @@ export default function ShortcutRecorder({
   }
   return (
     <SettingsRow
-      id="shortcut"
-      label="Shortcut"
-      help={
-        recording
-          ? "Press a key combination. Escape cancels."
-          : "Use this shortcut from any app."
-      }
+      id={id}
+      label={label}
+      help={recording ? "Press a key combination. Escape cancels." : idleHelp}
     >
       <Recorder
-        id="shortcut"
-        aria-describedby="shortcut-help"
+        id={id}
+        aria-describedby={`${id}-help`}
         value={value}
         recording={recording}
         disabled={disabled}

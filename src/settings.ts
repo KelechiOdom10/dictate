@@ -24,6 +24,8 @@ export const settingsSchema = z
     soundFeedback: z.boolean(),
     debugRecordings: z.boolean(),
     annotateShortcut: z.string(),
+    annotateEnabled: z.boolean(),
+    annotateShowInRecordings: z.boolean(),
   })
   .strict() satisfies z.ZodType<Settings>;
 

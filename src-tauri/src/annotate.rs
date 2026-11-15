@@ -1,25 +1,37 @@
-//! Annotate session, audio only: tap the Annotate shortcut to start, tap again
-//! to stop. Stopping writes a folder with `audio.wav` and `annotation.json`.
+//! Annotate session: tap the Annotate shortcut to start recording the screen
+//! and microphone, draw while it records, tap again to stop. Stopping builds
+//! the package folder and copies its summary.
 //!
 //! The rules here are pure: the phase a tap moves to, whether dictation may
-//! start, and how a finished recording becomes an `Annotation`. `lib.rs` holds
-//! the phase, calls `audio` and `transcribe`, and drives the pill. Ink drawn
-//! during the session comes from `ink.rs`. Screen video and frames come in
-//! later stages.
+//! start, and how a finished recording becomes an `Annotation`. `package`
+//! is the one path from a stopped session to a finished folder, and runs
+//! without AppKit state, so a test can feed it a generated MP4. `lib.rs`
+//! holds the phase, calls `audio`, `screen` and `transcribe`, and drives the
+//! pill and the floating bar. Ink drawn during the session comes from
+//! `ink.rs`.
 //!
 //! `audio.rs` keeps one shared recording, so Annotate and dictation must never
 //! record at the same time: a dictation `stop()` would take Annotate's audio.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-use crate::package::{self, Annotation, Audio, Display, Session, Stroke};
+use serde::Serialize;
+use ts_rs::TS;
+
+use crate::package::{self, Annotation, Audio, Display, Session, Stroke, Video};
+use crate::problem::Problem;
 use crate::transcribe::Word;
 
 /// Session folders live in `<app data>/annotations/<id>/`.
 pub const FOLDER: &str = "annotations";
 pub const AUDIO_FILE: &str = "audio.wav";
+pub const VIDEO_FILE: &str = "recording.mp4";
 pub const ANNOTATION_FILE: &str = "annotation.json";
+pub const SUMMARY_FILE: &str = "summary.md";
+/// History shows at most this many sessions, newest first.
+pub const LIST_LIMIT: usize = 200;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Phase {
@@ -57,6 +69,24 @@ pub fn blocks_dictation(phase: Phase) -> bool {
     phase != Phase::Idle
 }
 
+/// Without the grant ScreenCaptureKit records only the wallpaper, so a
+/// session does not start.
+pub fn screen_permission_needed() -> Problem {
+    Problem::new(
+        "Annotate needs Screen Recording",
+        "Open System Settings › Privacy & Security › Screen & System Audio Recording, turn on dictate, then reopen dictate.",
+    )
+}
+
+/// `screen::start` failed for a reason other than the permission.
+pub fn screen_start_failed(cause: impl std::fmt::Display) -> Problem {
+    Problem::new(
+        "Annotate couldn’t record the screen",
+        "Try again. If it keeps failing, turn on “Show in screen recordings” in Settings › Annotate.",
+    )
+    .because(cause)
+}
+
 pub const DICTATION_BLOCKED: &str = "Dictation is off while Annotate records";
 pub const DICTATION_BUSY: &str = "Finish dictating before starting Annotate";
 
@@ -67,28 +97,58 @@ pub struct Started {
     pub unix_ms: i64,
     /// How long `audio::start` took to return. Words are shifted by this.
     pub audio_offset_ms: u64,
+    /// When `screen::start` returned. ScreenCaptureKit's first frame comes
+    /// a little later; R4 in the design measures how much.
+    pub video_offset_ms: u64,
     pub display: Display,
     pub frontmost_app: Option<package::App>,
 }
 
-/// The `annotation.json` for a session without video: times, duration, the
-/// transcript and the ink, through the package builder, which groups strokes
-/// into marks. No video means no frames, so the builder's frames are dropped
-/// rather than pointing at missing images.
+/// The screen recording a session made, as `screen::stop` handed it over.
+/// `path` is wherever the recorder wrote it; `package` moves it in.
+#[derive(Clone, Debug)]
+pub struct Recording {
+    pub path: PathBuf,
+    /// When the video starts on the session clock.
+    pub offset_ms: u64,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub duration_ms: u64,
+}
+
+/// Everything a stopped session hands to `package`.
+#[derive(Clone, Debug)]
+pub struct Recorded {
+    pub started: Started,
+    pub duration_ms: u64,
+    /// The speech model's name, as `transcribe::model_name` gives it.
+    pub model: String,
+    pub strokes: Vec<Stroke>,
+    /// `None` when the screen recording failed to finish: the package is
+    /// then audio, transcript and ink only, with no frames.
+    pub video: Option<Recording>,
+}
+
+/// The `annotation.json` for a session. Without video there is nothing to
+/// pull frames from, so the builder's frames are dropped rather than
+/// pointing at missing images.
 pub fn annotation(
     started: Started,
     duration_ms: u64,
     model: String,
     words: Vec<Word>,
     strokes: Vec<Stroke>,
+    video: Option<Video>,
 ) -> Annotation {
+    let has_video = video.is_some();
     let mut annotation = package::build(Session {
         id: session_id(started.unix_ms),
         started_at: rfc3339(started.unix_ms),
         duration_ms,
         display: started.display,
         frontmost_app: started.frontmost_app,
-        video: None,
+        video,
         audio: Audio {
             file: AUDIO_FILE.to_string(),
             offset_ms: started.audio_offset_ms,
@@ -99,17 +159,211 @@ pub fn annotation(
         strokes,
         missing_permissions: Vec::new(),
     });
-    annotation.frames.clear();
+    if !has_video {
+        annotation.frames.clear();
+    }
     annotation
 }
 
-/// Writes `audio.wav` and `annotation.json` into `folder`, creating it.
-pub fn write(folder: &Path, samples: &[f32], annotation: &Annotation) -> io::Result<()> {
+/// A finished package.
+#[derive(Debug)]
+pub struct Packaged {
+    pub folder: PathBuf,
+    pub annotation: Annotation,
+    /// The text of `summary.md`, which is what gets copied.
+    pub summary: String,
+    pub transcribe_ms: u64,
+    #[cfg(target_os = "macos")]
+    pub rendered: Option<crate::frames::Rendered>,
+    /// The package was written, but without something the user expects.
+    pub warning: Option<Problem>,
+}
+
+impl Packaged {
+    pub fn contact_sheet(&self) -> Option<PathBuf> {
+        (!self.annotation.frames.is_empty())
+            .then(|| self.folder.join(&self.annotation.contact_sheet))
+    }
+}
+
+/// Stopped session in, finished folder out: the MP4 moved in as
+/// `recording.mp4`, `audio.wav`, the transcript, key frames, the contact
+/// sheet, `annotation.json` and `summary.md`. `stopped` is when the stop tap
+/// was handled; the time from it to here is stored as `packagingMs`.
+///
+/// A failed transcription or failed frames still leave a package, without
+/// that part, and come back as `warning`. Only failing to write the folder
+/// itself is an error.
+pub fn package(
+    folder: &Path,
+    samples: &[f32],
+    recorded: Recorded,
+    stopped: Instant,
+    transcribe: impl FnOnce(&[f32]) -> Result<Vec<Word>, Problem>,
+) -> io::Result<Packaged> {
     std::fs::create_dir_all(folder)?;
+    let mut warnings: Vec<Problem> = Vec::new();
+    let video = match recorded.video {
+        Some(recording) => match move_file(&recording.path, &folder.join(VIDEO_FILE)) {
+            Ok(()) => Some(Video {
+                file: VIDEO_FILE.to_string(),
+                offset_ms: recording.offset_ms,
+                width: recording.width,
+                height: recording.height,
+                fps: recording.fps,
+                duration_ms: recording.duration_ms,
+            }),
+            Err(error) => {
+                warnings.push(
+                    no_images().because(format!("Move {}: {error}", recording.path.display())),
+                );
+                None
+            }
+        },
+        None => {
+            warnings.push(no_images().because("The screen recording did not finish"));
+            None
+        }
+    };
     crate::audio::save_wav(&folder.join(AUDIO_FILE), samples).map_err(io::Error::other)?;
-    let mut json = serde_json::to_string_pretty(annotation).map_err(io::Error::other)?;
-    json.push('\n');
-    std::fs::write(folder.join(ANNOTATION_FILE), json)
+
+    let transcribing = Instant::now();
+    let words = transcribe(samples).unwrap_or_else(|error| {
+        warnings.push(
+            Problem::new("Annotation saved without a transcript", error.fix.clone()).because(error),
+        );
+        Vec::new()
+    });
+    let transcribe_ms = elapsed_ms(transcribing);
+
+    let mut annotation = annotation(
+        recorded.started,
+        recorded.duration_ms,
+        recorded.model,
+        words,
+        recorded.strokes,
+        video,
+    );
+    #[cfg(target_os = "macos")]
+    let rendered = match annotation.video.is_some() && !annotation.frames.is_empty() {
+        true => match crate::frames::render(folder, &annotation, &folder.join(VIDEO_FILE)) {
+            Ok(rendered) => Some(rendered),
+            Err(error) => {
+                annotation.frames.clear();
+                warnings.push(no_images().because(error));
+                None
+            }
+        },
+        false => None,
+    };
+    annotation.packaging_ms = Some(elapsed_ms(stopped));
+    let summary = package::write_package(folder, &annotation)?;
+    Ok(Packaged {
+        folder: folder.to_path_buf(),
+        annotation,
+        summary,
+        transcribe_ms,
+        #[cfg(target_os = "macos")]
+        rendered,
+        warning: warnings.into_iter().reduce(Problem::and),
+    })
+}
+
+fn no_images() -> Problem {
+    Problem::new(
+        "Annotation saved without images",
+        "The summary and audio are in the folder. Record again to get frames.",
+    )
+}
+
+/// `rename`, or copy and delete when the temp folder is on another volume.
+fn move_file(from: &Path, to: &Path) -> io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to)?;
+    std::fs::remove_file(from)
+}
+
+fn elapsed_ms(since: Instant) -> u64 {
+    since.elapsed().as_millis() as u64
+}
+
+/// One session, as History lists it.
+#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnotationEntry {
+    /// The folder name, `2026-11-14_14-56-36`.
+    pub id: String,
+    /// RFC 3339, UTC.
+    pub started_at: String,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    pub app: Option<String>,
+    pub frames: u32,
+    pub marks: u32,
+    pub text: String,
+    /// Absolute path of the folder, for display.
+    pub folder: String,
+    pub has_contact_sheet: bool,
+    #[ts(type = "number | null")]
+    pub packaging_ms: Option<u64>,
+}
+
+/// The sessions under `dir`, newest first. Folders without a readable
+/// `annotation.json` (an unfinished or foreign folder) are left out.
+pub fn list(dir: &Path) -> io::Result<Vec<AnnotationEntry>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut ids: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|id| is_session_id(id))
+        .collect();
+    ids.sort_unstable_by(|a, b| b.cmp(a));
+    Ok(ids
+        .into_iter()
+        .filter_map(|id| {
+            let folder = dir.join(&id);
+            let json = std::fs::read(folder.join(ANNOTATION_FILE)).ok()?;
+            let annotation: Annotation = serde_json::from_slice(&json)
+                .inspect_err(|error| log::warn!("[annotate] skip {id}: {error}"))
+                .ok()?;
+            Some(AnnotationEntry {
+                has_contact_sheet: !annotation.frames.is_empty()
+                    && folder.join(&annotation.contact_sheet).is_file(),
+                id,
+                started_at: annotation.started_at,
+                duration_ms: annotation.duration_ms,
+                app: annotation.frontmost_app.map(|app| app.name),
+                frames: annotation.frames.len() as u32,
+                marks: annotation.marks.len() as u32,
+                text: annotation.transcript.text,
+                folder: folder.display().to_string(),
+                packaging_ms: annotation.packaging_ms,
+            })
+        })
+        .take(LIST_LIMIT)
+        .collect())
+}
+
+/// The folder of session `id` under `dir`, if `id` is a session id and not
+/// a path that leaves `dir`.
+pub fn session_folder(dir: &Path, id: &str) -> Option<PathBuf> {
+    is_session_id(id).then(|| dir.join(id))
+}
+
+/// `2026-11-14_14-56-36`: what `session_id` makes, and nothing else.
+fn is_session_id(id: &str) -> bool {
+    let shape = "dddd-dd-dd_dd-dd-dd";
+    id.len() == shape.len()
+        && id.chars().zip(shape.chars()).all(|(c, s)| match s {
+            'd' => c.is_ascii_digit(),
+            other => c == other,
+        })
 }
 
 /// `2026-11-14_14-56-36`, UTC, the folder name and `id`.
@@ -243,6 +497,7 @@ mod tests {
         Started {
             unix_ms: 1_794_668_196_159,
             audio_offset_ms: 40,
+            video_offset_ms: 120,
             display: Display {
                 id: 1,
                 frame: package::Rect {
@@ -274,7 +529,14 @@ mod tests {
             word(7000, 7400, "Fix"),
             word(7400, 7800, "it."),
         ];
-        let annotation = annotation(started(), 10_000, "ggml-base.en".into(), words, Vec::new());
+        let annotation = annotation(
+            started(),
+            10_000,
+            "ggml-base.en".into(),
+            words,
+            Vec::new(),
+            None,
+        );
 
         assert_eq!(annotation.id, "2026-11-14_14-56-36");
         assert_eq!(annotation.started_at, "2026-11-14T14:56:36.159Z");
@@ -310,6 +572,7 @@ mod tests {
             "ggml-base.en".into(),
             Vec::new(),
             ink.finish(9_000),
+            None,
         );
 
         assert_eq!(annotation.strokes.len(), 3);
@@ -322,20 +585,30 @@ mod tests {
         assert_eq!(json["strokes"][2]["t1"], 4_500);
     }
 
+    fn recorded(strokes: Vec<Stroke>) -> Recorded {
+        Recorded {
+            started: started(),
+            duration_ms: 10_000,
+            model: "ggml-base.en".into(),
+            strokes,
+            video: None,
+        }
+    }
+
     #[test]
-    fn write_creates_the_folder_with_a_16k_wav_and_json() {
+    fn package_without_video_writes_audio_json_and_summary_and_warns() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join(FOLDER).join("2026-11-14_14-56-36");
         let samples = vec![0.0f32; 160_000];
-        let annotation = annotation(
-            started(),
-            10_000,
-            "ggml-base.en".into(),
-            Vec::new(),
-            Vec::new(),
-        );
 
-        write(&folder, &samples, &annotation).unwrap();
+        let packaged = package(
+            &folder,
+            &samples,
+            recorded(Vec::new()),
+            Instant::now(),
+            |_| Ok(vec![word(500, 800, "Hello.")]),
+        )
+        .unwrap();
 
         let wav = hound::WavReader::open(folder.join(AUDIO_FILE)).unwrap();
         assert_eq!(wav.spec().sample_rate, 16_000);
@@ -347,8 +620,131 @@ mod tests {
         assert_eq!(json["durationMs"], 10_000);
         assert_eq!(json["audio"]["file"], "audio.wav");
         assert_eq!(json["frames"], serde_json::json!([]));
+        assert!(json["packagingMs"].is_u64());
         let read_back: Annotation = serde_json::from_value(json).unwrap();
-        assert_eq!(read_back, annotation);
+        assert_eq!(read_back, packaged.annotation);
+        assert_eq!(
+            std::fs::read_to_string(folder.join(SUMMARY_FILE)).unwrap(),
+            packaged.summary
+        );
+        assert!(packaged.summary.contains("“Hello.”"));
+        assert!(packaged.contact_sheet().is_none());
+        assert_eq!(
+            packaged.warning.unwrap().title,
+            "Annotation saved without images"
+        );
+    }
+
+    #[test]
+    fn a_failed_transcription_still_writes_the_package() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("2026-11-14_14-56-36");
+        let packaged = package(
+            &folder,
+            &[0.0; 16_000],
+            recorded(Vec::new()),
+            Instant::now(),
+            |_| Err(Problem::new("Transcription failed", "Try again.")),
+        )
+        .unwrap();
+        assert!(folder.join(ANNOTATION_FILE).is_file());
+        assert!(packaged.annotation.transcript.words.is_empty());
+        let warning = packaged.warning.unwrap();
+        assert!(warning.title.contains("without images"), "{warning}");
+        assert!(warning.fix.contains("without a transcript"), "{warning}");
+    }
+
+    #[test]
+    fn a_missing_video_file_is_a_warning_not_a_lost_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("2026-11-14_14-56-36");
+        let mut session = recorded(Vec::new());
+        session.video = Some(Recording {
+            path: dir.path().join("gone.mp4"),
+            offset_ms: 100,
+            width: 2560,
+            height: 1600,
+            fps: 15,
+            duration_ms: 9_000,
+        });
+        let packaged = package(&folder, &[0.0; 16_000], session, Instant::now(), |_| {
+            Ok(Vec::new())
+        })
+        .unwrap();
+        assert!(packaged.annotation.video.is_none());
+        assert!(
+            packaged
+                .warning
+                .unwrap()
+                .detail
+                .unwrap()
+                .contains("gone.mp4")
+        );
+    }
+
+    #[test]
+    fn list_returns_sessions_newest_first_and_skips_other_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        for (id, text) in [
+            ("2026-11-14_09-00-00", "First."),
+            ("2026-11-15_10-30-00", "Second."),
+        ] {
+            let mut session = recorded(Vec::new());
+            session.started.unix_ms = 0;
+            let words = vec![word(0, 300, text)];
+            package(
+                &dir.path().join(id),
+                &[0.0; 1_600],
+                session,
+                Instant::now(),
+                |_| Ok(words),
+            )
+            .unwrap();
+        }
+        std::fs::create_dir_all(dir.path().join("not-a-session")).unwrap();
+        std::fs::create_dir_all(dir.path().join("2026-11-16_00-00-00")).unwrap();
+
+        let entries = list(dir.path()).unwrap();
+
+        let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["2026-11-15_10-30-00", "2026-11-14_09-00-00"]);
+        assert_eq!(entries[0].text, "Second.");
+        assert_eq!(entries[0].duration_ms, 10_000);
+        assert!(!entries[0].has_contact_sheet);
+        assert!(entries[0].packaging_ms.is_some());
+        assert!(list(&dir.path().join("missing")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_session_ids_name_a_folder() {
+        let dir = Path::new("/data/annotations");
+        assert_eq!(
+            session_folder(dir, "2026-11-14_14-56-36"),
+            Some(dir.join("2026-11-14_14-56-36"))
+        );
+        for bad in [
+            "..",
+            "../../etc",
+            "2026-11-14_14-56-3/",
+            "",
+            "2026-11-14T14-56-36",
+        ] {
+            assert_eq!(session_folder(dir, bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn typescript_contract_matches_rust_annotation_entry() {
+        let contract = format!("export {}\n", AnnotationEntry::decl());
+        let checked_in = include_str!("../../src/annotations.generated.ts");
+        let compact = |text: &str| {
+            text.chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+                .replace(',', ";")
+                .replace(";}", "}")
+        };
+        assert_eq!(compact(checked_in), compact(&contract));
     }
 
     /// The stop-to-saved path with the real whisper-cli: 10 s of `say` speech
@@ -384,16 +780,14 @@ mod tests {
         samples.resize(160_000, 0.0);
 
         let started_at = std::time::Instant::now();
-        let words = crate::transcribe::transcribe_timed(&samples, &model).unwrap();
-        let annotation = annotation(
-            started(),
-            10_000,
-            crate::transcribe::model_name(&model),
-            words,
-            Vec::new(),
-        );
-        let folder = temp.path().join(FOLDER).join(&annotation.id);
-        write(&folder, &samples, &annotation).unwrap();
+        let folder = temp.path().join(FOLDER).join(session_id(started().unix_ms));
+        let mut session = recorded(Vec::new());
+        session.model = crate::transcribe::model_name(&model);
+        let annotation = package(&folder, &samples, session, started_at, |samples| {
+            crate::transcribe::transcribe_timed(samples, &model)
+        })
+        .unwrap()
+        .annotation;
         eprintln!(
             "stop_to_saved_ms={} words={} text={:?}",
             started_at.elapsed().as_millis(),

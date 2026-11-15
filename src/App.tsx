@@ -119,17 +119,15 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
                   ? { kind: "annotating", seconds }
                   : status.phase === "packaging"
                     ? { kind: "packaging" }
-                    : status.phase === "annotated"
-                      ? { kind: "annotated" }
-                      : status.phase === "transcribing"
-                        ? { kind: "transcribing" }
-                        : status.phase === "done"
-                          ? { kind: "done" }
-                          : status.phase === "copied"
-                            ? { kind: "copied" }
-                            : status.phase === "skipped"
-                              ? { kind: "skipped" }
-                              : { kind: "ready", message: "Ready" }
+                    : status.phase === "transcribing"
+                      ? { kind: "transcribing" }
+                      : status.phase === "done"
+                        ? { kind: "done" }
+                        : status.phase === "copied"
+                          ? { kind: "copied" }
+                          : status.phase === "skipped"
+                            ? { kind: "skipped" }
+                            : { kind: "ready", message: "Ready" }
           }
           notice={
             error || !NOTICE_PHASES.has(status.phase)

@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type EventCallback } from "@tauri-apps/api/event";
 import { z } from "zod";
-import { AnnotateBar, InkCanvas, inkOpacity, type InkStroke } from "./ui";
+import {
+  AnnotateBar,
+  AnnotateCopiedBar,
+  InkCanvas,
+  inkOpacity,
+  type InkStroke,
+} from "./ui";
 
 const pointSchema = z.object({
   id: z.number().int(),
@@ -15,6 +21,8 @@ const barSchema = z.object({
   recording: z.boolean(),
   startedAtMs: z.number(),
   pen: z.boolean(),
+  copied: z.boolean(),
+  hasImage: z.boolean(),
 });
 type BarState = z.infer<typeof barSchema>;
 
@@ -135,11 +143,13 @@ export function AnnotateBarWindow() {
   useTransparentWindow();
   const [state, setState] = useState<BarState | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [imageCopied, setImageCopied] = useState(false);
   const [handlers] = useState(() => ({
     "annotate-bar": (({ payload }) => {
       const result = barSchema.safeParse(payload);
-      if (result.success) setState(result.data);
-      else console.error(result.error);
+      if (!result.success) return console.error(result.error);
+      setState(result.data);
+      if (!result.data.copied) setImageCopied(false);
     }) satisfies EventCallback<unknown>,
   }));
   useEvents(handlers);
@@ -154,6 +164,21 @@ export function AnnotateBarWindow() {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
   }, [state?.recording, state?.startedAtMs]);
+  if (state?.copied)
+    return (
+      <main className="annotate-bar-window">
+        <AnnotateCopiedBar
+          hasImage={state.hasImage}
+          imageCopied={imageCopied}
+          onCopyImage={() =>
+            void invoke("annotate_copy_image")
+              .then(() => setImageCopied(true))
+              .catch(console.error)
+          }
+          onClose={() => void invoke("annotate_dismiss").catch(console.error)}
+        />
+      </main>
+    );
   if (!state?.recording) return null;
   return (
     <main className="annotate-bar-window">

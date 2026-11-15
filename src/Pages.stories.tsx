@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { useState } from "react";
 import { expect, userEvent, waitFor, within } from "storybook/test";
+import type { AnnotationEntry } from "./annotations";
 import type { HistoryEntry, TakeStatus } from "./history";
 import modelFixture from "./models.fixture.json";
 import {
@@ -86,6 +87,38 @@ type ModelsMock = {
   states?: Partial<Record<SpeechModel, ModelState>>;
   whisperMissing?: boolean;
 };
+const annotationsFolder =
+  "/Users/you/Library/Application Support/com.kelechiodom.dictate/annotations";
+const sampleAnnotations = (now: number): AnnotationEntry[] => [
+  {
+    id: "2026-11-15_10-42-08",
+    startedAt: new Date(now - 6 * minute).toISOString(),
+    durationMs: 49_430,
+    app: "System Settings",
+    frames: 3,
+    marks: 3,
+    text: "This toggle should be on the right. And this list is too dense. The error at the bottom is cut off.",
+    folder: `${annotationsFolder}/2026-11-15_10-42-08`,
+    hasContactSheet: true,
+    packagingMs: 3_180,
+  },
+  {
+    id: "2026-11-14_16-05-51",
+    startedAt: new Date(now - 19 * 60 * minute).toISOString(),
+    durationMs: 12_100,
+    app: "Linear",
+    frames: 0,
+    marks: 1,
+    text: "",
+    folder: `${annotationsFolder}/2026-11-14_16-05-51`,
+    hasContactSheet: false,
+    packagingMs: null,
+  },
+];
+/** Annotate commands the pages sent, newest last, as `command id`. */
+const annotateCalls: string[] = [];
+type AnnotateMock = { entries?: AnnotationEntry[]; permission?: boolean };
+
 const MB = 1_000_000;
 /** Locations the About page asked the app to open, newest last. */
 const opened: string[] = [];
@@ -103,7 +136,9 @@ function mockApp(
   initialHistory: HistoryEntry[],
   models: ModelsMock = { states: { "base.en": { kind: "installed" } } },
   overrides: Partial<Settings> = {},
+  annotate: AnnotateMock = {},
 ) {
+  annotateCalls.length = 0;
   let history = initialHistory;
   const states = { ...models.states };
   const catalog = modelFixture.map((entry) => modelEntrySchema.parse(entry));
@@ -140,6 +175,8 @@ function mockApp(
     soundFeedback: false,
     debugRecordings: false,
     annotateShortcut: "Alt+Shift+KeyS",
+    annotateEnabled: true,
+    annotateShowInRecordings: false,
     ...overrides,
   };
   mockWindows("settings");
@@ -181,6 +218,18 @@ function mockApp(
         };
       }
       if (command === "list_models") return listModels();
+      if (command === "list_annotations") return annotate.entries ?? [];
+      if (command === "screen_permission") return annotate.permission ?? true;
+      if (
+        command === "copy_annotation" ||
+        command === "reveal_annotation" ||
+        command === "open_screen_recording_settings"
+      ) {
+        annotateCalls.push(
+          `${command} ${args && "id" in args ? String(args.id) : ""}`.trim(),
+        );
+        return null;
+      }
       if (command === "whisper_status")
         return models.whisperMissing ? problems.whisperMissing : null;
       if (command === "download_model") {
@@ -301,6 +350,69 @@ export const History: Story = {
     ).toHaveFocus();
     await expect(c.getByRole("button", { name: "Copy text" })).toBeDisabled();
     await userEvent.click(c.getByRole("button", { name: /Bakery/i }));
+  },
+};
+const annotationsHistory = ({
+  globals,
+}: {
+  globals: Record<string, unknown>;
+}) =>
+  mockApp(
+    globals,
+    [],
+    undefined,
+    {},
+    {
+      entries: sampleAnnotations(Date.now()),
+    },
+  );
+export const HistoryAnnotations: Story = {
+  beforeEach: annotationsHistory,
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("radio", { name: "Annotations" }));
+    const detail = await c.findByRole("region", { name: "Annotation" });
+    await expect(detail).toHaveTextContent(
+      "This toggle should be on the right.",
+    );
+    await expect(detail).toHaveTextContent("3 with a contact sheet");
+    await expect(detail).toHaveTextContent("3.2 s");
+    await expect(detail.scrollWidth).toBeLessThanOrEqual(detail.clientWidth);
+  },
+};
+export const HistoryAnnotationActions: Story = {
+  beforeEach: annotationsHistory,
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("radio", { name: "Annotations" }));
+    await userEvent.click(await c.findByRole("button", { name: "Copy again" }));
+    await expect(
+      await c.findByRole("button", { name: "Copied" }),
+    ).toBeVisible();
+    await userEvent.click(c.getByRole("button", { name: "Reveal in Finder" }));
+    await expect(annotateCalls).toEqual([
+      "copy_annotation 2026-11-15_10-42-08",
+      "reveal_annotation 2026-11-15_10-42-08",
+    ]);
+    await userEvent.click(
+      c.getByRole("button", { name: /1 mark, nothing said/ }),
+    );
+    await expect(
+      c.getByRole("region", { name: "Annotation" }),
+    ).toHaveTextContent("Nothing was said in this session.");
+  },
+};
+export const HistoryAnnotationsEmpty: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, []),
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("radio", { name: "Annotations" }));
+    await expect(
+      await c.findByRole("heading", { name: "No annotations yet" }),
+    ).toBeVisible();
   },
 };
 export const HistoryDelete: Story = {
@@ -549,6 +661,47 @@ export const ModelsError: Story = {
     await expect(
       c.getByRole("button", { name: "Retry Large v3 Turbo download" }),
     ).toBeVisible();
+  },
+};
+export const Annotate: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, []),
+  render: () => <GeneralPage page="Annotate" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(
+      await c.findByRole("switch", { name: "Annotate" }),
+    ).toBeChecked();
+    await expect(await c.findByText("Allowed")).toBeVisible();
+    await expect(
+      c.getByRole("switch", { name: "Show in screen recordings" }),
+    ).not.toBeChecked();
+  },
+};
+export const AnnotateToggles: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, []),
+  render: () => <GeneralPage page="Annotate" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const enabled = await c.findByRole("switch", { name: "Annotate" });
+    const show = c.getByRole("switch", { name: "Show in screen recordings" });
+    await userEvent.click(show);
+    await waitFor(() => expect(show).toBeChecked());
+    await userEvent.click(enabled);
+    await waitFor(() => expect(enabled).not.toBeChecked());
+    await expect(c.getByRole("button", { name: /Shortcut/ })).toBeDisabled();
+  },
+};
+export const AnnotateNotAllowed: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], undefined, {}, { permission: false }),
+  render: () => <GeneralPage page="Annotate" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(await c.findByText("Not allowed")).toBeVisible();
+    await userEvent.click(
+      c.getByRole("button", { name: "Open System Settings" }),
+    );
+    await expect(annotateCalls).toEqual(["open_screen_recording_settings"]);
   },
 };
 export const Output: Story = {

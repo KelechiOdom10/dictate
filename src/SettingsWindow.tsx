@@ -4,6 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { useQuery } from "@tanstack/react-query";
 import General from "./GeneralSettings";
 import HistoryPage from "./HistoryPage";
+import AnnotatePage from "./AnnotatePage";
 import ModelsPage from "./ModelsPage";
 import OutputPage from "./OutputPage";
 import AdvancedPage from "./AdvancedPage";
@@ -17,6 +18,7 @@ import {
   TextCursorInput,
   Settings2,
   Info,
+  PenLine,
 } from "lucide-react";
 import { useDictationStatus } from "./useDictationStatus";
 
@@ -24,7 +26,9 @@ const subtitles: Record<string, string> = {
   General: "Make dictate feel like second nature.",
   Models:
     "Choose how dictate turns speech into text. Everything runs on this Mac.",
-  History: "Everything you’ve dictated, kept on this Mac.",
+  Annotate:
+    "Record your screen, draw on it and talk. Stop to copy it for your agent.",
+  History: "Everything you’ve dictated and annotated, kept on this Mac.",
   Output: "Decide what happens to your words once you stop speaking.",
   Advanced: "Fine-tune the microphone, overlay and troubleshooting.",
   About: "Version, source code and where dictate keeps its files.",
@@ -33,6 +37,7 @@ const subtitles: Record<string, string> = {
 const pages = [
   { name: "General", icon: SlidersHorizontal },
   { name: "Models", icon: Cpu },
+  { name: "Annotate", icon: PenLine },
   { name: "History", icon: History },
   { name: "Output", icon: TextCursorInput },
   { name: "Advanced", icon: Settings2 },
@@ -95,6 +100,8 @@ export default function SettingsWindow({
           <General onOpenModels={() => setPage("Models")} />
         ) : page === "Models" ? (
           <ModelsPage />
+        ) : page === "Annotate" ? (
+          <AnnotatePage />
         ) : page === "History" ? (
           <HistoryPage />
         ) : page === "Output" ? (
