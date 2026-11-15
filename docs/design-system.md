@@ -90,7 +90,7 @@ Use `size="sm" | "md" | "lg"` on Button, IconButton, Select, Chip,
 SegmentedControl, SearchField, ShortcutRecorder and KeyboardShortcut. Toggle uses
 the same size for its alignment box; the switch track stays 22px high. The
 control heights are 28 / 32 / 40px, type 12 / 13 / 14px, horizontal padding
-10 / 12 / 16px, icons 14 / 16 / 18px and gaps 6 / 8 / 10px. Settings controls
+12 / 14 / 18px, icons 14 / 16 / 18px and gaps 6 / 8 / 10px. Settings controls
 use the default `md`. The “Controls side by side” story measures the rendered
 height, font size, horizontal padding and gaps as well as showing the comparison.
 

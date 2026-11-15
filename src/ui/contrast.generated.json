@@ -236,6 +236,15 @@
   {
     "theme": "ember",
     "mode": "light",
+    "foreground": "text",
+    "background": "segment-thumb",
+    "ratio": 17.23,
+    "minimum": 4.5,
+    "pass": true
+  },
+  {
+    "theme": "ember",
+    "mode": "light",
     "foreground": "on-primary",
     "background": "primary",
     "ratio": 16.63,
@@ -644,6 +653,15 @@
     "foreground": "info",
     "background": "control-pressed",
     "ratio": 6.95,
+    "minimum": 4.5,
+    "pass": true
+  },
+  {
+    "theme": "ember",
+    "mode": "dark",
+    "foreground": "text",
+    "background": "segment-thumb",
+    "ratio": 7.33,
     "minimum": 4.5,
     "pass": true
   },
@@ -1064,6 +1082,15 @@
   {
     "theme": "paper",
     "mode": "light",
+    "foreground": "text",
+    "background": "segment-thumb",
+    "ratio": 17.23,
+    "minimum": 4.5,
+    "pass": true
+  },
+  {
+    "theme": "paper",
+    "mode": "light",
     "foreground": "on-primary",
     "background": "primary",
     "ratio": 16.63,
@@ -1472,6 +1499,15 @@
     "foreground": "info",
     "background": "control-pressed",
     "ratio": 6.95,
+    "minimum": 4.5,
+    "pass": true
+  },
+  {
+    "theme": "paper",
+    "mode": "dark",
+    "foreground": "text",
+    "background": "segment-thumb",
+    "ratio": 7.33,
     "minimum": 4.5,
     "pass": true
   },

@@ -116,7 +116,7 @@ p {
   border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
-  min-height: calc(var(--control-height) - 4px);
+  min-height: calc(var(--control-height) - 6px);
   padding: 0 var(--control-padding);
   color: var(--muted);
   font-weight: var(--weight-medium);
@@ -131,8 +131,8 @@ p {
   background: var(--segment-thumb);
   color: var(--text);
   box-shadow:
-    0 0 0 1px var(--keycap-edge),
-    0 1px 2px oklch(0 0 0 / 0.08);
+    0 0 0 1px var(--segment-edge),
+    0 1px 2px var(--segment-shadow);
 }
 .ui-segments input:focus-visible + span {
   outline: 2px solid var(--accent);
@@ -663,7 +663,7 @@ kbd {
   border: 0;
   border-radius: var(--radius-pill);
   background: var(--control);
-  padding: 2px;
+  padding: 3px;
   gap: var(--space-half);
   min-height: var(--control-height);
 }
@@ -954,8 +954,8 @@ button:active:not(:disabled) {
   background: transparent;
   color: var(--text);
   width: fit-content;
-  padding: 0 var(--space-1);
-  margin-inline-end: calc(0px - var(--space-1));
+  padding: 0 var(--control-gap);
+  margin-inline-end: calc(0px - var(--control-gap));
 }
 .ui-search:has(input:focus-visible) {
   outline: 2px solid var(--accent);
