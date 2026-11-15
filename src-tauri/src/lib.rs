@@ -698,7 +698,6 @@ fn adopt_legacy_model(app: &AppHandle, pending: SpeechModel, dir: &Path, candida
                 }
                 let mut settings = runtime.settings.clone();
                 settings.speech_model = model;
-                settings.offer_parakeet = model != SpeechModel::ParakeetUnifiedEn;
                 app.persist(&settings)?;
                 runtime.settings = settings.clone();
                 Ok(Some(settings))
@@ -769,10 +768,7 @@ fn get_settings(app: AppHandle) -> Result<Settings, String> {
 }
 
 #[tauri::command]
-fn save_settings(app: AppHandle, mut settings: Settings) -> Result<Settings, String> {
-    if settings.speech_model == SpeechModel::ParakeetUnifiedEn {
-        settings.offer_parakeet = false;
-    }
+fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let state = app.state::<Mutex<Runtime>>();
     let mut runtime = state.lock().map_err(|e| e.to_string())?;
     let previous = runtime.settings.clone();
