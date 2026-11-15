@@ -30,8 +30,15 @@ async function openSettings(
           : "text/html";
     await route.fulfill({ body: await readFile(file), contentType: type });
   });
+  const models = JSON.parse(
+    await readFile(path.join(process.cwd(), "src/models.fixture.json"), "utf8"),
+  ).map((model: { id: string }) =>
+    model.id === "base.en"
+      ? { ...model, active: true, state: { kind: "installed" } }
+      : model,
+  );
   await page.addInitScript(
-    ({ failLoad, startupError }) => {
+    ({ failLoad, startupError, models }) => {
       let status = { phase: "idle", error: startupError };
       const callbacks = new Map<number, (response: unknown) => void>();
       const listeners = new Map<string, { id: number; handler: number }[]>();
@@ -62,6 +69,7 @@ async function openSettings(
         overlayPosition: "bottom",
         historyRetention: "week",
         appearanceMode: "system",
+        speechModel: "base.en",
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
         value: { unregisterListener: () => {} },
@@ -104,6 +112,8 @@ async function openSettings(
             if (command === "plugin:app|version") return "0.1.0";
             if (command === "list_history")
               return { entries: [], hasMore: false };
+            if (command === "list_models") return models;
+            if (command === "whisper_status") return null;
             if (command === "dismiss_error") {
               status = { phase: "idle", error: null };
               emit("dictation-state", "idle");
@@ -125,7 +135,7 @@ async function openSettings(
         },
       });
     },
-    { failLoad, startupError },
+    { failLoad, startupError, models },
   );
   await page.goto(
     overlay ? "http://dictate.test/" : "http://dictate.test/?window=settings",
@@ -164,7 +174,12 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
   await expect(
     page.getByRole("button", { name: "Shortcut", exact: true }),
   ).toContainText("⌃⇧D");
-  await page.getByRole("button", { name: "Models", exact: true }).click();
+  await expect(page.getByLabel("Speech model")).toHaveValue("base.en");
+  await page.getByRole("button", { name: "Manage models" }).click();
+  await expect(
+    page.getByRole("region", { name: "Base English" }),
+  ).toContainText("In use");
+  await page.getByRole("button", { name: "Output", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Coming soon" }),
   ).toBeVisible();
@@ -281,6 +296,7 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           overlayPosition: "bottom",
           historyRetention: "week",
           appearanceMode: "system",
+          speechModel: "base.en",
         },
       },
       "*",
@@ -446,6 +462,7 @@ test("overlay applies appearance events live, including System changes", async (
                 overlayPosition: "bottom",
                 historyRetention: "week",
                 appearanceMode,
+                speechModel: "base.en",
               },
             },
             "*",
@@ -546,6 +563,7 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 appearanceMode,
                 overlayPosition: "bottom",
                 historyRetention: "week",
+                speechModel: "base.en",
               },
             },
             "*",

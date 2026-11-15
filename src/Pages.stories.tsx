@@ -2,13 +2,20 @@ import "./App.css";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
-import { AudioLines } from "lucide-react";
 import { useState } from "react";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import type { HistoryEntry, TakeStatus } from "./history";
+import modelFixture from "./models.fixture.json";
+import {
+  modelEntrySchema,
+  type ModelEntry,
+  type ModelState,
+  type SpeechModel,
+} from "./models";
+import problems from "./problems.fixture.json";
 import { settingsSchema, type Settings } from "./settings";
 import SettingsWindow from "./SettingsWindow";
-import { ModelCard, RecordingCapsule, SidebarNav } from "./ui";
+import { RecordingCapsule } from "./ui";
 
 const meta = {
   title: "Pages",
@@ -74,14 +81,43 @@ const sampleHistory = (now: number): HistoryEntry[] =>
     }),
   );
 
+type ModelsMock = {
+  active?: SpeechModel;
+  states?: Partial<Record<SpeechModel, ModelState>>;
+  whisperMissing?: boolean;
+};
+const MB = 1_000_000;
+
 async function mockSettings({ globals }: { globals: Record<string, unknown> }) {
-  return mockApp(globals, []);
+  return mockApp(globals, [], {
+    states: {
+      "base.en": { kind: "installed" },
+      "small.en": { kind: "installed" },
+    },
+  });
 }
 function mockApp(
   globals: Record<string, unknown>,
   initialHistory: HistoryEntry[],
+  models: ModelsMock = { states: { "base.en": { kind: "installed" } } },
 ) {
   let history = initialHistory;
+  const states = { ...models.states };
+  const catalog = modelFixture.map((entry) => modelEntrySchema.parse(entry));
+  const listModels = (): ModelEntry[] =>
+    catalog.map((entry) => ({
+      ...entry,
+      active: entry.id === settings.speechModel,
+      state: states[entry.id] ?? { kind: "available" },
+    }));
+  const modelArg = (args: unknown) =>
+    catalog.find(
+      (entry) =>
+        typeof args === "object" &&
+        args !== null &&
+        "model" in args &&
+        entry.id === args.model,
+    )!;
   let settings: Settings = {
     version: 1,
     shortcut: "Alt+Shift+Space",
@@ -92,6 +128,7 @@ function mockApp(
     overlayPosition: "bottom",
     historyRetention: "week",
     appearanceMode: globals.mode === "dark" ? "dark" : "light",
+    speechModel: models.active ?? "base.en",
   };
   mockWindows("settings");
   mockIPC(
@@ -121,6 +158,20 @@ function mockApp(
           hasMore: matches.length > limit,
         };
       }
+      if (command === "list_models") return listModels();
+      if (command === "whisper_status")
+        return models.whisperMissing ? problems.whisperMissing : null;
+      if (command === "download_model") {
+        const model = modelArg(args);
+        states[model.id] = {
+          kind: "downloading",
+          received: 0,
+          total: model.bytes,
+          cancelling: false,
+        };
+      }
+      if (command === "cancel_download") delete states[modelArg(args).id];
+      if (command === "delete_model") delete states[modelArg(args).id];
       if (command === "delete_history") {
         const id = args && "id" in args ? args.id : undefined;
         history = history.filter((entry) => entry.id !== id);
@@ -198,45 +249,6 @@ export const GeneralError: Story = {
     ).toHaveTextContent("Settings file could not be read.");
   },
 };
-function MockShell({
-  page,
-  children,
-}: {
-  page: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="settings-shell story-page">
-      <aside>
-        <div className="brand">
-          <AudioLines size={22} aria-hidden="true" />
-          <span>dictate</span>
-        </div>
-        <SidebarNav
-          label="Settings preview"
-          items={["General", "Models", "History"].map((label) => ({
-            label,
-            value: label,
-          }))}
-          value={page}
-          onChange={() => {}}
-        />
-        <footer>Preview · sample data</footer>
-      </aside>
-      <main className="settings-content">
-        <header>
-          <h1>{page}</h1>
-          <p>
-            {page === "History"
-              ? "A little space for everything you’ve said."
-              : "Find the right balance for your words."}
-          </p>
-        </header>
-        {children}
-      </main>
-    </div>
-  );
-}
 export const History: Story = {
   beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
   render: () => <GeneralPage page="History" />,
@@ -370,33 +382,129 @@ export const HistoryNoMatches: Story = {
     await c.findByRole("heading", { name: "No matches for “zebra”" });
   },
 };
-export const Models: Story = {
-  render: () => (
-    <MockShell page="Models">
-      <div className="story-stack">
-        <ModelCard
-          name="Base English"
-          description="A balanced everyday companion."
-          accuracy={75}
-          speed={90}
-          size="142 MB"
-          badge="Recommended"
-          status={{ kind: "installed" }}
-        />
-        <ModelCard
-          name="Small English"
-          description="More detail, a little more time."
-          accuracy={90}
-          speed={65}
-          size="466 MB"
-          status={{ kind: "downloading", progress: 42 }}
-        />
-        <p className="ui-date">
-          Illustrative ratings for this preview, not measured benchmarks.
-        </p>
-      </div>
-    </MockShell>
-  ),
+export const ModelsIdle: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, [], { states: {} }),
+  render: () => <GeneralPage page="Models" />,
+  play: async ({ canvasElement }) => {
+    await expect(
+      await within(canvasElement).findByText(
+        /Download a model to start dictating/,
+      ),
+    ).toBeVisible();
+  },
+};
+export const ModelsDownloadAndCancel: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, [], { states: {} }),
+  render: () => <GeneralPage page="Models" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(
+      await c.findByRole("button", { name: "Download Tiny English" }),
+    );
+    await userEvent.click(
+      await c.findByRole("button", { name: "Cancel Tiny English download" }),
+    );
+    await expect(
+      await c.findByRole("button", { name: "Download Tiny English" }),
+    ).toBeVisible();
+  },
+};
+export const ModelsDownloading: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], {
+      states: {
+        "base.en": { kind: "installed" },
+        "small.en": {
+          kind: "downloading",
+          received: 205 * MB,
+          total: 487_614_201,
+          cancelling: false,
+        },
+      },
+    }),
+  render: () => <GeneralPage page="Models" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(
+      await c.findByRole("progressbar", { name: "Downloading" }),
+    ).toBeVisible();
+    await expect(c.getByText("205 MB of 488 MB")).toBeVisible();
+  },
+};
+export const ModelsInstalled: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], {
+      states: {
+        "tiny.en": { kind: "installed" },
+        "base.en": { kind: "installed" },
+        "small.en": { kind: "installed" },
+      },
+    }),
+  render: () => <GeneralPage page="Models" />,
+  play: async ({ canvasElement }) => {
+    await expect(
+      await within(canvasElement).findByRole("region", {
+        name: "Base English",
+      }),
+    ).toHaveTextContent("In use");
+  },
+};
+export const ModelsUseAndDelete: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], {
+      states: {
+        "tiny.en": { kind: "installed" },
+        "base.en": { kind: "installed" },
+        "small.en": { kind: "installed" },
+      },
+    }),
+  render: () => <GeneralPage page="Models" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(
+      await c.findByRole("button", { name: "Use Small English" }),
+    );
+    await waitFor(() =>
+      expect(
+        c.getByRole("region", { name: "Small English" }),
+      ).toHaveTextContent("In use"),
+    );
+    await waitFor(() =>
+      expect(c.getByRole("region", { name: "Small English" })).toContainElement(
+        document.activeElement as HTMLElement,
+      ),
+    );
+    await userEvent.click(
+      c.getByRole("button", { name: "Delete Tiny English" }),
+    );
+    await userEvent.click(c.getByRole("button", { name: "Delete model" }));
+    await waitFor(() =>
+      expect(
+        c.getByRole("button", { name: "Download Tiny English" }),
+      ).toHaveFocus(),
+    );
+  },
+};
+export const ModelsError: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], {
+      whisperMissing: true,
+      states: {
+        "base.en": { kind: "installed" },
+        "large-v3-turbo": {
+          kind: "failed",
+          message: "Download failed. Check your connection and try again.",
+        },
+      },
+    }),
+  render: () => <GeneralPage page="Models" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(await c.findByText("brew install whisper.cpp")).toBeVisible();
+    await expect(
+      c.getByRole("button", { name: "Retry Large v3 Turbo download" }),
+    ).toBeVisible();
+  },
 };
 export const Overlay: Story = {
   render: () => (

@@ -4,6 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { useQuery } from "@tanstack/react-query";
 import General from "./GeneralSettings";
 import HistoryPage from "./HistoryPage";
+import ModelsPage from "./ModelsPage";
 import { Button, EmptyState, SidebarNav, Toast } from "./ui";
 import {
   AudioLines,
@@ -71,7 +72,9 @@ export default function SettingsWindow({
               ? "Make dictate feel like second nature."
               : page === "History"
                 ? "Everything you’ve dictated, kept on this Mac."
-                : `Your ${page.toLowerCase()} preferences, all in one place.`}
+                : page === "Models"
+                  ? "Choose how dictate turns speech into text. Everything runs on this Mac."
+                  : `Your ${page.toLowerCase()} preferences, all in one place.`}
           </p>
         </header>
         {status.error && (
@@ -85,7 +88,9 @@ export default function SettingsWindow({
           </Toast>
         )}
         {page === "General" ? (
-          <General />
+          <General onOpenModels={() => setPage("Models")} />
+        ) : page === "Models" ? (
+          <ModelsPage />
         ) : page === "History" ? (
           <HistoryPage />
         ) : (

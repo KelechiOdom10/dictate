@@ -1,5 +1,12 @@
-import { useId, useRef, type ReactNode } from "react";
-import { Check, CircleAlert, Info } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  Check,
+  CircleAlert,
+  Download,
+  HardDrive,
+  Info,
+  Trash2,
+} from "lucide-react";
 import { Button } from "./Button";
 
 export function Card({ children }: { children: ReactNode }) {
@@ -146,16 +153,21 @@ export function DetailPanel({
 export function ProgressBar({
   label,
   value,
+  detail,
 }: {
   label: string;
   value?: number;
+  /** Replaces the percentage, e.g. "120 of 466 MB". */
+  detail?: string;
 }) {
   return (
     <div className="ui-progress">
       <span>{label}</span>
       <progress aria-label={label} max={100} value={value} />
-      {value !== undefined && (
-        <span className="ui-date">{Math.round(value)}%</span>
+      {(detail !== undefined || value !== undefined) && (
+        <span className="ui-date">
+          {detail ?? `${Math.round(value ?? 0)}%`}
+        </span>
       )}
     </div>
   );
@@ -209,79 +221,238 @@ export function Toast({
     </div>
   );
 }
+export function Confirm({
+  question,
+  confirmLabel,
+  children,
+  onConfirm,
+  onCancel,
+}: {
+  question: string;
+  confirmLabel: string;
+  children?: ReactNode;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <div
+      className="ui-confirm"
+      role="group"
+      aria-label={question}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+      }}
+    >
+      <div>
+        <p className="ui-confirm-question">{question}</p>
+        {children && <p className="ui-preview">{children}</p>}
+      </div>
+      <div className="ui-actions">
+        <Button ref={cancel} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" onClick={onConfirm}>
+          {confirmLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+export type ModelRating = {
+  label: string;
+  /** 0–1, drawn as a meter. */
+  value: number;
+  /** What the value means in words, e.g. "Good" or "0.4 s". */
+  text: string;
+};
 export type ModelStatus =
   | { kind: "available"; onDownload: () => void }
-  | { kind: "downloading"; progress: number }
-  | { kind: "installed" }
+  | {
+      kind: "downloading";
+      progress: number;
+      detail: string;
+      cancelling: boolean;
+      onCancel: () => void;
+    }
+  | {
+      kind: "installed";
+      active: boolean;
+      onUse: () => void;
+      onDelete: () => void;
+    }
   | { kind: "error"; message: string; onRetry: () => void };
 export function ModelCard({
   name,
   description,
-  accuracy,
-  speed,
+  ratings,
   size,
   badge,
   status,
+  disabled = false,
 }: {
   name: string;
   description: string;
-  accuracy: number;
-  speed: number;
+  ratings: ModelRating[];
   size: string;
   badge?: string;
   status: ModelStatus;
+  disabled?: boolean;
 }) {
-  const actions: Record<ModelStatus["kind"], ReactNode> = {
-    available: status.kind === "available" && (
-      <Button onClick={status.onDownload}>Download {name}</Button>
-    ),
-    downloading: status.kind === "downloading" && (
-      <ProgressBar label={`Downloading ${name}`} value={status.progress} />
-    ),
-    installed: <span className="ui-badge">Installed</span>,
-    error: status.kind === "error" && (
-      <>
-        <p role="alert">{status.message}</p>
-        <Button onClick={status.onRetry}>Retry {name}</Button>
-      </>
-    ),
-  };
+  const [confirming, setConfirming] = useState(false);
+  const headingId = useId();
+  const active = status.kind === "installed" && status.active;
+  const card = useRef<HTMLElement>(null);
+  const hadFocus = useRef(false);
+  // Use, Cancel and Delete each remove the button that was pressed. Keep
+  // keyboard focus in this card instead of letting it fall to the page.
+  useEffect(() => {
+    const focused = document.activeElement;
+    if (
+      !hadFocus.current ||
+      (focused !== document.body && focused !== card.current)
+    )
+      return;
+    const next =
+      card.current?.querySelector<HTMLElement>(
+        ".ui-model-actions button:not(:disabled)",
+      ) ?? card.current;
+    next?.focus();
+  }, [status.kind, active, confirming]);
+  const actions = (() => {
+    switch (status.kind) {
+      case "available":
+        return (
+          <Button
+            disabled={disabled}
+            aria-label={`Download ${name}`}
+            onClick={status.onDownload}
+          >
+            <Download size={14} aria-hidden="true" /> Download
+          </Button>
+        );
+      case "downloading":
+        return (
+          <>
+            <ProgressBar
+              label={status.cancelling ? "Cancelling" : "Downloading"}
+              value={status.progress}
+              detail={status.detail}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={status.cancelling}
+              aria-label={`Cancel ${name} download`}
+              onClick={status.onCancel}
+            >
+              Cancel
+            </Button>
+          </>
+        );
+      case "installed":
+        return status.active ? (
+          <span className="ui-date">Used for every dictation</span>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled}
+              aria-label={`Delete ${name}`}
+              onClick={() => setConfirming(true)}
+            >
+              <Trash2 size={14} aria-hidden="true" /> Delete
+            </Button>
+            <Button
+              variant="primary"
+              disabled={disabled}
+              aria-label={`Use ${name}`}
+              onClick={status.onUse}
+            >
+              Use
+            </Button>
+          </>
+        );
+      case "error":
+        return (
+          <>
+            <p className="ui-model-error" role="alert">
+              <CircleAlert size={14} aria-hidden="true" />
+              {status.message}
+            </p>
+            <Button
+              disabled={disabled}
+              aria-label={`Retry ${name} download`}
+              onClick={status.onRetry}
+            >
+              Retry
+            </Button>
+          </>
+        );
+    }
+  })();
   return (
-    <Card>
-      <div className="ui-model-heading">
-        <h2>{name}</h2>
-        {badge && <span className="ui-badge">{badge}</span>}
+    <section
+      ref={card}
+      tabIndex={-1}
+      onFocus={() => (hadFocus.current = true)}
+      onBlur={(e) => {
+        if (e.relatedTarget)
+          hadFocus.current = card.current?.contains(e.relatedTarget) ?? false;
+      }}
+      className={`ui-card ui-model${active ? " ui-model-active" : ""}`}
+      aria-labelledby={headingId}
+      aria-current={active ? "true" : undefined}
+    >
+      <div className="ui-model-top">
+        <div className="ui-model-about">
+          <div className="ui-model-heading">
+            <h2 id={headingId}>{name}</h2>
+            {active && <span className="ui-badge">In use</span>}
+            {badge && <span className="ui-badge ui-badge-quiet">{badge}</span>}
+          </div>
+          <p className="ui-preview">{description}</p>
+        </div>
+        <dl className="ui-model-ratings">
+          {ratings.map((rating) => (
+            <div key={rating.label} className="ui-model-rating">
+              <dt>{rating.label}</dt>
+              <dd>
+                <meter
+                  min={0}
+                  max={1}
+                  value={rating.value}
+                  aria-label={`${name} ${rating.label.toLowerCase()}`}
+                  aria-valuetext={rating.text}
+                />
+                <span className="ui-date">{rating.text}</span>
+              </dd>
+            </div>
+          ))}
+        </dl>
       </div>
-      <p className="ui-preview">{description}</p>
-      <ModelRating name={name} label="Accuracy" value={accuracy} />
-      <ModelRating name={name} label="Speed" value={speed} />
-      <div className="ui-model-footer">
-        <span className="ui-date">{size}</span>
-        {actions[status.kind]}
-      </div>
-    </Card>
-  );
-}
-
-function ModelRating({
-  name,
-  label,
-  value,
-}: {
-  name: string;
-  label: string;
-  value: number;
-}) {
-  return (
-    <div className="ui-progress">
-      <span>{label}</span>
-      <meter
-        min={0}
-        max={100}
-        value={value}
-        aria-label={`${name} ${label.toLowerCase()}`}
-      />
-      <span className="ui-date">{value}%</span>
-    </div>
+      {confirming && status.kind === "installed" && !status.active ? (
+        <Confirm
+          question={`Delete ${name}?`}
+          confirmLabel="Delete model"
+          onConfirm={() => {
+            setConfirming(false);
+            status.onDelete();
+          }}
+          onCancel={() => setConfirming(false)}
+        >
+          Frees {size}. You can download it again later.
+        </Confirm>
+      ) : (
+        <div className="ui-model-footer">
+          <span className="ui-date ui-model-size">
+            <HardDrive size={14} aria-hidden="true" /> {size}
+          </span>
+          <div className="ui-actions ui-model-actions">{actions}</div>
+        </div>
+      )}
+    </section>
   );
 }

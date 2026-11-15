@@ -227,3 +227,35 @@ the audio-thread request, device selection, stream creation and `play()`, but
 exclude physical key delivery, overlay rendering and first-sample latency.
 They do not close the end-to-end spike latency gate. Physical unplug/replug
 remains unverified.
+
+## Speech model speed — 15 November 2026
+
+Measured on this machine (Apple M4 Pro), Homebrew whisper.cpp 1.9.5, with the
+`measure_catalog_models` test in `src-tauri/src/transcribe.rs`. The fixture is
+generated at test time with `say -v Samantha` and converted to 16 kHz mono:
+94,335 samples (5.90 s) of “Please move the Thursday design review to Friday
+morning, and send Priya the updated budget before lunch.” Each model gets one
+warm-up call, then five timed calls of the real `transcribe` stage (WAV
+writing, subprocess startup, model load, inference, cleanup). Every file was
+checked against the catalog's size and SHA-256 before the run.
+
+| Model | Median | Min | Max | Returned text |
+|---|---:|---:|---:|---|
+| tiny.en | 188 ms | 177 ms | 194 ms | …send free of the updated budget before launch. |
+| base.en | 232 ms | 224 ms | 235 ms | …send free of the updated budget before launch. |
+| small.en | 437 ms | 435 ms | 502 ms | …send Priya the updated budget before lunch. |
+| medium.en | 1,037 ms | 1,031 ms | 1,052 ms | …send free of the updated budget before launch. |
+| large-v3-turbo | 1,084 ms | 1,075 ms | 1,093 ms | …send pre of the updated budget before launch. |
+
+The medians are the speed meters on the Models page (`models::CATALOG`). A
+first run of the same test about 20 minutes earlier gave medians within 3% of
+these. Only small.en got every word of this one sentence right, which is one
+synthetic sentence and not an accuracy measurement. The accuracy meters stay
+labelled as estimates from model size.
+
+Reproduce (about 3.9 GB of weights, kept outside the repo):
+
+```sh
+DICTATE_MEASURE_MODELS_DIR=/path/to/ggml/files \
+  cargo test --manifest-path src-tauri/Cargo.toml measure_catalog_models -- --ignored --nocapture
+```

@@ -28,6 +28,7 @@ import {
 } from "./settings";
 import {
   Button,
+  Confirm,
   DetailPanel,
   EmptyState,
   FilterChips,
@@ -290,46 +291,6 @@ export default function HistoryPage() {
           />
         </div>
       )}
-    </div>
-  );
-}
-
-function Confirm({
-  question,
-  confirmLabel,
-  children,
-  onConfirm,
-  onCancel,
-}: {
-  question: string;
-  confirmLabel: string;
-  children?: React.ReactNode;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => cancel.current?.focus(), []);
-  return (
-    <div
-      className="history-confirm"
-      role="group"
-      aria-label={question}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
-      }}
-    >
-      <div>
-        <p className="history-confirm-question">{question}</p>
-        {children && <p className="ui-preview">{children}</p>}
-      </div>
-      <div className="ui-actions">
-        <Button ref={cancel} onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={onConfirm}>
-          {confirmLabel}
-        </Button>
-      </div>
     </div>
   );
 }

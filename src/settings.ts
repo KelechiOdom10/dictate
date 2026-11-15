@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { speechModelSchema } from "./models";
 import type { Settings } from "./settings.generated";
 export type { Settings } from "./settings.generated";
 
@@ -14,6 +15,7 @@ export const settingsSchema = z
     overlayPosition: z.enum(["top", "bottom"]),
     appearanceMode: z.enum(["system", "light", "dark"]),
     historyRetention: z.enum(["day", "week", "month", "forever"]),
+    speechModel: speechModelSchema,
   })
   .strict() satisfies z.ZodType<Settings>;
 

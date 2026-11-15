@@ -1,3 +1,4 @@
+import type { SpeechModel } from "./models.generated";
 export type ShortcutMode = "hold" | "toggle";
 export type Theme = "ember" | "paper";
 export type AppearanceMode = "system" | "light" | "dark";
@@ -13,4 +14,5 @@ export type Settings = {
   appearanceMode: AppearanceMode;
   overlayPosition: OverlayPosition;
   historyRetention: HistoryRetention;
+  speechModel: SpeechModel;
 };

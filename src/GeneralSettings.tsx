@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Keyboard, Mic, Power, SunMoon } from "lucide-react";
+import { AudioWaveform, Keyboard, Mic, Power, SunMoon } from "lucide-react";
 import { z } from "zod";
 import {
   settingsSchema,
@@ -19,11 +19,17 @@ import {
   SettingsGroup,
 } from "./ui";
 import ShortcutRecorder from "./ShortcutRecorder";
+import { readModels, speechModelSchema } from "./models";
 import MicrophoneTest from "./MicrophoneTest";
 
-export default function General() {
+export default function General({
+  onOpenModels,
+}: {
+  onOpenModels: () => void;
+}) {
   const client = useQueryClient();
   const query = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+  const models = useQuery({ queryKey: ["models"], queryFn: readModels });
   const devices = useQuery({ queryKey: ["devices"], queryFn: readDevices });
   const [recording, setRecording] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -48,6 +54,7 @@ export default function General() {
         } else {
           void client.invalidateQueries({ queryKey: ["settings"] });
           void client.invalidateQueries({ queryKey: ["devices"] });
+          void client.invalidateQueries({ queryKey: ["models"] });
         }
       },
     );
@@ -93,6 +100,9 @@ export default function General() {
     );
   const settings = query.data;
   const busy = mutation.isPending;
+  const installed = (models.data ?? []).filter(
+    (model) => model.state.kind === "installed" || model.active,
+  );
   return (
     <>
       <SettingsGroup
@@ -130,6 +140,46 @@ export default function General() {
             <option value="hold">Hold to talk</option>
             <option value="toggle">Toggle</option>
           </Select>
+        </Row>
+      </SettingsGroup>
+      <SettingsGroup
+        title="Transcription"
+        icon={<AudioWaveform size={14} aria-hidden="true" />}
+      >
+        <Row
+          id="speech-model"
+          label="Speech model"
+          help="Used for every dictation. Download others in Models."
+        >
+          <div className="ui-actions general-model">
+            <Select
+              id="speech-model"
+              aria-describedby="speech-model-help"
+              value={settings.speechModel}
+              disabled={busy || recording || installed.length < 2}
+              onChange={(e) =>
+                void save({
+                  speechModel: speechModelSchema.parse(e.target.value),
+                })
+              }
+            >
+              {installed.length === 0 && (
+                <option value={settings.speechModel}>
+                  {settings.speechModel}
+                </option>
+              )}
+              {installed.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.state.kind === "installed"
+                    ? model.name
+                    : `${model.name} (not downloaded)`}
+                </option>
+              ))}
+            </Select>
+            <Button size="sm" variant="ghost" onClick={onOpenModels}>
+              Manage models
+            </Button>
+          </div>
         </Row>
       </SettingsGroup>
       <SettingsGroup

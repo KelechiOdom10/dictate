@@ -116,21 +116,7 @@ meter {
 .history .error {
   margin: 0;
 }
-.history-confirm {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-panel);
-  background: var(--warning-surface);
-  white-space: normal;
-}
-.history-confirm-question {
-  font-weight: var(--weight-medium);
-}
-.ui-detail .history-confirm {
+.ui-detail .ui-confirm {
   margin-bottom: var(--space-4);
 }
 .history-list {
@@ -230,4 +216,55 @@ html.overlay-window,
 }
 .overlay .ui-capsule {
   width: 100%;
+}
+.models {
+  display: grid;
+  gap: var(--space-3);
+}
+.models .error,
+.models-hint {
+  margin: 0;
+}
+.models-hint {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-panel);
+  background: var(--info-surface);
+  color: var(--info);
+}
+.models-footnote {
+  margin: var(--space-2) 0 0;
+  line-height: var(--leading-body);
+  max-width: 64ch;
+}
+.models-whisper {
+  align-items: flex-start;
+}
+.models-whisper > span:first-child {
+  padding-top: 2px;
+}
+.models-whisper-body {
+  flex: 1;
+  min-width: 220px;
+  display: grid;
+  gap: var(--space-1);
+}
+.models-whisper-body p {
+  margin: 0;
+}
+.models-whisper-title {
+  font-weight: var(--weight-medium);
+}
+.models-whisper code {
+  justify-self: start;
+  margin-top: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-sm);
+}
+.general-model {
+  margin-top: 0;
+  align-items: center;
+  gap: var(--space-2);
 }
