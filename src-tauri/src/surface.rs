@@ -189,6 +189,28 @@ pub fn refresh_menu(app: &AppHandle) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn alert(title: &str, detail: &str) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSAlert, NSApplication};
+    use objc2_foundation::NSString;
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        log::warn!("[tray] alert requested off the main thread");
+        return;
+    };
+    NSApplication::sharedApplication(main_thread).activate();
+    let alert = NSAlert::new(main_thread);
+    alert.setMessageText(&NSString::from_str(title));
+    alert.setInformativeText(&NSString::from_str(detail));
+    alert.runModal();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn alert(title: &str, detail: &str) {
+    log::info!("[tray] {title}: {detail}");
+}
+
 fn handle_menu(app: &AppHandle, id: &str) -> Result<(), String> {
     match id {
         "paste-last" | "copy-last" => {
@@ -210,20 +232,14 @@ fn handle_menu(app: &AppHandle, id: &str) -> Result<(), String> {
                 .map_err(|e| e.to_string())
             }
         }
-        "updates" => {
-            set_notice(
-                app,
-                Some("Update checking is coming in a later release.".into()),
-            );
-            refresh(app);
-            if let Some(window) = app.get_webview_window("settings") {
-                window
-                    .show()
-                    .and_then(|()| window.set_focus())
-                    .map_err(|e| e.to_string())?;
-            }
-            Ok(())
-        }
+        "updates" => app
+            .run_on_main_thread(|| {
+                alert(
+                    "Updates aren't set up yet",
+                    "This build of dictate can't check for updates. Install new versions by hand for now.",
+                )
+            })
+            .map_err(|e| e.to_string()),
         id if id.starts_with("model-") => {
             let index: usize = id
                 .trim_start_matches("model-")
