@@ -567,6 +567,7 @@ fn list_models(app: AppHandle) -> Result<Vec<ModelEntry>, String> {
 }
 
 fn models_changed(app: &AppHandle) {
+    surface::refresh_menu(app);
     if let Err(error) = app.emit("models-changed", ()) {
         log::warn!("[models] emit: {error}");
     }
@@ -739,6 +740,9 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
                 report_error(&app, &problem);
             }
         });
+    }
+    if !previous.annotate_enabled && settings.annotate_enabled && !screen::has_permission() {
+        screen::request_permission();
     }
     if shortcut_changed {
         surface::clear_error(&app);
@@ -1568,6 +1572,11 @@ fn annotate_dismiss(app: AppHandle) {
 }
 
 #[tauri::command]
+fn development_build() -> bool {
+    tauri::is_dev()
+}
+
+#[tauri::command]
 fn screen_permission() -> bool {
     screen::has_permission()
 }
@@ -1660,6 +1669,7 @@ pub fn run() {
             reveal_annotation,
             copy_annotation,
             screen_permission,
+            development_build,
             open_screen_recording_settings,
             report_settings_refresh_error,
             list_history,

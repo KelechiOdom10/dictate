@@ -27,6 +27,7 @@ const APP_COMMANDS: &[&str] = &[
     "reveal_annotation",
     "copy_annotation",
     "screen_permission",
+    "development_build",
     "open_screen_recording_settings",
     "report_settings_refresh_error",
     "list_history",

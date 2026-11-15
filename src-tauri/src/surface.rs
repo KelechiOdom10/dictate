@@ -3,7 +3,7 @@ use crate::settings::Settings;
 use tauri::{
     App, AppHandle, Emitter, Manager,
     image::Image,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
 };
 
@@ -55,8 +55,6 @@ pub fn clear_error(app: &AppHandle) {
         log::warn!("[tray] {error}");
     }
 }
-
-struct ShortcutItem(MenuItem<tauri::Wry>);
 
 fn icon(phase: &str) -> Image<'static> {
     let mut pixels = vec![0; 22 * 22 * 4];
@@ -115,51 +113,139 @@ pub fn set_phase(app: &AppHandle, phase: &str) {
     }
 }
 
-fn shortcut_label(shortcut: &str) -> String {
-    shortcut
-        .split('+')
-        .map(|key| match key {
-            "Alt" | "Option" => "⌥",
-            "Shift" => "⇧",
-            "Control" => "⌃",
-            "Super" | "Meta" | "CommandOrControl" => "⌘",
-            key => key
-                .strip_prefix("Key")
-                .or_else(|| key.strip_prefix("Digit"))
-                .unwrap_or(key),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+pub fn update_shortcut(app: &AppHandle, _shortcut: &str) {
+    refresh_menu(app);
 }
 
-pub fn update_shortcut(app: &AppHandle, shortcut: &str) {
-    if let Err(error) = app
-        .state::<ShortcutItem>()
-        .0
-        .set_text(format!("Shortcut: {}", shortcut_label(shortcut)))
-    {
-        log::warn!("[tray] {error}");
+fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let version = MenuItem::with_id(
+        app,
+        "version",
+        format!("dictate {}", app.package_info().version),
+        false,
+        None::<&str>,
+    )?;
+    let paste = MenuItem::with_id(
+        app,
+        "paste-last",
+        "Paste Last Dictation",
+        true,
+        None::<&str>,
+    )?;
+    let copy = MenuItem::with_id(app, "copy-last", "Copy Last Transcript", true, None::<&str>)?;
+    let models = Submenu::with_id(app, "speech-model", "Speech Model", true)?;
+    let active = crate::get_settings(app.clone())
+        .map(|s| s.speech_model)
+        .ok();
+    let dir = &app.state::<crate::Models>().dir;
+    let mut installed = 0;
+    for (index, info) in crate::models::CATALOG.iter().enumerate() {
+        if crate::models::path(dir, info.id).is_file() {
+            models.append(&CheckMenuItem::with_id(
+                app,
+                format!("model-{index}"),
+                info.name,
+                true,
+                active == Some(info.id),
+                None::<&str>,
+            )?)?;
+            installed += 1;
+        }
+    }
+    if installed == 0 {
+        models.append(&MenuItem::with_id(
+            app,
+            "no-models",
+            "No installed models",
+            false,
+            None::<&str>,
+        )?)?;
+    }
+    let open = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
+    let updates = MenuItem::with_id(app, "updates", "Check for Updates…", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit dictate", true, Some("CmdOrCtrl+Q"))?;
+    Menu::with_items(
+        app,
+        &[
+            &version,
+            &paste,
+            &copy,
+            &models,
+            &PredefinedMenuItem::separator(app)?,
+            &open,
+            &updates,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )
+}
+
+pub fn refresh_menu(app: &AppHandle) {
+    if let Some(tray) = app.tray_by_id("dictate") {
+        match menu(app).and_then(|menu| tray.set_menu(Some(menu))) {
+            Ok(()) => {}
+            Err(error) => log::warn!("[tray] {error}"),
+        }
     }
 }
 
-pub fn setup(app: &App, settings: &Settings) -> tauri::Result<()> {
+fn handle_menu(app: &AppHandle, id: &str) -> Result<(), String> {
+    match id {
+        "paste-last" | "copy-last" => {
+            let entries = crate::list_history(app.clone(), String::new(), 100)?.entries;
+            let text = entries
+                .into_iter()
+                .find(|entry| !entry.text.trim().is_empty())
+                .ok_or("No transcript in History. Dictate with History enabled first.")?
+                .text;
+            if id == "copy-last" {
+                crate::clipboard::copy_text(&text)
+            } else {
+                let settings = crate::get_settings(app.clone())?;
+                crate::insert::paste(
+                    app,
+                    &text,
+                    crate::insert::Delivery::from_settings(&settings),
+                )
+                .map_err(|e| e.to_string())
+            }
+        }
+        "updates" => {
+            set_notice(
+                app,
+                Some("Update checking is coming in a later release.".into()),
+            );
+            refresh(app);
+            if let Some(window) = app.get_webview_window("settings") {
+                window
+                    .show()
+                    .and_then(|()| window.set_focus())
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        }
+        id if id.starts_with("model-") => {
+            let index: usize = id
+                .trim_start_matches("model-")
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
+            let model = crate::models::CATALOG.get(index).ok_or("Unknown model")?;
+            let mut settings = crate::get_settings(app.clone())?;
+            settings.speech_model = model.id;
+            crate::save_settings(app.clone(), settings)?;
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+pub fn setup(app: &App, _settings: &Settings) -> tauri::Result<()> {
     app.manage(Mutex::new(Status {
         phase: "idle".into(),
         error: None,
         notice: None,
     }));
-    let open = MenuItem::with_id(app, "settings", "Open Settings…", true, None::<&str>)?;
-    let shortcut = MenuItem::with_id(
-        app,
-        "shortcut",
-        format!("Shortcut: {}", shortcut_label(&settings.shortcut)),
-        false,
-        None::<&str>,
-    )?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit dictate", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &shortcut, &separator, &quit])?;
-    app.manage(ShortcutItem(shortcut));
+    let menu = menu(app.handle())?;
     TrayIconBuilder::with_id("dictate")
         .icon(icon("idle"))
         .icon_as_template(true)
@@ -175,19 +261,12 @@ pub fn setup(app: &App, settings: &Settings) -> tauri::Result<()> {
                 }
             }
             "quit" => app.exit(0),
-            _ => {}
+            id => {
+                if let Err(error) = handle_menu(app, id) {
+                    crate::report_error(app, &Problem::new("Menu action failed", error));
+                }
+            }
         })
         .build(app)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn shortcut_menu_uses_mac_symbols_and_readable_key_names() {
-        assert_eq!(shortcut_label("Alt+Shift+Space"), "⌥ ⇧ Space");
-        assert_eq!(shortcut_label("Super+Control+KeyD"), "⌘ ⌃ D");
-    }
 }

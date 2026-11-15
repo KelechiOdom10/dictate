@@ -30,6 +30,7 @@
     "allow-reveal-annotation",
     "allow-copy-annotation",
     "allow-screen-permission",
+    "allow-development-build",
     "allow-open-screen-recording-settings",
     "allow-report-settings-refresh-error",
     "allow-list-history",

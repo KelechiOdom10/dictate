@@ -18,6 +18,10 @@ export default function AnnotatePage() {
     queryKey: ["screen-permission"],
     queryFn: readScreenPermission,
   });
+  const development = useQuery({
+    queryKey: ["development-build"],
+    queryFn: () => invoke<boolean>("development_build"),
+  });
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState("");
   const mutation = useMutation({
@@ -123,7 +127,9 @@ export default function AnnotatePage() {
               ? "Checking…"
               : allowed
                 ? "Allowed. Annotate can record the screen."
-                : "Not allowed. Turn on dictate in System Settings, then reopen dictate."
+                : development.data
+                  ? "In development builds, turn on your terminal app (e.g. iTerm) in Screen Recording, then restart."
+                  : "Not allowed. Turn on dictate in System Settings, then reopen dictate."
           }
         >
           <div className="ui-actions">

@@ -223,6 +223,7 @@ function mockApp(
       }
       if (command === "list_models") return listModels();
       if (command === "list_annotations") return annotate.entries ?? [];
+      if (command === "development_build") return false;
       if (command === "screen_permission") return annotate.permission ?? true;
       if (
         command === "copy_annotation" ||
