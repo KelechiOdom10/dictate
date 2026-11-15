@@ -158,15 +158,17 @@ pub fn input_devices() -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-fn selected_device(name: &str) -> Result<Option<cpal::Device>, String> {
+fn selected_device(
+    name: &str,
+) -> Result<Option<(cpal::Device, cpal::SupportedStreamConfig)>, String> {
     let mut cache = device_cache().lock().map_err(|e| e.to_string())?;
     if let Some(device) = cache
         .as_ref()
         .and_then(|devices| devices.iter().find(|(label, _)| label == name))
         .map(|(_, device)| device)
-        && device.default_input_config().is_ok()
+        && let Ok(config) = device.default_input_config()
     {
-        return Ok(Some(device.clone()));
+        return Ok(Some((device.clone(), config)));
     }
     let devices = list_devices()?;
     let device = devices
@@ -174,7 +176,14 @@ fn selected_device(name: &str) -> Result<Option<cpal::Device>, String> {
         .find(|(label, _)| label == name)
         .map(|(_, device)| device.clone());
     *cache = Some(devices);
-    Ok(device)
+    device
+        .map(|device| {
+            let config = device
+                .default_input_config()
+                .map_err(|e| format!("Microphone config: {e}"))?;
+            Ok((device, config))
+        })
+        .transpose()
 }
 
 pub fn monitor_start(device: Option<String>) -> Result<(), String> {
@@ -197,12 +206,16 @@ fn open_recording(name: Option<&str>, retain: bool) -> Result<Recording, String>
     let host = cpal::default_host();
     let selected = name.map(selected_device).transpose()?.flatten();
     let fallback = name.is_some() && selected.is_none();
-    let device = selected
-        .or_else(|| host.default_input_device())
-        .ok_or("No default microphone")?;
-    let config = device
-        .default_input_config()
-        .map_err(|e| format!("Microphone config: {e}"))?;
+    let (device, config) = match selected {
+        Some(selected) => selected,
+        None => {
+            let device = host.default_input_device().ok_or("No default microphone")?;
+            let config = device
+                .default_input_config()
+                .map_err(|e| format!("Microphone config: {e}"))?;
+            (device, config)
+        }
+    };
     let name = device.name().map_err(|e| format!("Microphone name: {e}"))?;
     println!(
         "[audio] device={name:?} rate={} channels={} format={:?}",
@@ -370,6 +383,31 @@ fn resample(samples: Vec<f32>, rate: usize) -> Result<Vec<f32>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "Measures real named-microphone startup; run explicitly"]
+    fn measure_named_microphone_startup() {
+        let name = cpal::default_host()
+            .default_input_device()
+            .unwrap()
+            .name()
+            .unwrap();
+        assert!(input_devices().unwrap().contains(&name));
+        let mut timings = Vec::new();
+        for _ in 0..30 {
+            let start = std::time::Instant::now();
+            assert!(!start_device(Some(name.clone())).unwrap());
+            timings.push(start.elapsed().as_secs_f64() * 1000.0);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            assert!(!stop().unwrap().is_empty());
+        }
+        println!("named_startup_device={name:?} first_ms={:.3}", timings[0]);
+        timings.sort_by(f64::total_cmp);
+        println!(
+            "named_startup_n=30 median_ms={:.3} p95_ms={:.3} max_ms={:.3}",
+            timings[15], timings[28], timings[29]
+        );
+    }
 
     #[test]
     #[ignore = "Opens the real microphone briefly; run explicitly"]

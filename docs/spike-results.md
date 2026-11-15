@@ -199,3 +199,31 @@ retained samples for a 150 ms take and read a finite level during a separate
 150 ms monitor session. No capture was written to disk. This proves default
 fallback at the audio boundary; it does not prove native overlay focus, physical
 hotkey conflicts, tray rendering, or end-to-end paste after recovery.
+
+## Settings review follow-up: named-microphone startup — 15 November 2026
+
+The named-device path previously fetched the default input configuration twice:
+when checking the cached handle, then again when opening the recording stream.
+Device selection now returns the handle and its configuration together. A failed
+cached configuration still refreshes the device list; missing names still use the
+system default. Both recording and microphone monitoring use this path.
+
+Measured on this Mac with the MacBook Pro Microphone explicitly selected by name
+(96 kHz, mono F32), a populated device cache, and 30 sequential starts per version:
+
+| `start_device(Some(name))` → stream playing | Before | After |
+| --- | ---: | ---: |
+| First call | 93.160 ms | 61.480 ms |
+| Median | 94.836 ms | 77.419 ms |
+| p95 | 98.309 ms | 82.595 ms |
+| Maximum | 99.981 ms | 82.925 ms |
+
+Command: `cargo test --manifest-path src-tauri/Cargo.toml
+measure_named_microphone_startup -- --ignored --nocapture`. The same test ran
+before and after the audio change in an unoptimised test build. Each timer ends
+when `start_device` returns; a separate 150 ms capture afterward verifies samples
+arrive before stopping. No audio is written to disk. These measurements include
+the audio-thread request, device selection, stream creation and `play()`, but
+exclude physical key delivery, overlay rendering and first-sample latency.
+They do not close the end-to-end spike latency gate. Physical unplug/replug
+remains unverified.
