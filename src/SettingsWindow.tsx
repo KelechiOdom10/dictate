@@ -3,6 +3,7 @@ import { useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useQuery } from "@tanstack/react-query";
 import General from "./GeneralSettings";
+import HistoryPage from "./HistoryPage";
 import { Button, EmptyState, SidebarNav, Toast } from "./ui";
 import {
   AudioLines,
@@ -25,9 +26,13 @@ const pages = [
   { name: "About", icon: Info },
 ];
 
-export default function SettingsWindow() {
+export default function SettingsWindow({
+  initialPage = "General",
+}: {
+  initialPage?: string;
+}) {
   const status = useDictationStatus();
-  const [page, setPage] = useState("General");
+  const [page, setPage] = useState(initialPage);
   const version = useQuery({ queryKey: ["version"], queryFn: getVersion });
   return (
     <div className="settings-shell">
@@ -64,7 +69,9 @@ export default function SettingsWindow() {
           <p>
             {page === "General"
               ? "Make dictate feel like second nature."
-              : `Your ${page.toLowerCase()} preferences, all in one place.`}
+              : page === "History"
+                ? "Everything you’ve dictated, kept on this Mac."
+                : `Your ${page.toLowerCase()} preferences, all in one place.`}
           </p>
         </header>
         {status.error && (
@@ -79,6 +86,8 @@ export default function SettingsWindow() {
         )}
         {page === "General" ? (
           <General />
+        ) : page === "History" ? (
+          <HistoryPage />
         ) : (
           <EmptyState
             title="Coming soon"

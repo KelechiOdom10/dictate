@@ -36,6 +36,27 @@ pub enum OverlayPosition {
     Bottom,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryRetention {
+    Day,
+    #[default]
+    Week,
+    Month,
+    Forever,
+}
+
+impl HistoryRetention {
+    pub fn days(self) -> Option<i64> {
+        match self {
+            Self::Day => Some(1),
+            Self::Week => Some(7),
+            Self::Month => Some(30),
+            Self::Forever => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -55,6 +76,8 @@ pub struct Settings {
     pub appearance_mode: AppearanceMode,
     #[serde(default)]
     pub overlay_position: OverlayPosition,
+    #[serde(default)]
+    pub history_retention: HistoryRetention,
 }
 
 const CURRENT_VERSION: u32 = 1;
@@ -74,6 +97,7 @@ impl Default for Settings {
             theme: Theme::Ember,
             appearance_mode: AppearanceMode::System,
             overlay_position: OverlayPosition::Bottom,
+            history_retention: HistoryRetention::Week,
         }
     }
 }
@@ -202,11 +226,12 @@ mod tests {
     #[test]
     fn typescript_contract_matches_rust_settings() {
         let contract = format!(
-            "export {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
+            "export {}\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
             ShortcutMode::decl(),
             Theme::decl(),
             AppearanceMode::decl(),
             OverlayPosition::decl(),
+            HistoryRetention::decl(),
             Settings::decl()
         );
         let checked_in = include_str!("../../src/settings.generated.ts");
@@ -231,6 +256,7 @@ mod tests {
             theme: Theme::Paper,
             appearance_mode: AppearanceMode::Dark,
             overlay_position: OverlayPosition::Top,
+            history_retention: HistoryRetention::Forever,
             ..Settings::default()
         };
         save(&path, &settings).unwrap();
@@ -253,6 +279,7 @@ mod tests {
         assert_eq!(settings.theme, Theme::Ember);
         assert_eq!(settings.appearance_mode, AppearanceMode::System);
         assert_eq!(settings.overlay_position, OverlayPosition::Bottom);
+        assert_eq!(settings.history_retention, HistoryRetention::Week);
         fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.version, 2);

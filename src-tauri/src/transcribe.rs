@@ -40,6 +40,17 @@ pub fn transcribe(samples: &[f32]) -> Result<String, String> {
     Ok(text.trim().to_string())
 }
 
+/// The model file name without extension, e.g. `ggml-base.en`.
+pub fn model_name() -> String {
+    model_path()
+        .ok()
+        .and_then(|path| {
+            path.file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "Unavailable".into())
+}
+
 fn whisper_cli() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("DICTATE_WHISPER_CLI") {
         let path = PathBuf::from(path);

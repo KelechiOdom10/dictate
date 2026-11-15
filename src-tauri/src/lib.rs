@@ -18,11 +18,14 @@ mod audio;
 mod insert;
 mod transcribe;
 
+mod focus;
+mod history;
 mod overlay;
 mod settings;
 mod surface;
 
-use settings::{Settings, ShortcutMode};
+use history::{HistoryEntry, NewTake, TakeStatus};
+use settings::{HistoryRetention, Settings, ShortcutMode};
 use std::{sync::Mutex, time::Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
@@ -39,9 +42,18 @@ struct Runtime {
     settings: Settings,
     phase: Phase,
     take_id: u64,
+    take_start: Option<TakeStart>,
     capturing_shortcut: bool,
     shortcut_registered: bool,
 }
+
+/// What we know at key-down: when the take began and which app had focus.
+struct TakeStart {
+    started_at_ms: i64,
+    app: Option<String>,
+}
+
+type History = Mutex<Option<history::Store>>;
 
 trait SettingsPlatform {
     fn input_devices(&self) -> Result<Vec<String>, String>;
@@ -194,7 +206,7 @@ fn record_stop() -> Result<usize, String> {
 #[tauri::command]
 fn finish_dictation(app: AppHandle) -> Result<String, String> {
     let samples = audio::stop()?;
-    let text = dictation_text(&samples)?;
+    let text = dictation_text(&samples)?.text;
     if !text.is_empty() {
         insert::paste(&app, &text)?;
     }
@@ -222,17 +234,84 @@ fn transcript_has_text(text: &str) -> bool {
     text.trim().chars().any(char::is_alphanumeric)
 }
 
-fn dictation_text(samples: &[f32]) -> Result<String, String> {
+struct Transcript {
+    text: String,
+    inference_ms: Option<i64>,
+    skip_reason: Option<String>,
+}
+
+fn dictation_text(samples: &[f32]) -> Result<Transcript, String> {
     if let Some(reason) = take_skip_reason(samples) {
         println!("[hotkey] skipped: {reason}");
-        return Ok(String::new());
+        return Ok(Transcript {
+            text: String::new(),
+            inference_ms: None,
+            skip_reason: Some(reason),
+        });
     }
+    let started = Instant::now();
     let text = transcribe::transcribe(samples)?;
+    let inference_ms = Some(started.elapsed().as_millis() as i64);
     if !transcript_has_text(&text) {
         println!("[hotkey] skipped: transcript has no letters or numbers");
-        return Ok(String::new());
+        return Ok(Transcript {
+            text: String::new(),
+            inference_ms,
+            skip_reason: Some("No words detected".into()),
+        });
     }
-    Ok(text.trim().to_string())
+    Ok(Transcript {
+        text: text.trim().to_string(),
+        inference_ms,
+        skip_reason: None,
+    })
+}
+
+fn with_history<T>(
+    app: &AppHandle,
+    read: impl FnOnce(&history::Store) -> Result<T, String>,
+) -> Result<T, String> {
+    let state = app.state::<History>();
+    let store = state.lock().map_err(|e| e.to_string())?;
+    read(
+        store
+            .as_ref()
+            .ok_or("History is unavailable. Restart dictate to try again.")?,
+    )
+}
+
+fn record_take(app: &AppHandle, take: &NewTake, retention: HistoryRetention) {
+    let result = with_history(app, |store| {
+        store.insert(take)?;
+        store.prune(retention, history::now_ms())
+    });
+    match result {
+        Ok(_) => {
+            if let Err(error) = app.emit("history-changed", ()) {
+                eprintln!("[history] emit: {error}");
+            }
+        }
+        Err(error) => eprintln!("[history] {error}"),
+    }
+}
+
+#[tauri::command]
+fn list_history(app: AppHandle, search: String) -> Result<Vec<HistoryEntry>, String> {
+    let retention = app
+        .state::<Mutex<Runtime>>()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .settings
+        .history_retention;
+    with_history(&app, |store| {
+        store.prune(retention, history::now_ms())?;
+        store.list(&search)
+    })
+}
+
+#[tauri::command]
+fn delete_history(app: AppHandle, id: i64) -> Result<(), String> {
+    with_history(&app, |store| store.delete(id))
 }
 
 #[tauri::command]
@@ -360,6 +439,10 @@ fn hotkey(
     }
     if next == Phase::Recording {
         runtime.take_id += 1;
+        runtime.take_start = Some(TakeStart {
+            started_at_ms: history::now_ms(),
+            app: focus::frontmost_app(),
+        });
         surface::clear_error(app);
         let result = audio::start_device(runtime.settings.microphone.clone()).map(|fallback| {
             surface::set_notice(app, microphone_notice(fallback));
@@ -391,6 +474,11 @@ fn hotkey(
         });
     } else {
         let released = Instant::now();
+        let start = runtime.take_start.take().unwrap_or(TakeStart {
+            started_at_ms: history::now_ms(),
+            app: None,
+        });
+        let retention = runtime.settings.history_retention;
         match audio::stop() {
             Ok(samples) => {
                 runtime.phase = Phase::Transcribing;
@@ -398,12 +486,38 @@ fn hotkey(
                 let take_id = runtime.take_id;
                 let app = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    let result = dictation_text(&samples).and_then(|text| {
-                        if !text.is_empty() {
-                            insert::paste(&app, &text)?;
+                    let transcript = dictation_text(&samples);
+                    let result = transcript.as_ref().map_err(Clone::clone).and_then(|t| {
+                        if !t.text.is_empty() {
+                            insert::paste(&app, &t.text)?;
                         }
-                        Ok(!text.is_empty())
+                        Ok(!t.text.is_empty())
                     });
+                    let total_ms = released.elapsed().as_millis() as i64;
+                    let (text, inference_ms, skip_reason) = match transcript {
+                        Ok(t) => (t.text, t.inference_ms, t.skip_reason),
+                        Err(_) => (String::new(), None, None),
+                    };
+                    let (status, detail) = match &result {
+                        Ok(true) => (TakeStatus::Pasted, None),
+                        Ok(false) => (TakeStatus::Skipped, skip_reason),
+                        Err(error) => (TakeStatus::Failed, Some(error.clone())),
+                    };
+                    record_take(
+                        &app,
+                        &NewTake {
+                            text,
+                            created_at_ms: start.started_at_ms,
+                            app: start.app,
+                            model: transcribe::model_name(),
+                            audio_ms: (samples.len() / 16) as i64,
+                            inference_ms,
+                            total_ms,
+                            status,
+                            detail,
+                        },
+                        retention,
+                    );
                     let outcome = match result {
                         Ok(true) => "done",
                         Ok(false) => "skipped",
@@ -412,10 +526,7 @@ fn hotkey(
                             "idle"
                         }
                     };
-                    println!(
-                        "[dictate] release_to_complete_ms={}",
-                        released.elapsed().as_millis()
-                    );
+                    println!("[dictate] release_to_complete_ms={total_ms}");
                     if let Ok(mut runtime) = app.state::<Mutex<Runtime>>().lock() {
                         surface::set_phase(&app, outcome);
                         runtime.phase = Phase::Idle;
@@ -490,13 +601,32 @@ pub fn run() {
             microphone_test,
             microphone_level,
             resize_overlay,
-            report_settings_refresh_error
+            report_settings_refresh_error,
+            list_history,
+            delete_history
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            let data_dir = app.path().app_data_dir()?;
             let (settings, mut startup_error) =
-                settings::load_or_default(&app.path().app_data_dir()?.join("settings.json"));
+                settings::load_or_default(&data_dir.join("settings.json"));
+            let store = history::Store::open(&data_dir.join("history.sqlite3")).and_then(|store| {
+                store.prune(settings.history_retention, history::now_ms())?;
+                Ok(store)
+            });
+            let store = match store {
+                Ok(store) => Some(store),
+                Err(error) => {
+                    let message = format!("{error}. Dictation still works; history is off.");
+                    startup_error = Some(match startup_error {
+                        Some(previous) => format!("{previous}\n{message}"),
+                        None => message,
+                    });
+                    None
+                }
+            };
+            app.manage::<History>(Mutex::new(store));
             let shortcut_registered = match settings.chord().and_then(|chord| {
                 app.global_shortcut()
                     .register(chord)
@@ -518,6 +648,7 @@ pub fn run() {
                 settings: settings.clone(),
                 phase: Phase::Idle,
                 take_id: 0,
+                take_start: None,
                 capturing_shortcut: false,
                 shortcut_registered,
             }));
@@ -600,6 +731,7 @@ mod take_tests {
             settings: Settings::default(),
             phase: Phase::Idle,
             take_id: 0,
+            take_start: None,
             capturing_shortcut: false,
             shortcut_registered: false,
         }
@@ -786,8 +918,12 @@ mod take_tests {
         assert!(take_skip_reason(&vec![0.2; 2_400]).is_some());
         assert!(take_skip_reason(&vec![0.002; 16_000]).is_some());
         assert!(take_skip_reason(&[]).is_some());
-        assert_eq!(dictation_text(&vec![0.0; 32_000]).unwrap(), "");
-        assert_eq!(dictation_text(&vec![0.2; 2_400]).unwrap(), "");
+        for samples in [vec![0.0; 32_000], vec![0.2; 2_400]] {
+            let transcript = dictation_text(&samples).unwrap();
+            assert_eq!(transcript.text, "");
+            assert_eq!(transcript.inference_ms, None);
+            assert!(transcript.skip_reason.is_some());
+        }
     }
 
     #[test]

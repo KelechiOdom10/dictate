@@ -100,6 +100,48 @@ meter {
 .notice button {
   margin-top: var(--space-3);
 }
+.history {
+  display: grid;
+  gap: var(--space-4);
+  container-type: inline-size;
+}
+.history-toolbar {
+  display: flex;
+  gap: var(--space-3);
+}
+.history-toolbar .ui-search {
+  flex: 1;
+  min-width: 0;
+}
+.history .error {
+  margin: 0;
+}
+.history-split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.history-list {
+  display: grid;
+  gap: var(--space-half);
+  min-width: 0;
+}
+.history .ui-detail {
+  position: sticky;
+  top: 0;
+}
+@container (max-width: 520px) {
+  .history-toolbar {
+    flex-wrap: wrap;
+  }
+  .history-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .history .ui-detail {
+    position: static;
+  }
+}
 .overlay {
   height: 100%;
   display: grid;

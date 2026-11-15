@@ -5,39 +5,75 @@ import { Button } from "./Button";
 export function Card({ children }: { children: ReactNode }) {
   return <div className="ui-card">{children}</div>;
 }
+type ListItemSelection =
+  | { selected: boolean; onSelect: () => void; actions?: never }
+  | { selected?: never; onSelect?: never; actions?: ReactNode };
 export function ListItem({
   date,
   title,
+  meta,
   preview,
+  selected,
+  onSelect,
   actions,
 }: {
   date: string;
   title: string;
-  preview: string;
-  actions?: ReactNode;
-}) {
+  meta?: string;
+  preview?: string;
+} & ListItemSelection) {
+  const body = (
+    <>
+      <span className="ui-list-heading">
+        <span className="ui-list-title">{title}</span>
+        <span className="ui-date">{date}</span>
+      </span>
+      {meta && <span className="ui-list-meta">{meta}</span>}
+      {preview && <span className="ui-preview">{preview}</span>}
+    </>
+  );
+  if (onSelect)
+    return (
+      <button
+        type="button"
+        className="ui-list-item ui-list-item-button"
+        aria-current={selected ? "true" : undefined}
+        onClick={onSelect}
+      >
+        {body}
+      </button>
+    );
   return (
     <article className="ui-list-item">
-      <p className="ui-date">{date}</p>
-      <h2>{title}</h2>
-      <p className="ui-preview">{preview}</p>
+      {body}
       {actions && <div className="ui-actions">{actions}</div>}
     </article>
   );
 }
 export function DetailPanel({
   title,
+  subtitle,
+  actions,
   metadata,
   children,
 }: {
   title: string;
+  subtitle?: string;
+  actions?: ReactNode;
   metadata: { label: string; value: string }[];
   children: ReactNode;
 }) {
   const id = useId();
   return (
     <section className="ui-detail" aria-labelledby={id}>
-      <h2 id={id}>{title}</h2>
+      <div className="ui-detail-header">
+        <div>
+          <h2 id={id}>{title}</h2>
+          {subtitle && <p className="ui-date">{subtitle}</p>}
+        </div>
+        {actions && <div className="ui-actions">{actions}</div>}
+      </div>
+      <div className="ui-detail-body">{children}</div>
       <dl>
         {metadata.map((row) => (
           <div key={row.label}>
@@ -46,7 +82,6 @@ export function DetailPanel({
           </div>
         ))}
       </dl>
-      <div className="ui-detail-body">{children}</div>
     </section>
   );
 }

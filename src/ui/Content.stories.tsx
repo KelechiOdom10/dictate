@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Button } from "./Button";
+import { useState } from "react";
+import { Copy, Trash2 } from "lucide-react";
+import { expect, userEvent, within } from "storybook/test";
+import { Button, IconButton } from "./Button";
 import {
   Card,
   ListItem,
@@ -34,20 +37,72 @@ export const Note: Story = {
       <ListItem
         date="Yesterday · 4:30 PM"
         title="A quiet moment"
+        meta="Notes"
         preview="Take the long way home."
       />
     </div>
   ),
 };
+export const SelectableNote: Story = {
+  name: "ListItem / selectable",
+  render: () => {
+    const [selected, setSelected] = useState(1);
+    const rows = [
+      {
+        title: "Pick up coffee on the way back",
+        meta: "Notes",
+        date: "1h ago",
+      },
+      {
+        title: "Ship the history page once the screenshots look right",
+        meta: "Slack",
+        date: "1d ago",
+      },
+      { title: "No speech detected", meta: "Notes · Skipped", date: "4d ago" },
+    ];
+    return (
+      <div className="story-stack" style={{ maxWidth: 280 }}>
+        {rows.map((row, index) => (
+          <ListItem
+            key={row.title}
+            {...row}
+            selected={selected === index}
+            onSelect={() => setSelected(index)}
+          />
+        ))}
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const first = c.getByRole("button", { name: /Pick up coffee/ });
+    await userEvent.click(first);
+    await expect(first).toHaveAttribute("aria-current", "true");
+    await expect(
+      c.getByRole("button", { name: /Ship the history page/ }),
+    ).not.toHaveAttribute("aria-current");
+  },
+};
 export const Detail: Story = {
   name: "DetailPanel",
   render: () => (
     <DetailPanel
-      title="A thought for later"
+      title="1h ago"
+      subtitle="14 Nov 2026, 2:57 PM"
+      actions={
+        <>
+          <IconButton variant="ghost" label="Copy text">
+            <Copy size={16} aria-hidden="true" />
+          </IconButton>
+          <IconButton variant="ghost" label="Delete dictation">
+            <Trash2 size={16} aria-hidden="true" />
+          </IconButton>
+        </>
+      }
       metadata={[
-        { label: "Recorded", value: "Today, 9:41 AM" },
-        { label: "Duration", value: "33 seconds" },
-        { label: "Model", value: "Base English" },
+        { label: "Application", value: "Notes" },
+        { label: "Speech model", value: "Whisper base.en" },
+        { label: "Latency", value: "4.2 s audio · 310 ms transcription" },
       ]}
     >
       <p>Make space for the things that matter. Start with one small thing.</p>

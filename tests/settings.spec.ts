@@ -60,6 +60,7 @@ async function openSettings(
         launchAtLogin: false,
         theme: "ember",
         overlayPosition: "bottom",
+        historyRetention: "week",
         appearanceMode: "system",
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
@@ -262,6 +263,7 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           launchAtLogin: false,
           theme: "ember",
           overlayPosition: "bottom",
+          historyRetention: "week",
           appearanceMode: "system",
         },
       },
@@ -422,6 +424,7 @@ test("overlay applies appearance events live, including System changes", async (
                 launchAtLogin: false,
                 theme,
                 overlayPosition: "bottom",
+                historyRetention: "week",
                 appearanceMode,
               },
             },
@@ -523,6 +526,7 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 theme,
                 appearanceMode,
                 overlayPosition: "bottom",
+                historyRetention: "week",
               },
             },
             "*",
