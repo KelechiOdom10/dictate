@@ -200,7 +200,7 @@ html.overlay-window,
 }
 .overlay-capsule {
   width: max-content;
-  max-width: min(420px, calc(100vw - 16px));
+  max-width: min(var(--overlay-max-width), calc(100vw - 16px));
   justify-self: center;
 }
 .overlay .ui-capsule {

@@ -1,0 +1,22 @@
+{
+  "accessibility": {
+    "title": "Accessibility access needed",
+    "fix": "Allow dictate in System Settings → Privacy & Security → Accessibility.",
+    "detail": null
+  },
+  "settingsRefresh": {
+    "title": "Settings couldn’t refresh",
+    "fix": "Open Settings and save again.",
+    "detail": null
+  },
+  "noSamples": {
+    "title": "No sound from the microphone",
+    "fix": "Check it in Settings → General → Test microphone.",
+    "detail": "Microphone delivered no samples"
+  },
+  "missingModel": {
+    "title": "Speech model missing",
+    "fix": "Download ggml-base.en.bin into dictate’s models folder.",
+    "detail": "no file at /Applications/dictate.app/models/ggml-base.en.bin"
+  }
+}

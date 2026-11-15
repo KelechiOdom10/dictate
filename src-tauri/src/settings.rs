@@ -1,3 +1,4 @@
+use crate::problem::Problem;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 use tauri_plugin_global_shortcut::Shortcut;
@@ -160,7 +161,7 @@ fn migrate(settings: &mut Settings) {
     }
 }
 
-pub fn load_or_default(path: &Path) -> (Settings, Option<String>) {
+pub fn load_or_default(path: &Path) -> (Settings, Option<Problem>) {
     match load(path) {
         Ok(settings) => (settings, None),
         Err(error) => {
@@ -169,13 +170,19 @@ pub fn load_or_default(path: &Path) -> (Settings, Option<String>) {
                 .unwrap_or_default()
                 .as_nanos();
             let backup = path.with_file_name(format!("settings.json.bad-{timestamp}"));
-            let detail = match fs::rename(path, &backup) {
-                Ok(()) => format!("Original saved to {}", backup.display()),
-                Err(error) => format!("Could not back up original: {error}"),
+            let (fix, detail) = match fs::rename(path, &backup) {
+                Ok(()) => (
+                    "Using defaults. Your old file is saved beside them.",
+                    format!("{error}; original saved to {}", backup.display()),
+                ),
+                Err(backup_error) => (
+                    "Using defaults. Choose your preferences again in Settings.",
+                    format!("{error}; could not back up original: {backup_error}"),
+                ),
             };
             (
                 Settings::default(),
-                Some(format!("{error}. Using default settings. {detail}")),
+                Some(Problem::new("Settings couldn’t be read", fix).because(detail)),
             )
         }
     }
@@ -303,7 +310,9 @@ mod tests {
             fs::write(&path, original).unwrap();
             let (settings, error) = load_or_default(&path);
             assert_eq!(settings, Settings::default());
-            assert!(error.unwrap().contains("Using default settings"));
+            let problem = error.unwrap();
+            assert_eq!(problem.title, "Settings couldn’t be read");
+            assert!(problem.fix.starts_with("Using defaults."));
             assert!(!path.exists());
             assert!(fs::read_dir(dir.path()).unwrap().any(|entry| {
                 let entry = entry.unwrap();

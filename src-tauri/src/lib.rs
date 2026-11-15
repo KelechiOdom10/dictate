@@ -21,10 +21,12 @@ mod transcribe;
 mod focus;
 mod history;
 mod overlay;
+mod problem;
 mod settings;
 mod surface;
 
 use history::{HistoryEntry, NewTake, TakeStatus};
+use problem::Problem;
 use settings::{HistoryRetention, Settings, ShortcutMode};
 use std::{sync::Mutex, time::Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -188,7 +190,7 @@ fn pipeline_status(app: AppHandle) -> surface::Status {
 /// Begin capture. Called on key-down.
 #[tauri::command]
 fn record_start() -> Result<(), String> {
-    audio::start()
+    Ok(audio::start()?)
 }
 
 /// Stop capture and report how many samples arrived.
@@ -198,7 +200,7 @@ fn record_start() -> Result<(), String> {
 /// IPC. Session 2's check reads this number.
 #[tauri::command]
 fn record_stop() -> Result<usize, String> {
-    audio::stop().map(|samples| samples.len())
+    Ok(audio::stop()?.len())
 }
 
 /// The whole pipeline, in Rust: stop, transcribe, paste. Returns the text so
@@ -240,7 +242,7 @@ struct Transcript {
     skip_reason: Option<String>,
 }
 
-fn dictation_text(samples: &[f32]) -> Result<Transcript, String> {
+fn dictation_text(samples: &[f32]) -> Result<Transcript, Problem> {
     if let Some(reason) = take_skip_reason(samples) {
         println!("[hotkey] skipped: {reason}");
         return Ok(Transcript {
@@ -336,7 +338,11 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
     if let Err(error) = app.emit("settings-changed", &settings) {
         report_error(
             &app,
-            &format!("Settings saved, but could not refresh the shortcut label: {error}"),
+            &Problem::new(
+                "Settings saved, display not refreshed",
+                "Close and reopen Settings to see the change.",
+            )
+            .because(error),
         );
     }
     Ok(settings)
@@ -399,10 +405,11 @@ fn microphone_notice(fallback: bool) -> Option<String> {
 
 #[tauri::command]
 fn report_settings_refresh_error(app: AppHandle) {
-    report_error(
-        &app,
-        "Settings could not refresh. Open Settings and save again.",
-    );
+    report_error(&app, &settings_refresh_failed());
+}
+
+fn settings_refresh_failed() -> Problem {
+    Problem::new("Settings couldn’t refresh", "Open Settings and save again.")
 }
 
 #[tauri::command]
@@ -410,7 +417,10 @@ fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String>
     overlay::resize(&app, width, height)
 }
 
-fn report_error(app: &AppHandle, error: &str) {
+/// Show a problem in the overlay, tray and Settings. Never call this while
+/// holding the `Runtime` lock: showing the overlay asks the focused app for
+/// its window over Accessibility.
+fn report_error(app: &AppHandle, error: &Problem) {
     eprintln!("[dictate] {error}");
     surface::set_error(app, error);
     if let Err(error) = overlay::show(app) {
@@ -448,16 +458,25 @@ fn hotkey(
             surface::set_notice(app, microphone_notice(fallback));
         });
         if let Err(error) = result {
+            drop(runtime);
             report_error(app, &error);
             return;
         }
         runtime.phase = Phase::Recording;
         surface::set_phase(app, "recording");
+        let take_id = runtime.take_id;
+        drop(runtime);
         if let Err(error) = overlay::show(app) {
-            report_error(app, &error);
+            report_error(
+                app,
+                &Problem::new(
+                    "Overlay couldn’t open",
+                    "Recording continues; release to finish.",
+                )
+                .because(error),
+            );
         }
         let meter_app = app.clone();
-        let take_id = runtime.take_id;
         tauri::async_runtime::spawn_blocking(move || {
             while meter_app
                 .state::<Mutex<Runtime>>()
@@ -501,7 +520,7 @@ fn hotkey(
                     let (status, detail) = match &result {
                         Ok(true) => (TakeStatus::Pasted, None),
                         Ok(false) => (TakeStatus::Skipped, skip_reason),
-                        Err(error) => (TakeStatus::Failed, Some(error.clone())),
+                        Err(error) => (TakeStatus::Failed, Some(error.to_string())),
                     };
                     record_take(
                         &app,
@@ -548,17 +567,26 @@ fn hotkey(
                         return;
                     }
                     surface::set_phase(&app, "idle");
+                    drop(runtime);
                     if surface::status(&app).should_hide()
                         && let Some(window) = app.get_webview_window("main")
                         && let Err(error) = window.hide()
                     {
-                        report_error(&app, &error.to_string());
+                        report_error(
+                            &app,
+                            &Problem::new(
+                                "Overlay couldn’t close",
+                                "Dismiss it from the menu bar.",
+                            )
+                            .because(error),
+                        );
                     }
                 });
             }
             Err(error) => {
                 runtime.phase = Phase::Idle;
                 surface::set_phase(app, "idle");
+                drop(runtime);
                 report_error(app, &error);
             }
         }
@@ -618,10 +646,14 @@ pub fn run() {
             let store = match store {
                 Ok(store) => Some(store),
                 Err(error) => {
-                    let message = format!("{error}. Dictation still works; history is off.");
+                    let problem = Problem::new(
+                        "History is off",
+                        "Dictation still works. Restart dictate to turn history back on.",
+                    )
+                    .because(error);
                     startup_error = Some(match startup_error {
-                        Some(previous) => format!("{previous}\n{message}"),
-                        None => message,
+                        Some(previous) => previous.and(problem),
+                        None => problem,
                     });
                     None
                 }
@@ -634,12 +666,14 @@ pub fn run() {
             }) {
                 Ok(()) => true,
                 Err(error) => {
-                    let message = format!(
-                        "Shortcut unavailable: {error}. Choose another shortcut in Settings."
-                    );
+                    let problem = Problem::new(
+                        "Shortcut unavailable",
+                        "Choose another shortcut in Settings.",
+                    )
+                    .because(error);
                     startup_error = Some(match startup_error {
-                        Some(previous) => format!("{previous}\n{message}"),
-                        None => message,
+                        Some(previous) => previous.and(problem),
+                        None => problem,
                     });
                     false
                 }
@@ -910,6 +944,23 @@ mod take_tests {
                 );
             }
         }
+    }
+
+    /// The overlay story renders `src/problems.fixture.json`; this keeps it in
+    /// step with the messages the pipeline really reports.
+    #[test]
+    fn overlay_story_fixture_matches_real_problems() {
+        let real = serde_json::json!({
+            "accessibility": insert::accessibility_needed(),
+            "settingsRefresh": settings_refresh_failed(),
+            "noSamples": audio::no_samples(),
+            "missingModel": transcribe::missing_model(std::path::Path::new(
+                "/Applications/dictate.app/models/ggml-base.en.bin"
+            )),
+        });
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/problems.fixture.json")).unwrap();
+        assert_eq!(fixture, real);
     }
 
     #[test]

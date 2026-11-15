@@ -31,7 +31,7 @@ export type RecordingState =
   | { kind: "transcribing" }
   | { kind: "done" }
   | { kind: "skipped" }
-  | { kind: "error"; message: string }
+  | { kind: "error"; title: string; fix: string }
   | { kind: "ready"; message: string };
 export function RecordingCapsule({
   state,
@@ -42,13 +42,12 @@ export function RecordingCapsule({
   shortcut?: ReactNode;
   notice?: string;
 }) {
-  const labels: Record<RecordingState["kind"], string> = {
+  const labels: Record<Exclude<RecordingState["kind"], "error">, string> = {
     ready: "Listening",
     recording: "Recording",
     transcribing: "Transcribing…",
     done: "Text inserted",
     skipped: "No speech captured",
-    error: "Something went wrong",
   };
   const icons: Record<RecordingState["kind"], ReactNode> = {
     ready: <Mic size={18} />,
@@ -65,15 +64,18 @@ export function RecordingCapsule({
         className="ui-capsule-copy"
         role={state.kind === "error" ? "alert" : "status"}
       >
-        <span>{labels[state.kind]}</span>
+        <span>{state.kind === "error" ? state.title : labels[state.kind]}</span>
         {state.kind === "skipped" && (
           <span className="ui-capsule-message">
             Hold the shortcut and speak a little longer.
           </span>
         )}
         {notice && <span className="ui-capsule-message">{notice}</span>}
-        {(state.kind === "ready" || state.kind === "error") && (
+        {state.kind === "ready" && (
           <span className="ui-capsule-message">{state.message}</span>
+        )}
+        {state.kind === "error" && (
+          <span className="ui-capsule-message">{state.fix}</span>
         )}
       </div>
       {state.kind === "recording" && (

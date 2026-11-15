@@ -1,27 +1,39 @@
+use crate::problem::Problem;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
 static TRANSCRIPTION: Mutex<()> = Mutex::new(());
 
-pub fn transcribe(samples: &[f32]) -> Result<String, String> {
+pub fn transcribe(samples: &[f32]) -> Result<String, Problem> {
     if samples.is_empty() || samples.iter().any(|sample| !sample.is_finite()) {
-        return Err("Expected nonempty, finite 16 kHz mono audio".into());
+        return Err(failed("Expected nonempty, finite 16 kHz mono audio"));
     }
     let _guard = TRANSCRIPTION.try_lock().map_err(|_| {
         eprintln!("[transcribe] rejected: transcription is already running");
-        "Transcription is already running; try again when it finishes".to_string()
+        Problem::new(
+            "Still transcribing",
+            "Wait for the last dictation to finish.",
+        )
     })?;
     let cli = whisper_cli()?;
     let model = model_path()?;
+    run(&cli, &model, samples).map_err(failed)
+}
+
+fn failed(cause: impl std::fmt::Display) -> Problem {
+    Problem::new("Transcription failed", "Hold the shortcut and try again.").because(cause)
+}
+
+fn run(cli: &Path, model: &Path, samples: &[f32]) -> Result<String, String> {
     let temp =
         tempfile::tempdir().map_err(|e| format!("Create transcription temp directory: {e}"))?;
     let wav = temp.path().join("audio.wav");
     write_wav(&wav, samples)?;
     let output_base = temp.path().join("transcript");
-    let output = Command::new(&cli)
+    let output = Command::new(cli)
         .arg("-m")
-        .arg(&model)
+        .arg(model)
         .arg("-f")
         .arg(&wav)
         .args(["-l", "en", "-nt", "-np", "-otxt", "-of"])
@@ -51,13 +63,16 @@ pub fn model_name() -> String {
         .unwrap_or_else(|| "Unavailable".into())
 }
 
-fn whisper_cli() -> Result<PathBuf, String> {
+fn whisper_cli() -> Result<PathBuf, Problem> {
     if let Some(path) = std::env::var_os("DICTATE_WHISPER_CLI") {
         let path = PathBuf::from(path);
-        return path
-            .is_file()
-            .then_some(path)
-            .ok_or_else(|| "DICTATE_WHISPER_CLI must point to the whisper-cli executable".into());
+        return path.is_file().then_some(path.clone()).ok_or_else(|| {
+            Problem::new(
+                "whisper-cli not found",
+                "Point DICTATE_WHISPER_CLI at the whisper-cli executable.",
+            )
+            .because(format!("no file at {}", path.display()))
+        });
     }
     std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .map(|directory| directory.join("whisper-cli"))
@@ -67,23 +82,36 @@ fn whisper_cli() -> Result<PathBuf, String> {
         ])
         .find(|path| path.is_file())
         .ok_or_else(|| {
-            "whisper-cli is missing: install whisper-cpp, add whisper-cli to PATH, or set DICTATE_WHISPER_CLI to its absolute path".into()
+            Problem::new(
+                "whisper-cli not found",
+                "Install whisper-cpp with Homebrew, then try again.",
+            )
         })
 }
 
-fn model_path() -> Result<PathBuf, String> {
-    let path = std::env::var_os("DICTATE_WHISPER_MODEL")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../models/ggml-base.en.bin")
-        });
+fn model_path() -> Result<PathBuf, Problem> {
+    existing_model(
+        std::env::var_os("DICTATE_WHISPER_MODEL")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../models/ggml-base.en.bin")
+            }),
+    )
+}
+
+fn existing_model(path: PathBuf) -> Result<PathBuf, Problem> {
     if !path.is_file() {
-        return Err(format!(
-            "Whisper model is missing at {}: download ggml-base.en.bin into models/ or set DICTATE_WHISPER_MODEL to an English GGML model path",
-            path.display()
-        ));
+        return Err(missing_model(&path));
     }
     Ok(path)
+}
+
+pub fn missing_model(path: &Path) -> Problem {
+    Problem::new(
+        "Speech model missing",
+        "Download ggml-base.en.bin into dictate’s models folder.",
+    )
+    .because(format!("no file at {}", path.display()))
 }
 
 fn write_wav(path: &Path, samples: &[f32]) -> Result<(), String> {
@@ -129,13 +157,24 @@ mod tests {
     }
 
     #[test]
+    fn missing_model_names_the_download() {
+        let problem = existing_model(PathBuf::from("/nonexistent/ggml-base.en.bin")).unwrap_err();
+        assert_eq!(problem.title, "Speech model missing");
+        assert!(problem.fix.contains("Download ggml-base.en.bin"));
+        assert!(
+            problem
+                .detail
+                .unwrap()
+                .contains("/nonexistent/ggml-base.en.bin")
+        );
+    }
+
+    #[test]
     fn rejects_empty_and_nonfinite_audio() {
         for samples in [&[][..], &[f32::NAN], &[f32::INFINITY]] {
-            assert!(
-                transcribe(samples)
-                    .unwrap_err()
-                    .contains("finite 16 kHz mono")
-            );
+            let problem = transcribe(samples).unwrap_err();
+            assert_eq!(problem.title, "Transcription failed");
+            assert!(problem.detail.unwrap().contains("finite 16 kHz mono"));
         }
     }
 

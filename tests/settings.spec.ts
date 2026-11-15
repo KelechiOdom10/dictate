@@ -10,7 +10,7 @@ async function openSettings(
     overlay = false,
   }: {
     failLoad?: boolean;
-    startupError?: string | null;
+    startupError?: { title: string; fix: string; detail: string | null } | null;
     overlay?: boolean;
   } = {},
 ) {
@@ -223,10 +223,15 @@ test("startup recovery is visible after mount and dismissible with the keyboard"
   page,
 }) => {
   await openSettings(page, {
-    startupError:
-      "Read settings: invalid JSON. Using default settings. Original saved to settings.json.bad-123",
+    startupError: {
+      title: "Settings couldn’t be read",
+      fix: "Using defaults. Your old file is saved beside them.",
+      detail: "invalid JSON; original saved to settings.json.bad-123",
+    },
   });
-  await expect(page.getByRole("alert")).toContainText("Using default settings");
+  await expect(page.getByRole("alert")).toContainText(
+    "Settings couldn’t be read. Using defaults. Your old file is saved beside them.",
+  );
   await expect(page.getByRole("switch")).toBeVisible();
   await page.screenshot({ path: "target/startup-recovery-browser.png" });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -246,9 +251,15 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
   await page.setViewportSize({ width: 460, height: 132 });
   await openSettings(page, {
     overlay: true,
-    startupError: "Shortcut unavailable. Choose another shortcut in Settings.",
+    startupError: {
+      title: "Shortcut unavailable",
+      fix: "Choose another shortcut in Settings.",
+      detail: "HotKey already registered",
+    },
   });
-  await expect(page.getByRole("alert")).toContainText("Shortcut unavailable");
+  await expect(page.getByRole("alert")).toHaveText(
+    "Shortcut unavailableChoose another shortcut in Settings.",
+  );
   await page.screenshot({ path: "target/overlay-error-browser.png" });
   await page.evaluate(() =>
     window.postMessage(
@@ -312,14 +323,18 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
         event: "dictation-error",
         payload: {
           phase: "idle",
-          error: "Microphone unavailable. Using the default microphone.",
+          error: {
+            title: "Accessibility access needed",
+            fix: "Allow dictate in System Settings → Privacy & Security → Accessibility.",
+            detail: null,
+          },
         },
       },
       "*",
     ),
   );
-  await expect(page.getByRole("alert")).toContainText(
-    "Using the default microphone",
+  await expect(page.getByRole("alert")).toHaveText(
+    "Accessibility access neededAllow dictate in System Settings → Privacy & Security → Accessibility.",
   );
 });
 
@@ -497,10 +512,9 @@ test("invalid appearance events show a recoverable overlay error", async ({
       "*",
     ),
   );
-  await expect(page.getByRole("alert")).toContainText(
-    "Settings could not refresh",
+  await expect(page.getByRole("alert")).toHaveText(
+    "Settings couldn’t refreshOpen Settings and save again.",
   );
-  await expect(page.getByRole("alert")).toContainText("Open Settings");
 });
 
 test("capsule state screenshots cover every theme and fit a narrow overlay", async ({
@@ -553,7 +567,14 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 event: "dictation-state",
                 payload: {
                   phase: phase === "error" ? "idle" : phase,
-                  error: phase === "error" ? "Microphone access denied." : null,
+                  error:
+                    phase === "error"
+                      ? {
+                          title: "No sound from the microphone",
+                          fix: "Check it in Settings → General → Test microphone.",
+                          detail: null,
+                        }
+                      : null,
                 },
               },
               "*",

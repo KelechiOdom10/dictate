@@ -1,14 +1,26 @@
+use crate::problem::Problem;
 use tauri::AppHandle;
 
-pub fn paste(_app: &AppHandle, text: &str) -> Result<(), String> {
+pub fn accessibility_needed() -> Problem {
+    Problem::new(
+        "Accessibility access needed",
+        "Allow dictate in System Settings → Privacy & Security → Accessibility.",
+    )
+}
+
+pub fn paste(_app: &AppHandle, text: &str) -> Result<(), Problem> {
     #[cfg(target_os = "macos")]
     return objc2::rc::autoreleasepool(|_| macos::paste(text));
     #[cfg(not(target_os = "macos"))]
-    Err("Focused-app paste is supported only on macOS".into())
+    Err(Problem::new(
+        "Paste unavailable",
+        "dictate can paste only on macOS.",
+    ))
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use crate::problem::Problem;
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use objc2::{rc::Retained, runtime::ProtocolObject};
@@ -30,26 +42,23 @@ mod macos {
         fn AXIsProcessTrusted() -> bool;
     }
 
-    pub(super) fn paste(text: &str) -> Result<(), String> {
+    pub(super) fn paste(text: &str) -> Result<(), Problem> {
         let _guard = PASTE
             .try_lock()
-            .map_err(|_| "Another paste is in progress")?;
+            .map_err(|_| Problem::new("Still pasting", "Wait a moment, then dictate again."))?;
         // SAFETY: AXIsProcessTrusted has no arguments or caller preconditions.
         if !unsafe { AXIsProcessTrusted() } {
-            return Err(
-                "Allow dictate in System Settings → Privacy & Security → Accessibility, then retry"
-                    .into(),
-            );
+            return Err(super::accessibility_needed());
         }
         if text.trim().is_empty() {
             return Ok(());
         }
         let source = CGEventSource::new(CGEventSourceStateID::Private)
-            .map_err(|_| "Could not create keyboard event source")?;
+            .map_err(|_| paste_failed("Could not create keyboard event source"))?;
         let down = CGEvent::new_keyboard_event(source.clone(), 9, true)
-            .map_err(|_| "Could not create paste key-down")?;
+            .map_err(|_| paste_failed("Could not create paste key-down"))?;
         let up = CGEvent::new_keyboard_event(source, 9, false)
-            .map_err(|_| "Could not create paste key-up")?;
+            .map_err(|_| paste_failed("Could not create paste key-up"))?;
         down.set_flags(CGEventFlags::CGEventFlagCommand);
         up.set_flags(CGEventFlags::CGEventFlagCommand);
 
@@ -59,7 +68,27 @@ mod macos {
         })
     }
 
-    fn paste_to_board(board: &NSPasteboard, text: &str, send: impl FnOnce()) -> Result<(), String> {
+    fn clipboard_unsaved(cause: &str) -> Problem {
+        Problem::new(
+            "Clipboard couldn’t be saved",
+            "Nothing was pasted. Copy your words from History.",
+        )
+        .because(cause)
+    }
+
+    fn paste_failed(cause: impl std::fmt::Display) -> Problem {
+        Problem::new(
+            "Couldn’t paste",
+            "Your words are in History. Copy them from there.",
+        )
+        .because(cause)
+    }
+
+    fn paste_to_board(
+        board: &NSPasteboard,
+        text: &str,
+        send: impl FnOnce(),
+    ) -> Result<(), Problem> {
         let original_count = board.changeCount();
         let mut saved: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = Vec::new();
         if let Some(items) = board.pasteboardItems() {
@@ -68,25 +97,25 @@ mod macos {
                 for kind in item.types().iter() {
                     let data = item
                         .dataForType(&kind)
-                        .ok_or("Could not save a clipboard format; clipboard left unchanged")?;
+                        .ok_or_else(|| clipboard_unsaved("Could not save a clipboard format"))?;
                     if !copy.setData_forType(&data, &kind) {
-                        return Err(
-                            "Could not save clipboard contents; clipboard left unchanged".into(),
-                        );
+                        return Err(clipboard_unsaved("Could not save clipboard contents"));
                     }
                 }
                 saved.push(ProtocolObject::from_retained(copy));
             }
         }
         if board.changeCount() != original_count {
-            return Err("Clipboard changed while saving it; retry dictation".into());
+            return Err(clipboard_unsaved("Clipboard changed while saving it"));
         }
         let transcript = NSPasteboardItem::new();
         // SAFETY: AppKit exports this immutable pasteboard type constant.
         if !transcript
             .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString })
         {
-            return Err("Could not prepare transcript for the clipboard".into());
+            return Err(paste_failed(
+                "Could not prepare transcript for the clipboard",
+            ));
         }
         let transcript: Retained<ProtocolObject<dyn NSPasteboardWriting>> =
             ProtocolObject::from_retained(transcript);
@@ -100,16 +129,22 @@ mod macos {
             println!("[insert] restore_delay_ms={}", posted.elapsed().as_millis());
         }
         if board.changeCount() != transcript_count {
-            return Err("Clipboard changed during paste; kept the newer clipboard contents".into());
+            return Err(Problem::new(
+                "Pasted, clipboard left as is",
+                "Something new was copied during the paste, so dictate kept it.",
+            ));
         }
         board.clearContents();
         if !saved.is_empty() && !board.writeObjects(&NSArray::from_retained_slice(&saved)) {
-            return Err("Paste attempted but could not restore the previous clipboard".into());
+            return Err(Problem::new(
+                "Pasted, clipboard not restored",
+                "Copy what you had before again.",
+            ));
         }
         if !written {
-            return Err(
-                "Could not put transcript on clipboard; previous clipboard restored".into(),
-            );
+            return Err(paste_failed(
+                "Could not put transcript on clipboard; previous clipboard restored",
+            ));
         }
         Ok(())
     }
@@ -177,7 +212,7 @@ mod macos {
                     })
                 );
             });
-            assert!(result.unwrap_err().contains("kept the newer clipboard"));
+            assert_eq!(result.unwrap_err().title, "Pasted, clipboard left as is");
             // SAFETY: AppKit exports this immutable pasteboard type constant.
             assert_eq!(
                 board

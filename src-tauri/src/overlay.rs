@@ -81,6 +81,12 @@ fn focused_window_center() -> Option<(f64, f64)> {
     None
 }
 
+/// How long one Accessibility call may wait on the focused app. The default is
+/// about 6 s, which would stall the hotkey on a hung app; past this we fall
+/// back to the main display.
+#[cfg(target_os = "macos")]
+const AX_TIMEOUT_SECONDS: f32 = 0.1;
+
 #[cfg(target_os = "macos")]
 fn focused_window_center() -> Option<(f64, f64)> {
     use core_foundation::{
@@ -92,6 +98,7 @@ fn focused_window_center() -> Option<(f64, f64)> {
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
         fn AXUIElementCreateSystemWide() -> CFTypeRef;
+        fn AXUIElementSetMessagingTimeout(element: CFTypeRef, timeout: f32) -> i32;
         fn AXUIElementCopyAttributeValue(
             element: CFTypeRef,
             attribute: CFStringRef,
@@ -119,7 +126,13 @@ fn focused_window_center() -> Option<(f64, f64)> {
     }
     // SAFETY: CreateSystemWide takes no arguments and returns an owned accessibility element.
     let system = unsafe { CFType::wrap_under_create_rule(AXUIElementCreateSystemWide()) };
+    let limit = |element: &CFType| {
+        // SAFETY: element is a live AXUIElement for the duration of the call.
+        unsafe { AXUIElementSetMessagingTimeout(element.as_CFTypeRef(), AX_TIMEOUT_SECONDS) }
+    };
+    limit(&system);
     let app = attribute(&system, "AXFocusedApplication")?;
+    limit(&app);
     let window = attribute(&app, "AXFocusedWindow")?;
     let position = attribute(&window, "AXPosition")?;
     let size = attribute(&window, "AXSize")?;

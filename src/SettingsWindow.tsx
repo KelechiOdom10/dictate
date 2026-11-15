@@ -81,7 +81,7 @@ export default function SettingsWindow({
               void invoke("dismiss_error").catch(console.error);
             }}
           >
-            {status.error}
+            {status.error.title}. {status.error.fix}
           </Toast>
         )}
         {page === "General" ? (
