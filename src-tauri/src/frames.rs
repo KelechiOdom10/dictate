@@ -25,7 +25,7 @@ use tiny_skia::{
     FillRule, FilterQuality, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Transform,
 };
 
-use crate::package::{Annotation, Display, Frame, POINT_SCALE, Stroke};
+use crate::package::{Annotation, Display, Frame, POINT_SCALE, Stroke, Video};
 
 /// Long edge of `frames/`: the image-size guidance of common chat models
 /// (design doc §5).
@@ -33,6 +33,9 @@ pub const FRAME_LONG_EDGE: u32 = 1568;
 pub const INK_RGB: [u8; 3] = [0xFF, 0x3B, 0x30];
 /// Ink width in display points, so it looks the same at any resolution.
 pub const INK_WIDTH_PT: f64 = 4.0;
+/// Contact-sheet cells are ~580 px wide, where 4 pt comes out near 1.5 px and
+/// the ink is hard to see, so each cell's ink is redrawn at least this wide.
+pub const SHEET_INK_MIN_PX: f32 = 3.0;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Rendered {
@@ -48,17 +51,16 @@ pub struct Rendered {
     pub sheet_ms: u64,
 }
 
-/// `video` is the session's MP4. Frame times are on the session clock, so the
-/// video's `offset_ms` is taken off before asking for each image.
+/// `video` is the session's MP4. Frame times are on the session clock and are
+/// moved to the video's clock with `video_time`.
 pub fn render(folder: &Path, annotation: &Annotation, video: &Path) -> Result<Rendered, String> {
     if annotation.frames.is_empty() {
         return Ok(Rendered::default());
     }
-    let offset_ms = annotation.video.as_ref().map_or(0, |v| v.offset_ms);
     let times: Vec<u64> = annotation
         .frames
         .iter()
-        .map(|frame| frame.t.saturating_sub(offset_ms))
+        .map(|frame| video_time(frame.t, annotation.video.as_ref()))
         .collect();
 
     let started = Instant::now();
@@ -104,8 +106,17 @@ pub fn render(folder: &Path, annotation: &Annotation, video: &Path) -> Result<Re
     let frames_ms = elapsed_ms(started);
 
     let started = Instant::now();
-    let numbers: Vec<usize> = annotation.frames.iter().map(|frame| frame.n).collect();
-    let contact_sheet = sheet::render(&small, &numbers)?;
+    let cells: Vec<sheet::Frame> = annotation
+        .frames
+        .iter()
+        .zip(&small)
+        .map(|(frame, image)| sheet::Frame {
+            image,
+            number: frame.n,
+            strokes: frame_strokes(annotation, frame),
+        })
+        .collect();
+    let contact_sheet = sheet::render(&cells, &annotation.display)?;
     save_png(&contact_sheet, &folder.join(&annotation.contact_sheet))?;
     let sheet_ms = elapsed_ms(started);
 
@@ -119,6 +130,18 @@ pub fn render(folder: &Path, annotation: &Annotation, video: &Path) -> Result<Re
         frames_ms,
         sheet_ms,
     })
+}
+
+/// A session time as a time in the MP4: the video's offset taken off, then
+/// held at its last frame. The session can outlast the recording by a few
+/// hundred ms, and AVFoundation fails a request past the end outright.
+pub fn video_time(t: u64, video: Option<&Video>) -> u64 {
+    let Some(video) = video else {
+        return t;
+    };
+    let frame_ms = 1000_u64.div_ceil(u64::from(video.fps.max(1)));
+    t.saturating_sub(video.offset_ms)
+        .min(video.duration_ms.saturating_sub(frame_ms))
 }
 
 fn finish_frame(
@@ -173,6 +196,12 @@ pub fn ink_width(display: &Display, image_width: u32) -> f32 {
 
 pub fn draw_ink(pixmap: &mut Pixmap, display: &Display, strokes: &[&Stroke]) {
     let width = ink_width(display, pixmap.width());
+    draw_strokes(pixmap, strokes, width);
+}
+
+/// `strokes` in `INK_RGB`, `width` pixels wide, round-capped. A stroke that
+/// never moved is a dot.
+pub fn draw_strokes(pixmap: &mut Pixmap, strokes: &[&Stroke], width: f32) {
     let mut paint = Paint::default();
     paint.set_color_rgba8(INK_RGB[0], INK_RGB[1], INK_RGB[2], 255);
     paint.anti_alias = true;
@@ -345,6 +374,23 @@ mod tests {
         // The path spans x 100–300, y 50–200 and the ink is 4 px wide with round
         // caps, so it covers 98.0–302.0: pixels 98 to 301.
         assert_eq!(bounds, (98, 48, 301, 201));
+    }
+
+    #[test]
+    fn video_time_takes_off_the_offset_and_stays_before_the_last_frame() {
+        let video = Video {
+            file: "recording.mp4".into(),
+            offset_ms: 120,
+            width: 2560,
+            height: 1600,
+            fps: 15,
+            duration_ms: 60_520,
+        };
+        assert_eq!(video_time(5_120, Some(&video)), 5_000);
+        assert_eq!(video_time(60, Some(&video)), 0);
+        assert_eq!(video_time(61_500, Some(&video)), 60_453);
+        assert_eq!(video_time(60_573, Some(&video)), 60_453);
+        assert_eq!(video_time(61_500, None), 61_500);
     }
 
     #[test]

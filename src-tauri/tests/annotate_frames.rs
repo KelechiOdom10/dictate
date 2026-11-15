@@ -117,6 +117,7 @@ fn session(display: Display) -> Session {
             width: WIDTH as u32,
             height: HEIGHT as u32,
             fps: FPS as u32,
+            duration_ms: SECONDS * 1000,
         }),
         audio: Audio {
             file: "audio.wav".into(),
@@ -159,7 +160,7 @@ fn a_generated_minute_with_four_marks_becomes_a_package() {
     let video = folder.join("recording.mp4");
 
     let written = Instant::now();
-    if let Err(error) = write_test_video(&video) {
+    if let Err(error) = write_test_video(&video, SECONDS) {
         eprintln!("SKIP annotate frames: cannot write a test MP4 with AVAssetWriter: {error}");
         return;
     }
@@ -274,6 +275,54 @@ fn a_generated_minute_with_four_marks_becomes_a_package() {
     }
 }
 
+/// The session clock runs on past the end of the MP4 (the recorder stops a
+/// little after the last frame). A speech frame at the session's end lands
+/// past the video, and must come out as the last frame instead of failing
+/// the whole render.
+#[test]
+fn a_session_longer_than_its_video_still_renders_every_frame() {
+    const VIDEO_SECONDS: u64 = 5;
+    let temp = tempfile::tempdir().unwrap();
+    let folder = temp.path().join("package");
+    std::fs::create_dir_all(&folder).unwrap();
+    let video = folder.join("recording.mp4");
+    if let Err(error) = write_test_video(&video, VIDEO_SECONDS) {
+        eprintln!("SKIP annotate frames: cannot write a test MP4 with AVAssetWriter: {error}");
+        return;
+    }
+
+    let display = display();
+    let mut session = session(display.clone());
+    session.duration_ms = 6_500;
+    session.strokes = vec![circle(&display, 1_000, 2_000, MARK_BOXES[0])];
+    session.words = words(&[(5_800, "the"), (6_000, "end.")]);
+    if let Some(video) = session.video.as_mut() {
+        video.duration_ms = VIDEO_SECONDS * 1000;
+    }
+
+    let annotation = package::build(session);
+    let last = annotation.frames.last().unwrap();
+    assert_eq!(last.reason, FrameReason::Speech);
+    assert!(
+        last.t - VIDEO_OFFSET_MS > VIDEO_SECONDS * 1000,
+        "the speech frame at {} ms should fall past the video",
+        last.t
+    );
+
+    package::write_package(&folder, &annotation).unwrap();
+    let rendered = frames::render(&folder, &annotation, &video).unwrap();
+    assert_eq!(rendered.frames, annotation.frames.len());
+    assert!(folder.join(&annotation.contact_sheet).is_file());
+
+    let full = Pixmap::load_png(folder.join(&last.full)).unwrap();
+    let last_index = VIDEO_SECONDS * FPS - 1;
+    let shown = read_barcode(&full);
+    assert!(
+        shown.abs_diff(last_index) <= 1,
+        "frame past the end shows video frame {shown}, expected the last ({last_index})"
+    );
+}
+
 /// Bounds of the red ink as fractions `[x0, y0, x1, y1]`, or `None`.
 fn ink_bounds(pixmap: &Pixmap) -> Option<[f64; 4]> {
     let (w, h) = (pixmap.width(), pixmap.height());
@@ -353,7 +402,7 @@ fn paint_frame(index: u64, pixels: &mut [u8], stride: usize) {
     }
 }
 
-fn write_test_video(path: &Path) -> Result<(), String> {
+fn write_test_video(path: &Path, seconds: u64) -> Result<(), String> {
     let _ = std::fs::remove_file(path);
     let url = NSURL::from_file_path(path).ok_or("bad path")?;
     // SAFETY: AVFoundation calls on objects this function owns; the statics
@@ -387,7 +436,7 @@ fn write_test_video(path: &Path) -> Result<(), String> {
         }
         writer.startSessionAtSourceTime(kCMTimeZero);
 
-        for index in 0..SECONDS * FPS {
+        for index in 0..seconds * FPS {
             let waited = Instant::now();
             while !input.isReadyForMoreMediaData() {
                 if waited.elapsed() > Duration::from_secs(10) {

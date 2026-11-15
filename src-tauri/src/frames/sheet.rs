@@ -4,8 +4,10 @@
 
 use tiny_skia::{
     Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect,
-    Stroke, Transform,
+    Transform,
 };
+
+use crate::package::{Display, Stroke};
 
 /// Long edge of the whole sheet. Twelve frames in four columns stay about
 /// 580 px wide each, enough to read UI text, and the PNG stays a few MB.
@@ -135,10 +137,25 @@ pub fn layout(numbers: &[usize], frame_w: u32, frame_h: u32, max_edge: u32) -> S
     }
 }
 
-/// `frames` all have the size of the first. `numbers[i]` is frame i's badge.
-pub fn render(frames: &[Pixmap], numbers: &[usize]) -> Result<Pixmap, String> {
+/// One key frame as the sheet needs it.
+pub struct Frame<'a> {
+    /// Already inked; all frames have the size of the first.
+    pub image: &'a Pixmap,
+    /// The badge, as in summary.md.
+    pub number: usize,
+    /// Redrawn over the scaled cell at `SHEET_INK_MIN_PX` or more.
+    pub strokes: Vec<&'a Stroke>,
+}
+
+pub fn render(frames: &[Frame], display: &Display) -> Result<Pixmap, String> {
     let first = frames.first().ok_or("No frames for the contact sheet")?;
-    let plan = layout(numbers, first.width(), first.height(), SHEET_MAX_EDGE);
+    let numbers: Vec<usize> = frames.iter().map(|frame| frame.number).collect();
+    let plan = layout(
+        &numbers,
+        first.image.width(),
+        first.image.height(),
+        SHEET_MAX_EDGE,
+    );
     let mut sheet = Pixmap::new(plan.width, plan.height).ok_or("Allocate the contact sheet")?;
     sheet.fill(Color::from_rgba8(
         BACKGROUND[0],
@@ -147,8 +164,10 @@ pub fn render(frames: &[Pixmap], numbers: &[usize]) -> Result<Pixmap, String> {
         255,
     ));
     for (frame, cell) in frames.iter().zip(&plan.cells) {
-        let scaled = super::resize(frame, cell.image.w, cell.image.h)
+        let mut scaled = super::resize(frame.image, cell.image.w, cell.image.h)
             .ok_or("Scale a frame for the sheet")?;
+        let width = super::ink_width(display, scaled.width()).max(super::SHEET_INK_MIN_PX);
+        super::draw_strokes(&mut scaled, &frame.strokes, width);
         sheet.draw_pixmap(
             cell.image.x as i32,
             cell.image.y as i32,
@@ -187,11 +206,11 @@ fn draw_badge(sheet: &mut Pixmap, area: Area, number: usize) {
     let text_w = text.len() as f32 * advance - DIGIT_SPACING * glyph_h;
     let mut origin_x = x + (w - text_w) / 2.0;
     let origin_y = y + (h - glyph_h) / 2.0;
-    let style = Stroke {
+    let style = tiny_skia::Stroke {
         width: DIGIT_STROKE,
         line_cap: LineCap::Round,
         line_join: LineJoin::Round,
-        ..Stroke::default()
+        ..tiny_skia::Stroke::default()
     };
     for digit in text.bytes().map(|b| b - b'0') {
         if let Some(path) = digit_path(digit) {

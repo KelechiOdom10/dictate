@@ -138,6 +138,9 @@ pub struct Video {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
+    /// Length of the MP4 (`screen::VideoInfo::duration_ms`). The session can
+    /// run past it, so frame times are held inside it (`frames::video_time`).
+    pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1021,6 +1024,7 @@ mod tests {
                 width: 3024,
                 height: 1964,
                 fps: 15,
+                duration_ms: 31_200,
             }),
             audio: Audio {
                 file: "audio.wav".to_string(),
