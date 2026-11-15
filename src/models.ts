@@ -10,6 +10,7 @@ export const speechModelSchema = z.enum([
   "small.en",
   "medium.en",
   "large-v3-turbo",
+  "parakeet-unified-en",
 ]) satisfies z.ZodType<SpeechModel>;
 
 const modelStateSchema = z.discriminatedUnion("kind", [
@@ -36,6 +37,7 @@ export const modelEntrySchema = z
     accuracy: z.number().int().min(1).max(5),
     measuredMs: z.number().int().positive(),
     recommended: z.boolean(),
+    licence: z.object({ name: z.string(), url: z.url() }).strict().nullable(),
     active: z.boolean(),
     state: modelStateSchema,
   })
@@ -49,6 +51,8 @@ export const cancelDownload = (model: SpeechModel) =>
   invoke<null>("cancel_download", { model });
 export const deleteModel = (model: SpeechModel) =>
   invoke<null>("delete_model", { model });
+export const openModelLicence = (model: SpeechModel) =>
+  invoke<null>("open_model_licence", { model });
 export const readWhisperStatus = async () =>
   problemSchema.nullable().parse(await invoke("whisper_status"));
 

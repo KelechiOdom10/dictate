@@ -3,6 +3,7 @@ import {
   Check,
   CircleAlert,
   Download,
+  ExternalLink,
   HardDrive,
   Info,
   Trash2,
@@ -290,6 +291,7 @@ export function ModelCard({
   ratings,
   size,
   badge,
+  licence,
   status,
   disabled = false,
 }: {
@@ -298,6 +300,8 @@ export function ModelCard({
   ratings: ModelRating[];
   size: string;
   badge?: string;
+  /** Terms the weights are published under, opened in the browser. */
+  licence?: { name: string; onOpen: () => void };
   status: ModelStatus;
   disabled?: boolean;
 }) {
@@ -421,6 +425,18 @@ export function ModelCard({
             {badge && <span className="ui-badge ui-badge-quiet">{badge}</span>}
           </div>
           <p className="ui-preview">{description}</p>
+          {licence && (
+            <p className="ui-date">
+              <button
+                type="button"
+                className="ui-model-licence"
+                onClick={licence.onOpen}
+              >
+                {licence.name}
+                <ExternalLink size={12} aria-hidden="true" />
+              </button>
+            </p>
+          )}
         </div>
         <dl className="ui-model-ratings">
           {ratings.map((rating) => (

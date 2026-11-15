@@ -1,4 +1,5 @@
-//! Speech models: the curated whisper.cpp list, and downloading, verifying and
+//! Speech models: the curated list (whisper.cpp files for whisper-cli, and a
+//! Parakeet GGUF for the in-process engine), and downloading, verifying and
 //! deleting their weights in the app data folder.
 //!
 //! A download streams into `<file>.part`, hashing as it goes. Only a file with
@@ -38,10 +39,22 @@ pub enum SpeechModel {
     MediumEn,
     #[serde(rename = "large-v3-turbo")]
     LargeV3Turbo,
+    #[serde(rename = "parakeet-unified-en")]
+    ParakeetUnifiedEn,
+}
+
+/// The terms a model's weights are published under, when the card has to
+/// show them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct Licence {
+    pub name: &'static str,
+    pub url: &'static str,
 }
 
 pub struct ModelInfo {
     pub id: SpeechModel,
+    /// Hugging Face folder URL at a pinned commit, ending in `/`.
+    pub source: &'static str,
     pub name: &'static str,
     pub description: &'static str,
     pub file_name: &'static str,
@@ -53,20 +66,28 @@ pub struct ModelInfo {
     /// owner's M4 Pro. See `docs/spike-results.md`.
     pub measured_ms: u32,
     pub recommended: bool,
+    pub licence: Option<Licence>,
 }
 
-/// Pinned to one commit of `ggerganov/whisper.cpp`, so every URL serves exactly
-/// the bytes the catalog checksums describe, even if upstream re-uploads.
-const HUGGING_FACE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/";
+/// Pinned to one commit, so every URL serves exactly the bytes the catalog
+/// checksums describe, even if upstream re-uploads.
+const WHISPER_CPP: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/";
+const PARAKEET_UNIFIED_EN: &str = "https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/7e948f21b7bdbac698d3318db9d350f1096f3b6c/";
+
+const NVIDIA_OPEN_MODEL_LICENSE: Licence = Licence {
+    name: "NVIDIA Open Model License",
+    url: "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+};
 
 /// How long a download may go without receiving a byte before it fails.
 pub const STALL_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Sizes and SHA-256 digests are the Git LFS object ids published for
-/// `ggerganov/whisper.cpp` at the pinned commit, checked against downloads.
-pub const CATALOG: [ModelInfo; 5] = [
+/// Sizes and SHA-256 digests are the Git LFS object ids published at the
+/// pinned commits, checked against downloads.
+pub const CATALOG: [ModelInfo; 6] = [
     ModelInfo {
         id: SpeechModel::TinyEn,
+        source: WHISPER_CPP,
         name: "Tiny English",
         description: "Instant, for short notes. Misses more words.",
         file_name: "ggml-tiny.en.bin",
@@ -75,9 +96,11 @@ pub const CATALOG: [ModelInfo; 5] = [
         accuracy: 1,
         measured_ms: 188,
         recommended: false,
+        licence: None,
     },
     ModelInfo {
         id: SpeechModel::BaseEn,
+        source: WHISPER_CPP,
         name: "Base English",
         description: "Fast and dependable for everyday dictation.",
         file_name: "ggml-base.en.bin",
@@ -86,9 +109,11 @@ pub const CATALOG: [ModelInfo; 5] = [
         accuracy: 2,
         measured_ms: 232,
         recommended: false,
+        licence: None,
     },
     ModelInfo {
         id: SpeechModel::SmallEn,
+        source: WHISPER_CPP,
         name: "Small English",
         description: "Noticeably more accurate, still quick on this Mac.",
         file_name: "ggml-small.en.bin",
@@ -97,9 +122,11 @@ pub const CATALOG: [ModelInfo; 5] = [
         accuracy: 3,
         measured_ms: 437,
         recommended: true,
+        licence: None,
     },
     ModelInfo {
         id: SpeechModel::MediumEn,
+        source: WHISPER_CPP,
         name: "Medium English",
         description: "Careful with names and jargon, but slower.",
         file_name: "ggml-medium.en.bin",
@@ -108,9 +135,11 @@ pub const CATALOG: [ModelInfo; 5] = [
         accuracy: 4,
         measured_ms: 1_037,
         recommended: false,
+        licence: None,
     },
     ModelInfo {
         id: SpeechModel::LargeV3Turbo,
+        source: WHISPER_CPP,
         name: "Large v3 Turbo",
         description: "The most accurate. Multilingual, set to English here.",
         file_name: "ggml-large-v3-turbo.bin",
@@ -119,6 +148,20 @@ pub const CATALOG: [ModelInfo; 5] = [
         accuracy: 5,
         measured_ms: 1_084,
         recommended: false,
+        licence: None,
+    },
+    ModelInfo {
+        id: SpeechModel::ParakeetUnifiedEn,
+        source: PARAKEET_UNIFIED_EN,
+        name: "Parakeet English",
+        description: "NVIDIA's dictation model. Very accurate, and stays loaded so text is ready fast.",
+        file_name: "parakeet-unified-en-0.6b-Q8_0.gguf",
+        bytes: 731_357_568,
+        sha256: "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795",
+        accuracy: 5,
+        measured_ms: 134,
+        recommended: false,
+        licence: Some(NVIDIA_OPEN_MODEL_LICENSE),
     },
 ];
 
@@ -169,6 +212,7 @@ pub struct ModelEntry {
     pub accuracy: u8,
     pub measured_ms: u32,
     pub recommended: bool,
+    pub licence: Option<Licence>,
     pub active: bool,
     pub state: ModelState,
 }
@@ -312,6 +356,7 @@ impl Downloads {
                 accuracy: info.accuracy,
                 measured_ms: info.measured_ms,
                 recommended: info.recommended,
+                licence: info.licence,
                 active: info.id == active,
                 state: self.state(info.id, path(dir, info.id).is_file()),
             })
@@ -473,7 +518,7 @@ pub fn fetch(
 ) -> Result<(), DownloadError> {
     let info = info(model);
     download(
-        &format!("{HUGGING_FACE}{}", info.file_name),
+        &format!("{}{}", info.source, info.file_name),
         info.bytes,
         info.sha256,
         &path(dir, model),
@@ -771,7 +816,7 @@ mod tests {
         fs::write(path(dir.path(), SpeechModel::TinyEn), b"x").unwrap();
         fs::write(dir.path().join("ggml-base.en.bin.part"), b"x").unwrap();
         let entries = Downloads::default().entries(dir.path(), SpeechModel::TinyEn);
-        assert_eq!(entries.len(), 5);
+        assert_eq!(entries.len(), CATALOG.len());
         assert_eq!(entries[0].state, ModelState::Installed);
         assert!(entries[0].active);
         assert_eq!(entries[1].state, ModelState::Available);
@@ -797,8 +842,9 @@ mod tests {
     #[test]
     fn typescript_contract_matches_rust_models() {
         let contract = format!(
-            "export {}\nexport {}\nexport {}\n",
+            "export {}\nexport {}\nexport {}\nexport {}\n",
             SpeechModel::decl(),
+            Licence::decl(),
             ModelState::decl(),
             ModelEntry::decl()
         );
@@ -815,6 +861,25 @@ mod tests {
                 .replace(";}", "}")
         };
         assert_eq!(compact(checked_in), compact(&contract));
+    }
+
+    /// The real download: the pinned URL serves exactly the bytes the catalog
+    /// describes. Saves into a temp folder, never the app's.
+    #[test]
+    #[ignore = "Downloads 731 MB; run explicitly with --ignored"]
+    fn parakeet_downloads_from_its_pinned_url_and_verifies() {
+        let dir = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        fetch(
+            SpeechModel::ParakeetUnifiedEn,
+            dir.path(),
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        let file = path(dir.path(), SpeechModel::ParakeetUnifiedEn);
+        assert_eq!(fs::metadata(&file).unwrap().len(), 731_357_568);
+        println!("download_s={}", started.elapsed().as_secs());
     }
 
     /// Serves `body` after HTTP headers promising `len` bytes, then holds the
