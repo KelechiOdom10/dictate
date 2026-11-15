@@ -1,8 +1,9 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useQuery } from "@tanstack/react-query";
 import General from "./GeneralSettings";
-import { Button, EmptyState, SidebarNav } from "./ui";
+import { Button, EmptyState, SidebarNav, Toast } from "./ui";
 import {
   AudioLines,
   SlidersHorizontal,
@@ -13,6 +14,8 @@ import {
   Info,
   ArrowLeft,
 } from "lucide-react";
+import { useDictationStatus } from "./useDictationStatus";
+
 const pages = [
   { name: "General", icon: SlidersHorizontal },
   { name: "Models", icon: Cpu },
@@ -23,6 +26,7 @@ const pages = [
 ];
 
 export default function SettingsWindow() {
+  const status = useDictationStatus();
   const [page, setPage] = useState("General");
   const version = useQuery({ queryKey: ["version"], queryFn: getVersion });
   return (
@@ -58,6 +62,16 @@ export default function SettingsWindow() {
               : `Your ${page.toLowerCase()} preferences, all in one place.`}
           </p>
         </header>
+        {status.error && (
+          <Toast
+            tone="danger"
+            onDismiss={() => {
+              void invoke("dismiss_error").catch(console.error);
+            }}
+          >
+            {status.error}
+          </Toast>
+        )}
         {page === "General" ? (
           <General />
         ) : (

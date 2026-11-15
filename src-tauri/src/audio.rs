@@ -213,18 +213,21 @@ where
             config,
             move |data: &[T], _| {
                 if let Ok(mut captured) = samples.lock() {
-                    let mono: Vec<f32> = data
-                        .chunks_exact(channels)
-                        .map(|frame| {
-                            frame
-                                .iter()
-                                .map(|s| s.to_sample::<f32>().clamp(-1.0, 1.0))
-                                .sum::<f32>()
-                                / channels as f32
-                        })
-                        .collect();
-                    captured.level =
-                        (mono.iter().map(|s| s * s).sum::<f32>() / mono.len().max(1) as f32).sqrt();
+                    if !captured.retain {
+                        let frames = data.chunks_exact(channels);
+                        let count = frames.len().max(1);
+                        let squares = frames
+                            .map(|frame| {
+                                let mono = frame
+                                    .iter()
+                                    .map(|s| s.to_sample::<f32>().clamp(-1.0, 1.0))
+                                    .sum::<f32>()
+                                    / channels as f32;
+                                mono * mono
+                            })
+                            .sum::<f32>();
+                        captured.level = (squares / count as f32).sqrt();
+                    }
                     if captured.retain {
                         append_mono(&mut captured.samples, data, channels);
                     }

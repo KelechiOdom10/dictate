@@ -49,3 +49,21 @@ export const Levels: Story = {
     </div>
   ),
 };
+
+export const StartupRecovery: Story = {
+  args: {
+    state: {
+      kind: "error",
+      message:
+        "Settings could not be read. Using defaults. Open Settings for details.",
+    },
+  },
+};
+export const MissingMicrophone: Story = {
+  args: {
+    state: {
+      kind: "error",
+      message: "Microphone unavailable. Using the default microphone.",
+    },
+  },
+};

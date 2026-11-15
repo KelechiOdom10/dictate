@@ -4,7 +4,15 @@ import path from "node:path";
 
 async function openSettings(
   page: import("@playwright/test").Page,
-  failLoad = false,
+  {
+    failLoad = false,
+    startupError = null,
+    overlay = false,
+  }: {
+    failLoad?: boolean;
+    startupError?: string | null;
+    overlay?: boolean;
+  } = {},
 ) {
   await page.route("http://dictate.test/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
@@ -21,8 +29,29 @@ async function openSettings(
     await route.fulfill({ body: await readFile(file), contentType: type });
   });
   await page.addInitScript(
-    ({ failLoad }) => {
+    ({ failLoad, startupError }) => {
+      let status = { phase: "idle", error: startupError };
+      const callbacks = new Map<number, (response: unknown) => void>();
+      const listeners = new Map<string, { id: number; handler: number }[]>();
+      let nextId = 0;
+      function emit(event: string, payload: unknown) {
+        for (const listener of listeners.get(event) ?? []) {
+          callbacks.get(listener.handler)?.({
+            event,
+            id: listener.id,
+            payload,
+          });
+        }
+      }
+      window.addEventListener("message", ({ data }) => {
+        if (data.type !== "dictate-test") return;
+        if (data.event === "settings-changed")
+          Object.assign(settings, data.payload);
+        else status = data.payload;
+        emit(data.event, data.payload);
+      });
       const settings = {
+        version: 1,
         shortcut: "Alt+Shift+Space",
         shortcutMode: "hold",
         microphone: null,
@@ -37,11 +66,21 @@ async function openSettings(
             currentWindow: { label: "settings" },
             currentWebview: { label: "settings" },
           },
-          transformCallback: () => 1,
+          transformCallback: (callback: (response: unknown) => void) => {
+            const id = ++nextId;
+            callbacks.set(id, callback);
+            return id;
+          },
           invoke: async (
             command: string,
-            args: { settings?: typeof settings; enabled?: boolean },
+            args: {
+              settings?: typeof settings;
+              enabled?: boolean;
+              event?: string;
+              handler?: number;
+            },
           ) => {
+            if (command === "pipeline_status") return status;
             if (command === "get_settings") {
               if (failLoad) throw "Settings file could not be read";
               return settings;
@@ -56,15 +95,32 @@ async function openSettings(
               return ["Built-in Microphone", "USB Microphone"];
             if (command === "microphone_level") return 0.12;
             if (command === "plugin:app|version") return "0.1.0";
-            if (command === "plugin:event|listen") return 1;
+            if (command === "dismiss_error") {
+              status = { phase: "idle", error: null };
+              emit("dictation-state", "idle");
+            }
+            if (
+              command === "plugin:event|listen" &&
+              args.event &&
+              args.handler
+            ) {
+              const id = ++nextId;
+              listeners.set(args.event, [
+                ...(listeners.get(args.event) ?? []),
+                { id, handler: args.handler },
+              ]);
+              return id;
+            }
             return null;
           },
         },
       });
     },
-    { failLoad },
+    { failLoad, startupError },
   );
-  await page.goto("http://dictate.test/?window=settings");
+  await page.goto(
+    overlay ? "http://dictate.test/" : "http://dictate.test/?window=settings",
+  );
 }
 
 test("preferences save, shortcut failures preserve the old value, and placeholders navigate", async ({
@@ -112,7 +168,7 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
 test("load failure offers recovery and controls never appear with unknown settings", async ({
   page,
 }) => {
-  await openSettings(page, true);
+  await openSettings(page, { failLoad: true });
   await expect(page.getByRole("alert")).toContainText(
     "Settings file could not be read",
   );
@@ -144,3 +200,91 @@ for (const colorScheme of ["light", "dark"] as const) {
     ).toBeVisible();
   });
 }
+
+test("startup recovery is visible after mount and dismissible with the keyboard", async ({
+  page,
+}) => {
+  await openSettings(page, {
+    startupError:
+      "Read settings: invalid JSON. Using default settings. Original saved to settings.json.bad-123",
+  });
+  await expect(page.getByRole("alert")).toContainText("Using default settings");
+  await expect(page.getByRole("switch")).toBeVisible();
+  await page.screenshot({ path: "target/startup-recovery-browser.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Dismiss", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("overlay receives retained errors, live phases and changed shortcuts", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 460, height: 132 });
+  await openSettings(page, {
+    overlay: true,
+    startupError: "Shortcut unavailable. Choose another shortcut in Settings.",
+  });
+  await expect(page.getByRole("alert")).toContainText("Shortcut unavailable");
+  await page.screenshot({ path: "target/overlay-error-browser.png" });
+  await page.evaluate(() =>
+    window.postMessage(
+      {
+        type: "dictate-test",
+        event: "settings-changed",
+        payload: {
+          version: 1,
+          shortcut: "Control+KeyD",
+          shortcutMode: "hold",
+          microphone: null,
+          launchAtLogin: false,
+        },
+      },
+      "*",
+    ),
+  );
+  await expect(page.locator("kbd")).toHaveText(["⌃", "D"]);
+  await page.evaluate(() =>
+    window.postMessage(
+      {
+        type: "dictate-test",
+        event: "dictation-state",
+        payload: { phase: "recording", error: null },
+      },
+      "*",
+    ),
+  );
+  await expect(page.getByRole("status")).toHaveText("Recording");
+  await page.evaluate(() =>
+    window.postMessage(
+      {
+        type: "dictate-test",
+        event: "dictation-state",
+        payload: { phase: "transcribing", error: null },
+      },
+      "*",
+    ),
+  );
+  await expect(page.getByRole("status")).toHaveText("Transcribing…");
+  await page.evaluate(() =>
+    window.postMessage(
+      {
+        type: "dictate-test",
+        event: "dictation-error",
+        payload: {
+          phase: "idle",
+          error: "Microphone unavailable. Using the default microphone.",
+        },
+      },
+      "*",
+    ),
+  );
+  await expect(page.getByRole("alert")).toContainText(
+    "Using the default microphone",
+  );
+});

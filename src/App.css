@@ -334,3 +334,8 @@ meter {
     display: none;
   }
 }
+
+.settings-content > .ui-toast {
+  margin-bottom: var(--space-6);
+  overflow-wrap: anywhere;
+}
