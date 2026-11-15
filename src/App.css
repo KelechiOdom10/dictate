@@ -273,13 +273,6 @@ html.overlay-window,
   color: var(--text);
   font-size: var(--font-sm);
 }
-.general-model {
-  margin-top: 0;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: nowrap;
-  gap: var(--space-2);
-}
 
 .ink-window {
   position: fixed;
@@ -297,4 +290,21 @@ html.overlay-window,
 }
 .history-retention-confirm {
   padding: 0 var(--space-4) var(--space-4);
+}
+.row-link {
+  font: inherit;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+}
+.row-link:hover:not(:disabled),
+.row-link:active:not(:disabled) {
+  background: none;
+  text-decoration-color: currentColor;
 }
