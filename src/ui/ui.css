@@ -818,7 +818,7 @@ kbd {
 .ui-toast > span:first-child {
   display: flex;
 }
-.ui-toast .ui-button {
+.ui-toast .ui-button:not(.ui-button-primary) {
   color: inherit;
 }
 .ui-level-idle .ui-level-bars {

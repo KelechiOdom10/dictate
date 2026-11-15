@@ -30,7 +30,6 @@ use ts_rs::TS;
 pub enum SpeechModel {
     #[serde(rename = "tiny.en")]
     TinyEn,
-    #[default]
     #[serde(rename = "base.en")]
     BaseEn,
     #[serde(rename = "small.en")]
@@ -39,6 +38,7 @@ pub enum SpeechModel {
     MediumEn,
     #[serde(rename = "large-v3-turbo")]
     LargeV3Turbo,
+    #[default]
     #[serde(rename = "parakeet-unified-en")]
     ParakeetUnifiedEn,
 }
@@ -121,7 +121,7 @@ pub const CATALOG: [ModelInfo; 6] = [
         sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
         accuracy: 3,
         measured_ms: 437,
-        recommended: true,
+        recommended: false,
         licence: None,
     },
     ModelInfo {
@@ -160,7 +160,7 @@ pub const CATALOG: [ModelInfo; 6] = [
         sha256: "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795",
         accuracy: 5,
         measured_ms: 134,
-        recommended: false,
+        recommended: true,
         licence: Some(NVIDIA_OPEN_MODEL_LICENSE),
     },
 ];
@@ -170,6 +170,15 @@ pub fn info(model: SpeechModel) -> &'static ModelInfo {
         .iter()
         .find(|info| info.id == model)
         .expect("every SpeechModel has a catalog entry")
+}
+
+/// The name a model goes by in pickers, marked when it is the one to choose.
+pub fn label(info: &ModelInfo) -> String {
+    if info.recommended {
+        format!("{} (Recommended)", info.name)
+    } else {
+        info.name.to_string()
+    }
 }
 
 pub fn path(dir: &Path, model: SpeechModel) -> PathBuf {
@@ -821,6 +830,11 @@ mod tests {
         assert!(entries[0].active);
         assert_eq!(entries[1].state, ModelState::Available);
         assert_eq!(entries.iter().filter(|entry| entry.recommended).count(), 1);
+        assert_eq!(
+            label(info(SpeechModel::default())),
+            "Parakeet English (Recommended)"
+        );
+        assert_eq!(label(info(SpeechModel::BaseEn)), "Base English");
         delete(dir.path(), SpeechModel::TinyEn).unwrap();
         delete(dir.path(), SpeechModel::TinyEn).unwrap();
         assert!(!path(dir.path(), SpeechModel::TinyEn).exists());

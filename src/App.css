@@ -246,23 +246,34 @@ html.overlay-window,
   line-height: var(--leading-body);
   max-width: 64ch;
 }
-.models-whisper {
+.models-whisper,
+.parakeet-offer {
   align-items: flex-start;
 }
-.models-whisper > span:first-child {
+.models-whisper > span:first-child,
+.parakeet-offer > span:first-child {
   padding-top: 2px;
 }
-.models-whisper-body {
+.models-whisper-body,
+.parakeet-offer-body {
   flex: 1;
   min-width: 220px;
   display: grid;
   gap: var(--space-1);
 }
-.models-whisper-body p {
+.models-whisper-body p,
+.parakeet-offer-body p {
   margin: 0;
 }
-.models-whisper-title {
+.models-whisper-title,
+.parakeet-offer-title {
   font-weight: var(--weight-medium);
+}
+.parakeet-offer-body .ui-actions {
+  margin-top: var(--space-2);
+}
+.settings-content > .parakeet-offer {
+  margin-bottom: var(--space-6);
 }
 .models-whisper code {
   justify-self: start;

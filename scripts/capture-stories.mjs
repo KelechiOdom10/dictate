@@ -61,6 +61,10 @@ const settingsReady = {
       .waitFor(),
   "pages--annotate-not-allowed": (page) =>
     page.getByText("Not allowed", { exact: true }).waitFor(),
+  "pages--general-parakeet-offer": (page) =>
+    page.getByText(/now the recommended model/).waitFor(),
+  "pages--models-fresh-profile": (page) =>
+    page.getByText(/Parakeet English is a good first choice/).waitFor(),
   "pages--general-no-model": (page) =>
     page.getByRole("button", { name: "Download a model" }).waitFor(),
 };

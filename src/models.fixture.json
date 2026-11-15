@@ -34,7 +34,7 @@
     "bytes": 487614201,
     "accuracy": 3,
     "measuredMs": 437,
-    "recommended": true,
+    "recommended": false,
     "licence": null,
     "active": false,
     "state": {
@@ -76,7 +76,7 @@
     "bytes": 731357568,
     "accuracy": 5,
     "measuredMs": 134,
-    "recommended": false,
+    "recommended": true,
     "licence": {
       "name": "NVIDIA Open Model License",
       "url": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/"

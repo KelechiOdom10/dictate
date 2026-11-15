@@ -60,6 +60,10 @@ export const WHISPER_INSTALL = "brew install whisper.cpp";
 /** Length of the generated sentence behind `measuredMs`. */
 export const MEASURED_CLIP_SECONDS = 5.9;
 
+/** Matches `models::label` in Rust, used by the menu bar. */
+export const modelLabel = (model: Pick<ModelEntry, "name" | "recommended">) =>
+  model.recommended ? `${model.name} (Recommended)` : model.name;
+
 const accuracyWords = ["Basic", "Fair", "Good", "Very good", "Best"];
 export const accuracyLabel = (accuracy: number) =>
   accuracyWords[accuracy - 1] ?? "Unknown";

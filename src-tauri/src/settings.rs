@@ -120,13 +120,18 @@ pub struct Settings {
     /// On: the recording also shows dictate's ink and floating bar.
     #[serde(default)]
     pub annotate_show_in_recordings: bool,
+    /// On: Settings asks once whether to download Parakeet. Set for people
+    /// who were on a Whisper model before Parakeet became the default.
+    #[serde(default)]
+    pub offer_parakeet: bool,
 }
 
 fn enabled() -> bool {
     true
 }
 
-const CURRENT_VERSION: u32 = 1;
+/// 2: Parakeet became the default model.
+const CURRENT_VERSION: u32 = 2;
 
 fn default_shortcut() -> String {
     "Alt+Shift+Space".into()
@@ -148,7 +153,7 @@ impl Default for Settings {
             appearance_mode: AppearanceMode::System,
             overlay_position: OverlayPosition::Bottom,
             history_retention: HistoryRetention::Week,
-            speech_model: SpeechModel::BaseEn,
+            speech_model: SpeechModel::ParakeetUnifiedEn,
             paste_method: PasteMethod::Paste,
             restore_clipboard: true,
             trailing_space: false,
@@ -159,6 +164,7 @@ impl Default for Settings {
             annotate_shortcut: default_annotate_shortcut(),
             annotate_enabled: true,
             annotate_show_in_recordings: false,
+            offer_parakeet: false,
         }
     }
 }
@@ -241,9 +247,13 @@ fn parse_chord(shortcut: &str) -> Result<Shortcut, String> {
 pub fn load(path: &Path) -> Result<Settings, String> {
     match fs::read(path) {
         Ok(bytes) => {
-            let mut settings: Settings =
+            let mut value: serde_json::Value =
                 serde_json::from_slice(&bytes).map_err(|e| format!("Read settings: {e}"))?;
-            migrate(&mut settings);
+            if let serde_json::Value::Object(fields) = &mut value {
+                migrate(fields);
+            }
+            let settings: Settings =
+                serde_json::from_value(value).map_err(|e| format!("Read settings: {e}"))?;
             settings.chord()?;
             Ok(settings)
         }
@@ -252,10 +262,24 @@ pub fn load(path: &Path) -> Result<Settings, String> {
     }
 }
 
-fn migrate(settings: &mut Settings) {
-    if settings.version == 0 {
-        settings.version = CURRENT_VERSION;
+/// Brings a file saved by an older dictate up to `CURRENT_VERSION`, before
+/// missing fields take today's defaults. Newer files are left alone.
+fn migrate(fields: &mut serde_json::Map<String, serde_json::Value>) {
+    let version = fields
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if version >= u64::from(CURRENT_VERSION) {
+        return;
     }
+    // Before version 2 a missing model meant Base English. Keep it, so the
+    // new Parakeet default never switches anyone silently.
+    let model = fields
+        .entry("speechModel")
+        .or_insert_with(|| serde_json::json!(SpeechModel::BaseEn));
+    let on_whisper = *model != serde_json::json!(SpeechModel::ParakeetUnifiedEn);
+    fields.insert("offerParakeet".into(), on_whisper.into());
+    fields.insert("version".into(), CURRENT_VERSION.into());
 }
 
 pub fn load_or_default(path: &Path) -> (Settings, Option<Problem>) {
@@ -386,7 +410,7 @@ mod tests {
         fs::write(&path, r#"{"shortcut":"Control+KeyD"}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.shortcut, "Control+KeyD");
-        assert_eq!(settings.version, 1);
+        assert_eq!(settings.version, CURRENT_VERSION);
         assert_eq!(settings.shortcut_mode, ShortcutMode::Hold);
         assert_eq!(settings.microphone, None);
         assert!(!settings.launch_at_login);
@@ -403,9 +427,9 @@ mod tests {
         assert!(!settings.sound_feedback);
         assert!(!settings.debug_recordings);
         assert_eq!(settings.annotate_shortcut, "Alt+Shift+KeyS");
-        fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
+        fs::write(&path, r#"{"version":99,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
-        assert_eq!(settings.version, 2);
+        assert_eq!(settings.version, 99);
         assert_eq!(settings.shortcut, "Alt+Shift+Space");
         let updated = Settings {
             launch_at_login: true,
@@ -414,8 +438,61 @@ mod tests {
         save(&path, &updated).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(value["newSetting"], true);
-        assert_eq!(value["version"], 2);
+        assert_eq!(value["version"], 99);
         assert_eq!(value["launchAtLogin"], true);
+    }
+
+    #[test]
+    fn a_new_profile_starts_on_parakeet_without_the_offer() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = load(&dir.path().join("settings.json")).unwrap();
+        assert_eq!(settings.speech_model, SpeechModel::ParakeetUnifiedEn);
+        assert!(!settings.offer_parakeet);
+        assert_eq!(settings.version, CURRENT_VERSION);
+    }
+
+    #[test]
+    fn version_1_profiles_keep_their_whisper_model_and_are_offered_parakeet_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        for (file, model) in [
+            (
+                r#"{"version":1,"speechModel":"base.en"}"#,
+                SpeechModel::BaseEn,
+            ),
+            (
+                r#"{"version":1,"speechModel":"small.en"}"#,
+                SpeechModel::SmallEn,
+            ),
+            (r#"{"version":1}"#, SpeechModel::BaseEn),
+            (r#"{}"#, SpeechModel::BaseEn),
+        ] {
+            fs::write(&path, file).unwrap();
+            let settings = load(&path).unwrap();
+            assert_eq!(settings.speech_model, model, "{file}");
+            assert!(settings.offer_parakeet, "{file}");
+            assert_eq!(settings.version, CURRENT_VERSION);
+            let answered = Settings {
+                offer_parakeet: false,
+                ..settings
+            };
+            save(&path, &answered).unwrap();
+            assert_eq!(load(&path).unwrap(), answered, "{file}");
+        }
+    }
+
+    #[test]
+    fn version_1_profiles_already_on_parakeet_are_not_offered_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"version":1,"speechModel":"parakeet-unified-en"}"#,
+        )
+        .unwrap();
+        let settings = load(&path).unwrap();
+        assert_eq!(settings.speech_model, SpeechModel::ParakeetUnifiedEn);
+        assert!(!settings.offer_parakeet);
     }
 
     /// "Unload model after N minutes idle" was dropped because whisper-cli
