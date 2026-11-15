@@ -293,7 +293,9 @@ export const GeneralNoModel: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     await expect(
-      await c.findByText("Download a speech model in Settings › Models."),
+      await c.findByText(
+        "No speech model yet. Download one to start dictating.",
+      ),
     ).toBeVisible();
     await expect(
       c.getByRole("button", { name: "Download a model" }),

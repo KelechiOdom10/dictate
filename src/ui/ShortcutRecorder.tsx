@@ -80,7 +80,7 @@ export function ShortcutRecorder({
     <Button
       {...props}
       size={size}
-      variant="primary"
+      variant="ghost"
       className={`ui-shortcut ${recording ? "ui-capturing" : ""}`}
       onClick={(event) => {
         event.currentTarget.focus();

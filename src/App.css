@@ -126,14 +126,6 @@ meter {
   gap: var(--space-4);
   container-type: inline-size;
 }
-.history-toolbar {
-  display: flex;
-  gap: var(--space-3);
-}
-.history-toolbar .ui-search {
-  flex: 1;
-  min-width: 0;
-}
 .history .error {
   margin: 0;
 }
@@ -164,9 +156,6 @@ meter {
   top: 0;
 }
 @container (max-width: 520px) {
-  .history-toolbar {
-    flex-wrap: wrap;
-  }
   .history-split {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -287,6 +276,8 @@ html.overlay-window,
 .general-model {
   margin-top: 0;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
   gap: var(--space-2);
 }
 
@@ -297,4 +288,13 @@ html.overlay-window,
 }
 .annotate-bar-window {
   height: 100vh;
+}
+.history > .ui-segments {
+  justify-self: start;
+}
+.history > .ui-settings-group {
+  margin-top: var(--space-4);
+}
+.history-retention-confirm {
+  padding: 0 var(--space-4) var(--space-4);
 }

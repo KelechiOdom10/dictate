@@ -62,6 +62,9 @@
   --control-hover: var(--brown-250);
   --control-pressed: var(--brown-300);
   --selected: var(--brown-200);
+  --keycap: var(--brown-0);
+  --keycap-edge: var(--brown-300);
+  --segment-thumb: var(--brown-0);
   --primary: var(--brown-900);
   --primary-hover: var(--brown-800);
   --primary-pressed: var(--brown-700);
@@ -145,6 +148,9 @@
   --control-hover: var(--brown-700);
   --control-pressed: var(--brown-650);
   --selected: var(--brown-800);
+  --keycap: var(--brown-750);
+  --keycap-edge: var(--brown-650);
+  --segment-thumb: var(--brown-650);
   --primary: var(--brown-100);
   --primary-hover: var(--brown-300);
   --primary-pressed: var(--brown-400);

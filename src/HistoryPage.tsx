@@ -38,6 +38,8 @@ import {
   SegmentedControl,
   Select,
   SelectList,
+  SettingsGroup,
+  SettingsRow,
 } from "./ui";
 import {
   annotationMeta,
@@ -69,6 +71,12 @@ const retentionLabels: Record<Retention, string> = {
   week: "7 days",
   month: "30 days",
   forever: "forever",
+};
+const retentionChoices: Record<Retention, string> = {
+  day: "1 day",
+  week: "7 days",
+  month: "30 days",
+  forever: "Forever",
 };
 const retentionOrder: Retention[] = ["day", "week", "month", "forever"];
 
@@ -171,16 +179,23 @@ function Dictations() {
   }
 
   const toolbar = (
-    <>
-      <div className="history-toolbar">
-        <SearchField
-          label="Search history"
-          placeholder="Search history"
-          value={search}
-          onChange={setSearch}
-        />
+    <SearchField
+      label="Search history"
+      placeholder="Search history"
+      value={search}
+      onChange={setSearch}
+    />
+  );
+  const keepFor = (
+    <SettingsGroup title="Storage">
+      <SettingsRow
+        id="history-retention"
+        label="Keep history for"
+        help="Older dictations are deleted from this Mac automatically."
+      >
         <Select
-          aria-label="Keep history for"
+          id="history-retention"
+          aria-describedby="history-retention-help"
           value={pendingRetention ?? current}
           disabled={!settings.data || retention.isPending}
           onChange={(e) => {
@@ -194,23 +209,25 @@ function Dictations() {
         >
           {retentionOrder.map((value) => (
             <option key={value} value={value}>
-              Keep {retentionLabels[value]}
+              {retentionChoices[value]}
             </option>
           ))}
         </Select>
-      </div>
+      </SettingsRow>
       {pendingRetention && (
-        <Confirm
-          question={`Delete dictations older than ${retentionLabels[pendingRetention]}?`}
-          confirmLabel="Delete older dictations"
-          onConfirm={() => saveRetention(pendingRetention)}
-          onCancel={() => setPendingRetention(null)}
-        >
-          They are removed now, and from then on after{" "}
-          {retentionLabels[pendingRetention]}.
-        </Confirm>
+        <div className="history-retention-confirm">
+          <Confirm
+            question={`Delete dictations older than ${retentionLabels[pendingRetention]}?`}
+            confirmLabel="Delete older dictations"
+            onConfirm={() => saveRetention(pendingRetention)}
+            onCancel={() => setPendingRetention(null)}
+          >
+            They are removed now, and from then on after{" "}
+            {retentionLabels[pendingRetention]}.
+          </Confirm>
+        </div>
       )}
-    </>
+    </SettingsGroup>
   );
 
   if (history.isPending)
@@ -220,6 +237,7 @@ function Dictations() {
         <div className="loading" role="status">
           Loading your history…
         </div>
+        {keepFor}
       </>
     );
   if (history.isError)
@@ -230,6 +248,7 @@ function Dictations() {
           <p>{String(history.error)}</p>
           <Button onClick={() => void history.refetch()}>Try again</Button>
         </div>
+        {keepFor}
       </>
     );
 
@@ -327,6 +346,7 @@ function Dictations() {
           />
         </div>
       )}
+      {keepFor}
     </>
   );
 }

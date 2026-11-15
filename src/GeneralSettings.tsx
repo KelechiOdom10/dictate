@@ -157,46 +157,52 @@ export default function General({
           help={
             modelMissing ? (
               <span className="row-warning">
-                Download a speech model in Settings › Models.
+                No speech model yet. Download one to start dictating.
               </span>
             ) : (
               "Used for every dictation. Download others in Models."
             )
           }
         >
-          <div className="ui-actions general-model">
-            <Select
-              id="speech-model"
-              aria-describedby="speech-model-help"
-              value={settings.speechModel}
-              disabled={busy || recording || installed.length < 2}
-              onChange={(e) =>
-                void save({
-                  speechModel: speechModelSchema.parse(e.target.value),
-                })
-              }
-            >
-              {installed.length === 0 && (
-                <option value={settings.speechModel}>
-                  {settings.speechModel}
-                </option>
-              )}
-              {installed.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.state.kind === "installed"
-                    ? model.name
-                    : `${model.name} (not downloaded)`}
-                </option>
-              ))}
-            </Select>
+          {modelMissing ? (
             <Button
-              size="sm"
-              variant={modelMissing ? "primary" : "ghost"}
+              id="speech-model"
+              aria-label="Download a model"
+              aria-describedby="speech-model-help"
+              variant="primary"
               onClick={onOpenModels}
             >
-              {modelMissing ? "Download a model" : "Manage models"}
+              Download a model
             </Button>
-          </div>
+          ) : (
+            <div className="ui-actions general-model">
+              <Select
+                id="speech-model"
+                aria-describedby="speech-model-help"
+                value={settings.speechModel}
+                disabled={busy || recording || installed.length < 2}
+                onChange={(e) =>
+                  void save({
+                    speechModel: speechModelSchema.parse(e.target.value),
+                  })
+                }
+              >
+                {installed.length === 0 && (
+                  <option value={settings.speechModel}>
+                    {settings.speechModel}
+                  </option>
+                )}
+                {installed.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </Select>
+              <Button size="sm" variant="ghost" onClick={onOpenModels}>
+                Manage models
+              </Button>
+            </div>
+          )}
         </Row>
       </SettingsGroup>
       <SettingsGroup
