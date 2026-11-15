@@ -541,6 +541,27 @@ fn download_model(app: AppHandle, model: SpeechModel) -> Result<(), String> {
     Ok(())
 }
 
+/// Proof that setup has managed `Runtime`. Only `manage_runtime` makes one.
+struct RuntimeManaged(());
+
+fn manage_runtime(app: &tauri::App, runtime: Runtime) -> RuntimeManaged {
+    app.manage(Mutex::new(runtime));
+    RuntimeManaged(())
+}
+
+/// Adopts a legacy model on its own thread. Adoption saves the chosen model
+/// into `Runtime`, so it needs `RuntimeManaged`: before then `app.state`
+/// panics and the model would stay "Preparing" for good.
+fn spawn_legacy_adoption(
+    _: &RuntimeManaged,
+    app: AppHandle,
+    pending: SpeechModel,
+    dir: PathBuf,
+    candidates: Vec<PathBuf>,
+) {
+    std::thread::spawn(move || adopt_legacy_model(&app, pending, &dir, &candidates));
+}
+
 /// Copies and verifies a model from before the Models page, off the launch
 /// path (it hashes up to 1.6 GB). The Models page shows it as preparing.
 fn adopt_legacy_model(app: &AppHandle, pending: SpeechModel, dir: &Path, candidates: &[PathBuf]) {
@@ -635,9 +656,11 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
     if (previous.mic_mode, &previous.microphone) != (settings.mic_mode, &settings.microphone) {
         let app = app.clone();
         // Opening the microphone takes 60–80 ms; keep the save responsive.
-        // Reading the settings again means the last toggle wins, whatever
-        // order these threads run in.
+        // Holding the lock while reading the settings again and applying them
+        // means the last toggle wins, whatever order these threads run in.
+        static APPLYING: Mutex<()> = Mutex::new(());
         std::thread::spawn(move || {
+            let _applying = APPLYING.lock().unwrap_or_else(|e| e.into_inner());
             let latest = app
                 .state::<Mutex<Runtime>>()
                 .lock()
@@ -783,13 +806,13 @@ fn hotkey(
         });
         surface::clear_error(app);
         let sound_feedback = runtime.settings.sound_feedback;
-        let skip = if sound_feedback {
-            sound::START_SKIP
+        let mute = if sound_feedback {
+            sound::START_MUTE
         } else {
             std::time::Duration::ZERO
         };
         let result =
-            audio::start_device(runtime.settings.microphone.clone(), skip).map(|fallback| {
+            audio::start_device(runtime.settings.microphone.clone(), mute).map(|fallback| {
                 if sound_feedback {
                     sound::play(sound::Cue::Start);
                 }
@@ -1065,10 +1088,6 @@ pub fn run() {
                 dir: models_dir.clone(),
                 downloads: Mutex::new(downloads),
             });
-            if let Some(model) = pending {
-                let app = app.handle().clone();
-                std::thread::spawn(move || adopt_legacy_model(&app, model, &models_dir, &legacy));
-            }
             let shortcut_registered = match settings.chord().and_then(|chord| {
                 app.global_shortcut()
                     .register(chord)
@@ -1088,14 +1107,26 @@ pub fn run() {
                     false
                 }
             };
-            app.manage(Mutex::new(Runtime {
-                settings: settings.clone(),
-                phase: Phase::Idle,
-                take_id: 0,
-                take_start: None,
-                capturing_shortcut: false,
-                shortcut_registered,
-            }));
+            let runtime_managed = manage_runtime(
+                app,
+                Runtime {
+                    settings: settings.clone(),
+                    phase: Phase::Idle,
+                    take_id: 0,
+                    take_start: None,
+                    capturing_shortcut: false,
+                    shortcut_registered,
+                },
+            );
+            if let Some(model) = pending {
+                spawn_legacy_adoption(
+                    &runtime_managed,
+                    app.handle().clone(),
+                    model,
+                    models_dir,
+                    legacy,
+                );
+            }
             app.manage(Mutex::new(settings.overlay_position));
             if settings.mic_mode == MicMode::Warm
                 && let Err(problem) = apply_mic_mode(&settings)
