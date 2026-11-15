@@ -133,6 +133,19 @@ meter {
 .ui-detail .history-confirm {
   margin-bottom: var(--space-4);
 }
+.history-list {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.history-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding-inline: var(--space-3);
+}
 .history-split {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);

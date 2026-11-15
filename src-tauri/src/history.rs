@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use ts_rs::TS;
 
+use crate::problem::Problem;
 use crate::settings::HistoryRetention;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, TS)]
@@ -74,6 +75,15 @@ pub struct HistoryEntry {
     pub detail: Option<String>,
 }
 
+/// One page of takes, newest first. `has_more` is true when older matching
+/// takes exist beyond the requested limit.
+#[derive(Clone, Debug, Serialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryList {
+    pub entries: Vec<HistoryEntry>,
+    pub has_more: bool,
+}
+
 /// Each entry upgrades the schema by one `user_version`. Append, never edit.
 const MIGRATIONS: &[&str] = &["CREATE TABLE takes (
         id INTEGER PRIMARY KEY,
@@ -89,18 +99,45 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE takes (
     );
     CREATE INDEX takes_created_at ON takes (created_at_ms);"];
 
-const LIST_LIMIT: i64 = 500;
+/// Why history could not open. A newer schema needs a newer app; anything
+/// else may clear up on restart.
+#[derive(Debug, PartialEq)]
+pub enum OpenError {
+    NewerSchema { found: i64, supported: i64 },
+    Failed(String),
+}
+
+impl OpenError {
+    pub fn problem(&self) -> Problem {
+        match self {
+            Self::NewerSchema { found, supported } => Problem::new(
+                "History is off",
+                "This version of dictate can’t read your history. Update dictate to see it again.",
+            )
+            .because(format!(
+                "history schema {found} is newer than this app ({supported})"
+            )),
+            Self::Failed(cause) => Problem::new(
+                "History is off",
+                "Dictation still works. Restart dictate to turn history back on.",
+            )
+            .because(cause),
+        }
+    }
+}
 
 pub struct Store {
     connection: Connection,
 }
 
 impl Store {
-    pub fn open(path: &Path) -> Result<Self, String> {
+    pub fn open(path: &Path) -> Result<Self, OpenError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("Create history folder: {e}"))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| OpenError::Failed(format!("Create history folder: {e}")))?;
         }
-        let connection = Connection::open(path).map_err(|e| format!("Open history: {e}"))?;
+        let connection =
+            Connection::open(path).map_err(|e| OpenError::Failed(format!("Open history: {e}")))?;
         Self::from_connection(connection)
     }
 
@@ -109,8 +146,13 @@ impl Store {
         Self::from_connection(Connection::open_in_memory().unwrap()).unwrap()
     }
 
-    fn from_connection(mut connection: Connection) -> Result<Self, String> {
-        migrate(&mut connection).map_err(|e| format!("Upgrade history: {e}"))?;
+    fn from_connection(mut connection: Connection) -> Result<Self, OpenError> {
+        // Deleting a take promises its text can't be recovered: overwrite freed
+        // pages instead of leaving them in the file.
+        connection
+            .pragma_update(None, "secure_delete", "ON")
+            .map_err(|e| OpenError::Failed(format!("Turn on secure delete: {e}")))?;
+        migrate(&mut connection)?;
         Ok(Self { connection })
     }
 
@@ -136,8 +178,9 @@ impl Store {
         Ok(self.connection.last_insert_rowid())
     }
 
-    /// Newest first. `search` matches text or app name, case-insensitively.
-    pub fn list(&self, search: &str) -> Result<Vec<HistoryEntry>, String> {
+    /// Up to `limit` takes, newest first. `search` matches text or app name,
+    /// case-insensitively.
+    pub fn list(&self, search: &str, limit: u32) -> Result<HistoryList, String> {
         let pattern = format!("%{}%", escape_like(search.trim()));
         let mut statement = self
             .connection
@@ -149,8 +192,8 @@ impl Store {
                  LIMIT ?2",
             )
             .map_err(|e| format!("Read history: {e}"))?;
-        statement
-            .query_map(params![pattern, LIST_LIMIT], |row| {
+        let mut entries = statement
+            .query_map(params![pattern, i64::from(limit) + 1], |row| {
                 Ok(HistoryEntry {
                     id: row.get(0)?,
                     text: row.get(1)?,
@@ -164,8 +207,11 @@ impl Store {
                     detail: row.get(9)?,
                 })
             })
-            .and_then(Iterator::collect)
-            .map_err(|e| format!("Read history: {e}"))
+            .and_then(Iterator::collect::<rusqlite::Result<Vec<_>>>)
+            .map_err(|e| format!("Read history: {e}"))?;
+        let has_more = entries.len() > limit as usize;
+        entries.truncate(limit as usize);
+        Ok(HistoryList { entries, has_more })
     }
 
     pub fn delete(&self, id: i64) -> Result<(), String> {
@@ -187,19 +233,25 @@ impl Store {
     }
 }
 
-fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
-    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > MIGRATIONS.len() as i64 {
-        return Err(rusqlite::Error::InvalidParameterName(format!(
-            "history schema {version} is newer than this app ({})",
-            MIGRATIONS.len()
-        )));
+fn migrate(connection: &mut Connection) -> Result<(), OpenError> {
+    let failed = |e: rusqlite::Error| OpenError::Failed(format!("Upgrade history: {e}"));
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(failed)?;
+    let supported = MIGRATIONS.len() as i64;
+    if version > supported {
+        return Err(OpenError::NewerSchema {
+            found: version,
+            supported,
+        });
     }
     for (sql, next_version) in MIGRATIONS.iter().zip(1_i64..).skip(version as usize) {
-        let transaction = connection.transaction()?;
-        transaction.execute_batch(sql)?;
-        transaction.pragma_update(None, "user_version", next_version)?;
-        transaction.commit()?;
+        let transaction = connection.transaction().map_err(failed)?;
+        transaction.execute_batch(sql).map_err(failed)?;
+        transaction
+            .pragma_update(None, "user_version", next_version)
+            .map_err(failed)?;
+        transaction.commit().map_err(failed)?;
     }
     Ok(())
 }
@@ -253,7 +305,7 @@ mod tests {
             store.insert(&take("first", 1_000)).unwrap();
             store.insert(&skipped).unwrap();
         }
-        let entries = Store::open(&path).unwrap().list("").unwrap();
+        let entries = Store::open(&path).unwrap().list("", 500).unwrap().entries;
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].status, TakeStatus::Skipped);
         assert_eq!(entries[0].app, None);
@@ -289,8 +341,9 @@ mod tests {
         store.insert(&take("snake_case names", 3)).unwrap();
         let texts = |query: &str| {
             store
-                .list(query)
+                .list(query, 500)
                 .unwrap()
+                .entries
                 .into_iter()
                 .map(|entry| entry.text)
                 .collect::<Vec<_>>()
@@ -311,7 +364,13 @@ mod tests {
         let gone = store.insert(&take("gone", 2)).unwrap();
         store.delete(gone).unwrap();
         store.delete(gone).unwrap();
-        let ids: Vec<_> = store.list("").unwrap().into_iter().map(|e| e.id).collect();
+        let ids: Vec<_> = store
+            .list("", 500)
+            .unwrap()
+            .entries
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
         assert_eq!(ids, [keep]);
     }
 
@@ -331,7 +390,11 @@ mod tests {
                 store.insert(&take("take", now - age)).unwrap();
             }
             assert_eq!(store.prune(retention, now).unwrap(), ages.len() - kept);
-            assert_eq!(store.list("").unwrap().len(), kept, "{retention:?}");
+            assert_eq!(
+                store.list("", 500).unwrap().entries.len(),
+                kept,
+                "{retention:?}"
+            );
         }
     }
 
@@ -344,7 +407,7 @@ mod tests {
             .insert(&take("kept", 1))
             .unwrap();
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.list("").unwrap().len(), 1);
+        assert_eq!(store.list("", 500).unwrap().entries.len(), 1);
         let version: i64 = store
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -355,28 +418,76 @@ mod tests {
             .pragma_update(None, "user_version", MIGRATIONS.len() as i64 + 1)
             .unwrap();
         drop(store);
-        assert!(
-            Store::open(&path)
-                .err()
-                .unwrap()
-                .contains("newer than this app")
+        let error = Store::open(&path).err().unwrap();
+        assert_eq!(
+            error,
+            OpenError::NewerSchema {
+                found: MIGRATIONS.len() as i64 + 1,
+                supported: MIGRATIONS.len() as i64
+            }
         );
+        let problem = error.problem();
+        assert!(problem.fix.contains("Update dictate"));
+        assert!(!problem.fix.contains("Restart"));
+    }
+
+    #[test]
+    fn list_pages_and_reports_older_takes() {
+        let store = Store::in_memory();
+        for at in 1..=5 {
+            store.insert(&take(&format!("take {at}"), at)).unwrap();
+        }
+        let page = store.list("", 2).unwrap();
+        let texts: Vec<_> = page.entries.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, ["take 5", "take 4"]);
+        assert!(page.has_more);
+        let all = store.list("", 5).unwrap();
+        assert_eq!(all.entries.len(), 5);
+        assert!(!all.has_more);
+        assert!(!store.list("take 1", 1).unwrap().has_more);
+    }
+
+    #[test]
+    fn deleted_text_is_not_left_in_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.sqlite3");
+        let secret = "zebra-quartz-secret-0451";
+        {
+            let store = Store::open(&path).unwrap();
+            store.insert(&take("kept", 1)).unwrap();
+            let id = store.insert(&take(secret, 2)).unwrap();
+            store.delete(id).unwrap();
+        }
+        let mut bytes = Vec::new();
+        for entry in std::fs::read_dir(dir.path()).unwrap() {
+            bytes.extend(std::fs::read(entry.unwrap().path()).unwrap());
+        }
+        assert!(
+            !bytes
+                .windows(secret.len())
+                .any(|window| window == secret.as_bytes())
+        );
+        assert!(bytes.windows(4).any(|window| window == b"kept"));
     }
 
     #[test]
     fn typescript_contract_matches_rust_history() {
         let contract = format!(
-            "export {}\nexport {}\n",
+            "export {}\nexport {}\nexport {}\n",
             TakeStatus::decl(),
-            HistoryEntry::decl()
+            HistoryEntry::decl(),
+            HistoryList::decl()
         );
         let checked_in = include_str!("../../src/history.generated.ts");
+        // Prettier drops the last `;` of a one-line object type.
         let compact = |text: &str| {
             text.chars()
                 .filter(|c| !c.is_whitespace())
                 .collect::<String>()
+                .replace(',', ";")
+                .replace(";}", "}")
         };
-        assert_eq!(compact(checked_in), compact(&contract).replace(',', ";"));
+        assert_eq!(compact(checked_in), compact(&contract));
     }
 
     #[test]
@@ -390,6 +501,6 @@ mod tests {
                  VALUES ('x', 1, 'm', 1, 1, 'mystery');",
             )
             .unwrap();
-        assert!(store.list("").unwrap_err().contains("mystery"));
+        assert!(store.list("", 500).unwrap_err().contains("mystery"));
     }
 }

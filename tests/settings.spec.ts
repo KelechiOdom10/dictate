@@ -102,7 +102,8 @@ async function openSettings(
               return ["Built-in Microphone", "USB Microphone"];
             if (command === "microphone_level") return 0.12;
             if (command === "plugin:app|version") return "0.1.0";
-            if (command === "list_history") return [];
+            if (command === "list_history")
+              return { entries: [], hasMore: false };
             if (command === "dismiss_error") {
               status = { phase: "idle", error: null };
               emit("dictation-state", "idle");

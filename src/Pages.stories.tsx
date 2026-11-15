@@ -112,9 +112,14 @@ function mockApp(
         const search = String(
           args && "search" in args ? args.search : "",
         ).toLowerCase();
-        return history.filter((entry) =>
+        const limit = Number(args && "limit" in args ? args.limit : 500);
+        const matches = history.filter((entry) =>
           `${entry.text} ${entry.app ?? ""}`.toLowerCase().includes(search),
         );
+        return {
+          entries: matches.slice(0, limit),
+          hasMore: matches.length > limit,
+        };
       }
       if (command === "delete_history") {
         const id = args && "id" in args ? args.id : undefined;
@@ -291,6 +296,36 @@ export const HistoryRetention: Story = {
     await userEvent.click(c.getByRole("button", { name: "Cancel" }));
     await expect(keep).toHaveValue("forever");
     await userEvent.selectOptions(keep, "day");
+  },
+};
+export const HistoryLoadMore: Story = {
+  beforeEach: ({ globals }) => {
+    const now = Date.now();
+    return mockApp(
+      globals,
+      Array.from({ length: 503 }, (_, index): HistoryEntry => {
+        const [sample] = sampleHistory(now);
+        return {
+          ...sample,
+          id: index + 1,
+          text: `Dictation number ${index + 1}`,
+          createdAtMs: now - index * minute,
+        };
+      }),
+    );
+  },
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(await c.findByText("Showing the latest 500.")).toBeVisible();
+    await expect(c.queryByRole("button", { name: /number 501/ })).toBeNull();
+    await userEvent.click(
+      c.getByRole("button", { name: "Load older dictations" }),
+    );
+    await expect(
+      await c.findByRole("button", { name: /number 503/ }),
+    ).toBeVisible();
+    await expect(c.queryByText(/Showing the latest/)).toBeNull();
   },
 };
 export const HistoryEmpty: Story = {

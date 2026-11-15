@@ -25,7 +25,7 @@ mod problem;
 mod settings;
 mod surface;
 
-use history::{HistoryEntry, NewTake, TakeStatus};
+use history::{HistoryList, NewTake, TakeStatus};
 use problem::Problem;
 use settings::{HistoryRetention, Settings, ShortcutMode};
 use std::{sync::Mutex, time::Instant};
@@ -55,7 +55,8 @@ struct TakeStart {
     app: Option<String>,
 }
 
-type History = Mutex<Option<history::Store>>;
+/// The open store, or the message to show when history is off.
+type History = Mutex<Result<history::Store, String>>;
 
 trait SettingsPlatform {
     fn input_devices(&self) -> Result<Vec<String>, String>;
@@ -275,11 +276,7 @@ fn with_history<T>(
 ) -> Result<T, String> {
     let state = app.state::<History>();
     let store = state.lock().map_err(|e| e.to_string())?;
-    read(
-        store
-            .as_ref()
-            .ok_or("History is unavailable. Restart dictate to try again.")?,
-    )
+    read(store.as_ref().map_err(Clone::clone)?)
 }
 
 fn record_take(app: &AppHandle, take: &NewTake, retention: HistoryRetention) {
@@ -298,7 +295,7 @@ fn record_take(app: &AppHandle, take: &NewTake, retention: HistoryRetention) {
 }
 
 #[tauri::command]
-fn list_history(app: AppHandle, search: String) -> Result<Vec<HistoryEntry>, String> {
+fn list_history(app: AppHandle, search: String, limit: u32) -> Result<HistoryList, String> {
     let retention = app
         .state::<Mutex<Runtime>>()
         .lock()
@@ -307,7 +304,7 @@ fn list_history(app: AppHandle, search: String) -> Result<Vec<HistoryEntry>, Str
         .history_retention;
     with_history(&app, |store| {
         store.prune(retention, history::now_ms())?;
-        store.list(&search)
+        store.list(&search, limit)
     })
 }
 
@@ -328,7 +325,9 @@ fn get_settings(app: AppHandle) -> Result<Settings, String> {
 fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let state = app.state::<Mutex<Runtime>>();
     let mut runtime = state.lock().map_err(|e| e.to_string())?;
-    if runtime.save_settings(settings.clone(), &app)? {
+    let shortcut_changed = runtime.save_settings(settings.clone(), &app)?;
+    drop(runtime);
+    if shortcut_changed {
         surface::clear_error(&app);
     }
     *app.state::<Mutex<settings::OverlayPosition>>()
@@ -587,9 +586,29 @@ fn hotkey(
                 runtime.phase = Phase::Idle;
                 surface::set_phase(app, "idle");
                 drop(runtime);
+                record_take(
+                    app,
+                    &failed_capture(&start, released.elapsed().as_millis() as i64, &error),
+                    retention,
+                );
                 report_error(app, &error);
             }
         }
+    }
+}
+
+/// The History row for a take whose audio never arrived.
+fn failed_capture(start: &TakeStart, total_ms: i64, error: &Problem) -> NewTake {
+    NewTake {
+        text: String::new(),
+        created_at_ms: start.started_at_ms,
+        app: start.app.clone(),
+        model: transcribe::model_name(),
+        audio_ms: 0,
+        inference_ms: None,
+        total_ms,
+        status: TakeStatus::Failed,
+        detail: Some(error.to_string()),
     }
 }
 
@@ -640,24 +659,20 @@ pub fn run() {
             let (settings, mut startup_error) =
                 settings::load_or_default(&data_dir.join("settings.json"));
             let store = history::Store::open(&data_dir.join("history.sqlite3")).and_then(|store| {
-                store.prune(settings.history_retention, history::now_ms())?;
+                store
+                    .prune(settings.history_retention, history::now_ms())
+                    .map_err(history::OpenError::Failed)?;
                 Ok(store)
             });
-            let store = match store {
-                Ok(store) => Some(store),
-                Err(error) => {
-                    let problem = Problem::new(
-                        "History is off",
-                        "Dictation still works. Restart dictate to turn history back on.",
-                    )
-                    .because(error);
-                    startup_error = Some(match startup_error {
-                        Some(previous) => previous.and(problem),
-                        None => problem,
-                    });
-                    None
-                }
-            };
+            let store = store.map_err(|error| {
+                let problem = error.problem();
+                let message = problem.fix.clone();
+                startup_error = Some(match startup_error.take() {
+                    Some(previous) => previous.and(problem),
+                    None => problem,
+                });
+                message
+            });
             app.manage::<History>(Mutex::new(store));
             let shortcut_registered = match settings.chord().and_then(|chord| {
                 app.global_shortcut()
@@ -961,6 +976,45 @@ mod take_tests {
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("../../src/problems.fixture.json")).unwrap();
         assert_eq!(fixture, real);
+    }
+
+    #[test]
+    fn failed_capture_is_recorded_as_a_failed_take() {
+        let take = failed_capture(
+            &TakeStart {
+                started_at_ms: 1_000,
+                app: Some("Notes".into()),
+            },
+            12,
+            &audio::no_samples(),
+        );
+        assert_eq!(take.status, TakeStatus::Failed);
+        assert_eq!(take.created_at_ms, 1_000);
+        assert_eq!(take.app.as_deref(), Some("Notes"));
+        assert_eq!(take.total_ms, 12);
+        assert_eq!(take.audio_ms, 0);
+        assert!(take.text.is_empty());
+        assert!(
+            take.detail
+                .unwrap()
+                .contains("No sound from the microphone")
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let store = history::Store::open(&dir.path().join("history.sqlite3")).unwrap();
+        store
+            .insert(&failed_capture(
+                &TakeStart {
+                    started_at_ms: 1,
+                    app: None,
+                },
+                1,
+                &audio::no_samples(),
+            ))
+            .unwrap();
+        assert_eq!(
+            store.list("", 10).unwrap().entries[0].status,
+            TakeStatus::Failed
+        );
     }
 
     #[test]
