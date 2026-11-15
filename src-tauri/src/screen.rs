@@ -10,6 +10,7 @@
 //! Our own process is removed from the picture with the content filter, which
 //! also covers windows opened after recording starts.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
@@ -30,6 +31,14 @@ use screencapturekit::shareable_content::SCShareableContentInfo;
 pub const MAX_LONG_EDGE: u32 = 2560;
 pub const DEFAULT_FPS: u32 = 15;
 const FINALIZE_TIMEOUT: Duration = Duration::from_secs(10);
+const SESSION_DIR_PREFIX: &str = "dictate-screen-";
+/// Session folders older than this are left over from failed or abandoned
+/// takes, so `start` removes them.
+const STALE_SESSION_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+pub const OWN_APP_NOT_FOUND: &str = "Could not find dictate among the apps ScreenCaptureKit \
+can see, so its windows cannot be left out of the recording. Recording was not started. \
+Turn on \"Show in screen recordings\" to record anyway.";
 
 pub const PERMISSION_DENIED: &str = "Screen Recording permission is not granted to dictate. \
 Open System Settings → Privacy & Security → Screen & System Audio Recording, \
@@ -82,6 +91,36 @@ pub struct FrameCounts {
     pub other: u64,
 }
 
+/// A failed `stop`. `partial_recording` is the MP4 that may hold part of the
+/// take, so the caller can keep or delete it instead of leaving it orphaned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopError {
+    pub message: String,
+    pub partial_recording: Option<PathBuf>,
+}
+
+impl fmt::Display for StopError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.partial_recording {
+            Some(path) => write!(
+                f,
+                "{} (partial recording: {})",
+                self.message,
+                path.display()
+            ),
+            None => f.write_str(&self.message),
+        }
+    }
+}
+
+impl std::error::Error for StopError {}
+
+impl From<StopError> for String {
+    fn from(error: StopError) -> Self {
+        error.to_string()
+    }
+}
+
 impl FrameCounts {
     pub fn delivered(&self) -> u64 {
         self.complete + self.idle + self.other
@@ -101,36 +140,93 @@ pub fn request_permission() -> bool {
 }
 
 pub fn is_recording() -> bool {
-    state().lock().is_ok_and(|active| active.is_some())
+    state()
+        .lock()
+        .is_ok_and(|slot| matches!(*slot, Slot::Recording(_)))
 }
 
+/// The permission check, content listing and capture start are blocking
+/// system calls, so they run with the lock released. The `Starting` slot keeps
+/// a second `start` (or a `stop`) out while they run.
 pub fn start(target: DisplayTarget, options: CaptureOptions) -> Result<(), String> {
     if options.fps == 0 {
         return Err("fps must be at least 1".into());
     }
-    let mut slot = state().lock().map_err(|_| "Screen state lock poisoned")?;
-    if slot.is_some() {
-        return Err("Screen recording already running".into());
-    }
+    let reservation = StartReservation::claim()?;
+    remove_stale_sessions(&std::env::temp_dir(), SystemTime::now());
     if !has_permission() && !request_permission() {
         return Err(PERMISSION_DENIED.into());
     }
-    *slot = Some(Recording::begin(target, options)?);
+    reservation.fill(Recording::begin(target, options)?);
     Ok(())
 }
 
-pub fn stop() -> Result<VideoInfo, String> {
-    let recording = state()
+pub fn stop() -> Result<VideoInfo, StopError> {
+    let not_stoppable = |message: &str| StopError {
+        message: message.into(),
+        partial_recording: None,
+    };
+    let mut slot = state()
         .lock()
-        .map_err(|_| "Screen state lock poisoned")?
-        .take()
-        .ok_or("Screen is not recording")?;
+        .map_err(|_| not_stoppable("Screen state lock poisoned"))?;
+    let recording = match std::mem::replace(&mut *slot, Slot::Idle) {
+        Slot::Recording(recording) => recording,
+        Slot::Starting => {
+            *slot = Slot::Starting;
+            return Err(not_stoppable("Screen recording is still starting"));
+        }
+        Slot::Idle => return Err(not_stoppable("Screen is not recording")),
+    };
+    drop(slot);
     recording.finish()
 }
 
-fn state() -> &'static Mutex<Option<Recording>> {
-    static STATE: Mutex<Option<Recording>> = Mutex::new(None);
+enum Slot {
+    Idle,
+    Starting,
+    Recording(Recording),
+}
+
+fn state() -> &'static Mutex<Slot> {
+    static STATE: Mutex<Slot> = Mutex::new(Slot::Idle);
     &STATE
+}
+
+/// Holds the `Starting` slot. Dropping it without `fill` (an error or a
+/// panic during start) puts the slot back to `Idle`.
+struct StartReservation {
+    filled: bool,
+}
+
+impl StartReservation {
+    fn claim() -> Result<Self, String> {
+        let mut slot = state().lock().map_err(|_| "Screen state lock poisoned")?;
+        match *slot {
+            Slot::Idle => {
+                *slot = Slot::Starting;
+                Ok(Self { filled: false })
+            }
+            Slot::Starting | Slot::Recording(_) => Err("Screen recording already running".into()),
+        }
+    }
+
+    fn fill(mut self, recording: Recording) {
+        if let Ok(mut slot) = state().lock() {
+            *slot = Slot::Recording(recording);
+            self.filled = true;
+        }
+    }
+}
+
+impl Drop for StartReservation {
+    fn drop(&mut self) {
+        if self.filled {
+            return;
+        }
+        if let Ok(mut slot) = state().lock() {
+            *slot = Slot::Idle;
+        }
+    }
 }
 
 struct Recording {
@@ -165,15 +261,14 @@ impl Recording {
                 format!("Display {display_id} is not among the capturable displays {ids:?}")
             })?;
 
-        let own_app = (!options.include_own_windows)
-            .then(|| {
-                let pid = std::process::id() as i32;
-                content
-                    .applications()
-                    .into_iter()
-                    .find(|app| app.process_id() == pid)
-            })
-            .flatten();
+        let pid = std::process::id() as i32;
+        let own_app = own_app_to_exclude(
+            options.include_own_windows,
+            content
+                .applications()
+                .into_iter()
+                .find(|app| app.process_id() == pid),
+        )?;
         let mut filter = SCContentFilter::create().with_display(display);
         if let Some(app) = &own_app {
             filter = filter.with_excluding_applications(&[app], &[]);
@@ -249,19 +344,23 @@ impl Recording {
         })
     }
 
-    fn finish(self) -> Result<VideoInfo, String> {
+    fn finish(self) -> Result<VideoInfo, StopError> {
         let wall_ms = self.started.elapsed().as_millis() as u64;
+        let failed = |message: String| StopError {
+            message,
+            partial_recording: Some(self.path.clone()),
+        };
         self.stream
             .stop_capture()
-            .map_err(|e| format!("Stop capture: {e}"))?;
+            .map_err(|e| failed(format!("Stop capture: {e}")))?;
         match self.finished.recv_timeout(FINALIZE_TIMEOUT) {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => return Err(format!("Recording failed: {error}")),
+            Ok(Err(error)) => return Err(failed(format!("Recording failed: {error}"))),
             Err(_) => {
-                return Err(format!(
+                return Err(failed(format!(
                     "Recording did not finish within {} s",
                     FINALIZE_TIMEOUT.as_secs()
-                ));
+                )));
             }
         }
         let duration = self.output.recorded_duration();
@@ -272,7 +371,7 @@ impl Recording {
         };
         let file_bytes = std::fs::metadata(&self.path)
             .map(|m| m.len())
-            .map_err(|e| format!("Read {}: {e}", self.path.display()))?;
+            .map_err(|e| failed(format!("Read {}: {e}", self.path.display())))?;
         Ok(VideoInfo {
             path: self.path,
             display_id: self.display_id,
@@ -321,6 +420,19 @@ impl SCStreamOutputTrait for FrameCounter {
     }
 }
 
+/// Recording with our own windows in it by accident is worse than not
+/// recording: the default promises a clean video, so a miss is an error.
+fn own_app_to_exclude<App>(
+    include_own_windows: bool,
+    own_app: Option<App>,
+) -> Result<Option<App>, String> {
+    match (include_own_windows, own_app) {
+        (true, _) => Ok(None),
+        (false, Some(app)) => Ok(Some(app)),
+        (false, None) => Err(OWN_APP_NOT_FOUND.into()),
+    }
+}
+
 /// Scale down to fit `max_long_edge`, keep the aspect ratio, and round to even
 /// numbers because H.264 encodes 4:2:0 chroma in 2×2 blocks.
 fn output_size(width: u32, height: u32, max_long_edge: u32) -> (u32, u32) {
@@ -335,9 +447,42 @@ fn session_dir() -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default();
-    let dir = std::env::temp_dir().join(format!("dictate-screen-{stamp}"));
+    let dir = std::env::temp_dir().join(format!("{SESSION_DIR_PREFIX}{stamp}"));
     create_dir(&dir)?;
     Ok(dir)
+}
+
+/// Reads the age from the folder name, which `session_dir` stamps with the
+/// creation time in ms, so a folder touched later still ages out.
+fn is_stale_session(name: &str, now: SystemTime) -> bool {
+    let Some(created_ms) = name
+        .strip_prefix(SESSION_DIR_PREFIX)
+        .and_then(|stamp| stamp.parse::<u64>().ok())
+    else {
+        return false;
+    };
+    let created = UNIX_EPOCH + Duration::from_millis(created_ms);
+    now.duration_since(created)
+        .is_ok_and(|age| age > STALE_SESSION_AGE)
+}
+
+fn remove_stale_sessions(root: &Path, now: SystemTime) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+        if !is_dir || !is_stale_session(&name.to_string_lossy(), now) {
+            continue;
+        }
+        if let Err(error) = std::fs::remove_dir_all(entry.path()) {
+            eprintln!(
+                "[screen] could not remove stale session {}: {error}",
+                entry.path().display()
+            );
+        }
+    }
 }
 
 fn create_dir(dir: &Path) -> Result<(), String> {
@@ -384,6 +529,81 @@ mod tests {
 
     #[test]
     fn stop_without_start_is_an_error() {
-        assert_eq!(stop().unwrap_err(), "Screen is not recording");
+        let error = stop().unwrap_err();
+        assert_eq!(error.message, "Screen is not recording");
+        assert_eq!(error.partial_recording, None);
+    }
+
+    #[test]
+    fn missing_own_app_refuses_to_record_by_default() {
+        assert_eq!(
+            own_app_to_exclude::<u32>(false, None).unwrap_err(),
+            OWN_APP_NOT_FOUND
+        );
+    }
+
+    #[test]
+    fn found_own_app_is_excluded_by_default() {
+        assert_eq!(own_app_to_exclude(false, Some(7)), Ok(Some(7)));
+    }
+
+    #[test]
+    fn including_own_windows_never_needs_our_app() {
+        assert_eq!(own_app_to_exclude::<u32>(true, None), Ok(None));
+        assert_eq!(own_app_to_exclude(true, Some(7)), Ok(None));
+    }
+
+    #[test]
+    fn stop_error_names_the_partial_recording() {
+        let error = StopError {
+            message: "Recording failed: disk full".into(),
+            partial_recording: Some(PathBuf::from("/tmp/dictate-screen-1/recording.mp4")),
+        };
+        assert_eq!(
+            String::from(error),
+            "Recording failed: disk full (partial recording: /tmp/dictate-screen-1/recording.mp4)"
+        );
+    }
+
+    const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+
+    #[test]
+    fn session_ages_out_after_a_day() {
+        let now = UNIX_EPOCH + Duration::from_millis(10 * DAY_MS);
+        let stamp = |age_ms: u64| format!("{SESSION_DIR_PREFIX}{}", 10 * DAY_MS - age_ms);
+        assert!(is_stale_session(&stamp(DAY_MS + 1), now));
+        assert!(!is_stale_session(&stamp(DAY_MS), now));
+        assert!(!is_stale_session(&stamp(60_000), now));
+    }
+
+    #[test]
+    fn only_our_stamped_folders_count_as_sessions() {
+        let now = UNIX_EPOCH + Duration::from_millis(10 * DAY_MS);
+        assert!(!is_stale_session("dictate-screen-notanumber", now));
+        assert!(!is_stale_session("other-1", now));
+        assert!(!is_stale_session("dictate-screen-", now));
+    }
+
+    #[test]
+    fn stale_sessions_are_removed_and_the_rest_kept() {
+        let root = tempfile::tempdir().unwrap();
+        let now = UNIX_EPOCH + Duration::from_millis(10 * DAY_MS);
+        let old = root
+            .path()
+            .join(format!("{SESSION_DIR_PREFIX}{}", 8 * DAY_MS));
+        let fresh = root
+            .path()
+            .join(format!("{SESSION_DIR_PREFIX}{}", 10 * DAY_MS - 1));
+        let unrelated = root.path().join("dictate-other-1");
+        for dir in [&old, &fresh, &unrelated] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        std::fs::write(old.join("recording.mp4"), b"partial").unwrap();
+
+        remove_stale_sessions(root.path(), now);
+
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert!(unrelated.exists());
     }
 }
