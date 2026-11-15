@@ -30,9 +30,22 @@ hound = "3.5"
 tempfile = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# The frames stage encodes PNGs and scales images. Optimised in debug builds
+# too, so the stop-to-package time the frames test logs reflects real code.
+[profile.dev.package]
+tiny-skia = { opt-level = 3 }
+tiny-skia-path = { opt-level = 3 }
+png = { opt-level = 3 }
+fdeflate = { opt-level = 3 }
+flate2 = { opt-level = 3 }
+miniz_oxide = { opt-level = 3 }
+crc32fast = { opt-level = 3 }
+adler2 = { opt-level = 3 }
+
 [profile.release]
 codegen-units = 1
 lto = true
@@ -44,9 +57,17 @@ strip = true
 core-graphics = "0.25"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSString"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSError", "NSString", "NSURL"] }
 screencapturekit = { version = "11", features = ["macos_15_0"] }
+block2 = "0.6"
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-graphics", "objc2-core-media", "AVAsset", "AVAssetImageGenerator"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSColor", "NSGraphics", "NSResponder", "NSRunningApplication", "NSScreen", "NSWindow"] }
-objc2-foundation = { version = "0.3", features = ["NSDate", "NSGeometry", "NSRunLoop"] }
+objc2-foundation = { version = "0.3", features = ["NSDate", "NSDictionary", "NSGeometry", "NSRunLoop", "NSValue"] }
+# Writes the test MP4 in tests/annotate_frames.rs.
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-media", "objc2-core-video", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
