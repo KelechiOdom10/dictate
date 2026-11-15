@@ -4,15 +4,26 @@ import "../src/ui/ui.css";
 const preview: Preview = {
   globalTypes: {
     theme: {
-      description: "Colour theme",
+      description: "Theme",
+      toolbar: {
+        icon: "paintbrush",
+        items: [
+          { value: "ember", title: "Ember" },
+          { value: "paper", title: "Paper" },
+        ],
+        dynamicTitle: true,
+      },
+    },
+    mode: {
+      description: "Mode",
       toolbar: {
         icon: "circlehollow",
-        items: ["system", "light", "dark"],
+        items: ["light", "dark"],
         dynamicTitle: true,
       },
     },
   },
-  initialGlobals: { theme: "system" },
+  initialGlobals: { theme: "ember", mode: "light" },
   parameters: {
     a11y: { test: "error" },
     backgrounds: { disable: true },
@@ -21,11 +32,10 @@ const preview: Preview = {
   decorators: [
     (Story, context) => {
       useEffect(() => {
-        if (context.globals.theme === "system")
-          delete document.documentElement.dataset.theme;
-        else document.documentElement.dataset.theme = context.globals.theme;
+        document.documentElement.dataset.theme = context.globals.theme;
+        document.documentElement.dataset.mode = context.globals.mode;
         document.body.style.background = "var(--canvas)";
-      }, [context.globals.theme]);
+      }, [context.globals.theme, context.globals.mode]);
       return <Story />;
     },
   ],

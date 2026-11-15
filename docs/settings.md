@@ -29,8 +29,10 @@ The template waveform uses different shapes for idle, recording and transcribing
 
 ## Design choices
 
-The Voicenotes direction uses neutral surfaces, pill controls, calm system type
-and a restrained success green. Colours, type, spacing and radii live in
+The chosen Ember/Paper direction uses warm surfaces, pill controls, local
+Instrument Sans and ink actions. General’s Appearance group saves Theme and Mode;
+Ember and System are the defaults for older files too. Both windows apply changes
+live through settings-changed. System follows macOS appearance changes. Colours, type, spacing and radii live in
 `src/tokens.css`. Shared controls and their state stories live in `src/ui`. The recorder adapter
 and microphone-test component keep native capture and persistence outside the
 library. See [design-system.md](design-system.md) for contracts and commands.

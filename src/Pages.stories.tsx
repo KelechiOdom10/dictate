@@ -24,13 +24,15 @@ const meta = {
 } satisfies Meta;
 export default meta;
 type Story = StoryObj<typeof meta>;
-async function mockSettings() {
+async function mockSettings({ globals }: { globals: Record<string, unknown> }) {
   let settings: Settings = {
     version: 1,
     shortcut: "Alt+Shift+Space",
     shortcutMode: "hold",
     microphone: null,
     launchAtLogin: false,
+    theme: globals.theme === "paper" ? "paper" : "ember",
+    appearanceMode: globals.mode === "dark" ? "dark" : "light",
   };
   mockWindows("settings");
   mockIPC(
@@ -72,7 +74,6 @@ function GeneralPage() {
   );
 }
 export const General: Story = {
-  globals: { theme: "light" },
   beforeEach: mockSettings,
   render: () => <GeneralPage />,
   play: async ({ canvasElement }) => {
@@ -83,7 +84,7 @@ export const General: Story = {
     ).toBeVisible();
   },
 };
-export const GeneralDark: Story = { ...General, globals: { theme: "dark" } };
+
 export const GeneralLoading: Story = {
   beforeEach: () => {
     mockWindows("settings");
