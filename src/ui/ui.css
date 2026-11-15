@@ -181,6 +181,7 @@ p {
 }
 .ui-card {
   background: var(--surface);
+  border: 1px solid var(--card-edge);
   border-radius: var(--radius-panel);
   padding: var(--space-5);
   display: grid;
@@ -268,6 +269,7 @@ p {
 .ui-detail {
   padding: var(--space-6);
   background: var(--surface);
+  border: 1px solid var(--card-edge);
   border-radius: var(--radius-panel);
   display: grid;
   gap: var(--space-5);
@@ -542,6 +544,7 @@ p {
 }
 .ui-group {
   background: var(--surface);
+  border: 1px solid var(--card-edge);
   border-radius: var(--radius-panel);
   overflow: visible;
 }
@@ -1046,7 +1049,6 @@ h3 {
   margin: 0;
   gap: var(--space-3);
   container-type: inline-size;
-  border: 1px solid var(--card-edge);
 }
 .ui-model-active {
   border-color: var(--primary);
