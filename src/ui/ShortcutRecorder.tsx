@@ -1,5 +1,5 @@
 import type { KeyboardEvent } from "react";
-import { Button } from "./Button";
+import { Button, type ControlSize } from "./Button";
 
 const keyLabels: Record<string, string> = {
   CommandOrControl: "⌘",
@@ -10,9 +10,15 @@ const keyLabels: Record<string, string> = {
   Option: "⌥",
   Shift: "⇧",
 };
-export function KeyboardShortcut({ value }: { value: string }) {
+export function KeyboardShortcut({
+  value,
+  size = "md",
+}: {
+  value: string;
+  size?: ControlSize;
+}) {
   return (
-    <span className="ui-keycaps">
+    <span className={`ui-keycaps ui-size-${size}`}>
       {value
         .split("+")
         .filter(Boolean)
@@ -25,6 +31,7 @@ export function KeyboardShortcut({ value }: { value: string }) {
   );
 }
 type Props = {
+  size?: ControlSize;
   id?: string;
   value: string;
   recording: boolean;
@@ -36,6 +43,7 @@ type Props = {
   onError: (error: string) => void;
 };
 export function ShortcutRecorder({
+  size = "md",
   value,
   recording,
   onStart,
@@ -71,8 +79,9 @@ export function ShortcutRecorder({
   return (
     <Button
       {...props}
+      size={size}
       variant="primary"
-      className={`shortcut ${recording ? "capturing" : ""}`}
+      className={`ui-shortcut ${recording ? "ui-capturing" : ""}`}
       onClick={(event) => {
         event.currentTarget.focus();
         if (!recording) onStart();
@@ -82,7 +91,11 @@ export function ShortcutRecorder({
         if (recording) onCancel();
       }}
     >
-      {recording ? "Press shortcut…" : <KeyboardShortcut value={value} />}
+      {recording ? (
+        "Press shortcut…"
+      ) : (
+        <KeyboardShortcut value={value} size={size} />
+      )}
     </Button>
   );
 }

@@ -37,6 +37,12 @@ try {
     }
   });
   const captures = [
+    ["foundations--dark", "foundations-dark", "h1"],
+    [
+      "components-controls--controls-side-by-side",
+      "controls-side-by-side",
+      "h1",
+    ],
     ["foundations--light", "foundations", "h1"],
     ["components-button--all-states", "buttons", "button"],
     ["components-controls--filters", "filter-chips", "button"],
@@ -54,6 +60,10 @@ try {
     ["pages--models", "models", ".ui-card"],
   ];
   for (const [id, filename, selector] of captures) {
+    await page.setViewportSize({
+      width: id.includes("controls-side-by-side") ? 1440 : 1000,
+      height: 820,
+    });
     await page.goto(
       `http://localhost:6007/iframe.html?id=${id}&viewMode=story`,
     );
@@ -68,9 +78,54 @@ try {
     });
     console.log(`Captured ${filename}`);
   }
-  await page.setViewportSize({ width: 390, height: 844 });
+  const index = JSON.parse(
+    await readFile("target/storybook/index.json", "utf8"),
+  );
+  const catalog = [];
+  for (const theme of ["light", "dark"]) {
+    for (const entry of Object.values(index.entries).filter(
+      (entry) => entry.type === "story",
+    )) {
+      await page.setViewportSize({
+        width: entry.id.includes("controls-side-by-side") ? 1440 : 1000,
+        height: 820,
+      });
+      await page.goto(
+        `http://localhost:6007/iframe.html?id=${entry.id}&viewMode=story&globals=theme:${theme}`,
+      );
+      await page
+        .locator("#storybook-root > *")
+        .first()
+        .waitFor({ state: "visible" });
+      if (
+        entry.id.startsWith("pages--general") &&
+        !entry.id.includes("loading") &&
+        !entry.id.includes("error")
+      )
+        await page.locator("#login").waitFor();
+      await page.evaluate((theme) => {
+        document.documentElement.dataset.theme = theme;
+        return document.fonts.ready;
+      }, theme);
+      const filename = `${entry.id}-${theme}.png`;
+      await page.screenshot({
+        path: path.join(output, filename),
+        fullPage: true,
+      });
+      catalog.push({ id: entry.id, theme, filename });
+    }
+  }
+  await import("node:fs/promises").then((fs) =>
+    fs.writeFile(
+      path.join(output, "catalog.json"),
+      JSON.stringify(catalog, null, 2),
+    ),
+  );
+  console.log(`Captured all ${catalog.length} story/theme combinations`);
+  await page.setViewportSize({ width: 320, height: 844 });
   for (const id of [
     "pages--general",
+    "pages--general-dark",
     "pages--history",
     "pages--models",
     "components-recordingcapsule--all-states",
@@ -87,7 +142,7 @@ try {
         () => document.documentElement.scrollWidth > innerWidth,
       )
     )
-      throw new Error(`${id} overflows at 390px`);
+      throw new Error(`${id} overflows at 320px`);
     await page.screenshot({
       path: path.join(output, `${id}-narrow.png`),
       fullPage: true,

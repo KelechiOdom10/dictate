@@ -12,12 +12,12 @@ export function SettingsRow({
   children: ReactNode;
 }) {
   return (
-    <div className="setting-row">
-      <div className="row-copy">
+    <div className="ui-setting-row">
+      <div className="ui-row-copy">
         <label htmlFor={id}>{label}</label>
         <p id={`${id}-help`}>{help}</p>
       </div>
-      <div className="row-control">{children}</div>
+      <div className="ui-row-control">{children}</div>
     </div>
   );
 }
@@ -37,7 +37,7 @@ export function SettingsGroup({
         {icon}
         {title}
       </h2>
-      <div className="group">{children}</div>
+      <div className="ui-group">{children}</div>
     </section>
   );
 }

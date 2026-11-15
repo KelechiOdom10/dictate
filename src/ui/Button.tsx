@@ -1,9 +1,13 @@
 import type { ButtonHTMLAttributes } from "react";
 
+export type ControlSize = "sm" | "md" | "lg";
+
 type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
+  size?: ControlSize;
   variant?: "primary" | "secondary" | "ghost";
 };
 export function Button({
+  size = "md",
   variant = "secondary",
   className = "",
   type = "button",
@@ -12,7 +16,7 @@ export function Button({
   return (
     <button
       type={type}
-      className={`ui-button ui-button-${variant} ${className}`}
+      className={`ui-button ui-size-${size} ui-button-${variant} ${className}`}
       {...props}
     />
   );

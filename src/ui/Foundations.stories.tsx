@@ -1,3 +1,5 @@
+import contrast from "./contrast.generated.json";
+import { Toast } from "./Content";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { tokens } from "./tokens";
 
@@ -52,7 +54,10 @@ function Foundations() {
   return (
     <main style={{ padding: tokens.space8 }}>
       <h1>Foundations</h1>
-      <p className="ui-preview">Quiet surfaces. Clear words. Room to think.</p>
+      <p className="ui-preview">
+        Cool slate neutrals at 255° · monochrome actions · status colour only
+        when it carries meaning.
+      </p>
       <section className="foundation-section">
         <h2>Colour</h2>
         <div className="foundation-grid">
@@ -68,7 +73,66 @@ function Foundations() {
         </div>
       </section>
       <section className="foundation-section">
-        <h2>Typography</h2>
+        <h2>Status surfaces</h2>
+        <div className="story-stack">
+          <Toast>Copied to clipboard.</Toast>
+          <Toast tone="warning">
+            Microphone disconnected. Choose another input.
+          </Toast>
+          <Toast tone="danger">Download failed. Try again.</Toast>
+          <Toast tone="info">Your audio stays on this Mac.</Toast>
+        </div>
+      </section>
+      <section className="foundation-section">
+        <h2>Measured contrast · WCAG AA</h2>
+        <p className="ui-preview">
+          Chromium sRGB pixels · 4.5:1 for text, 3:1 for focus. Regenerate with
+          node scripts/check-contrast.mjs.
+        </p>
+        <div className="contrast-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Text / surface</th>
+                <th>Light</th>
+                <th>Dark</th>
+                <th>Minimum</th>
+              </tr>
+            </thead>
+            <tbody>
+              {contrast
+                .filter((pair) => pair.theme === "light")
+                .map((pair) => (
+                  <tr key={`${pair.foreground}-${pair.background}`}>
+                    <th scope="row">
+                      {pair.foreground} / {pair.background}
+                    </th>
+                    <td>{pair.ratio.toFixed(2)}:1</td>
+                    <td>
+                      {contrast
+                        .find(
+                          (dark) =>
+                            dark.theme === "dark" &&
+                            dark.foreground === pair.foreground &&
+                            dark.background === pair.background,
+                        )
+                        ?.ratio.toFixed(2)}
+                      :1
+                    </td>
+                    <td>{pair.minimum}:1</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="foundation-section">
+        <h2>Typography · system SF Pro</h2>
+        <p className="ui-preview">
+          22px title · 18px content heading · 13px row label and md control ·
+          12px helper and section overline. Regular 400, medium 500, semibold
+          600. Sentence case needs no added tracking.
+        </p>
         <div className="story-stack">
           {type.map((name) => (
             <p key={name} style={{ fontSize: tokens[name] }}>
