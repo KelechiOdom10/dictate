@@ -28,6 +28,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 | `src-tauri/src/audio.rs` | Capture. `start`/`stop`, 16 kHz mono f32 |
 | `src-tauri/src/transcribe.rs` | Speech to text. Samples in, text out |
 | `src-tauri/src/insert.rs` | Paste into the focused app, restore clipboard |
+| `src-tauri/src/screen.rs` | Annotate screen recording. `start`/`stop`, one display to MP4 |
 | `models/` | Whisper GGML weights. Never committed. |
 | `docs/` | The spike question, and later the kickoff docs |
 

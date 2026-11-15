@@ -169,3 +169,111 @@ reason; speak a sentence and confirm it pastes. Listen to the logged WAV and
 delete it afterward. Repeat with quiet speech and normal room noise. Physical
 hotkey, real-mic gate behavior, first/last phonemes, and focused-app insertion
 were not verified in this run; the seven-check gate remains open.
+
+## Annotate screen stage — 15 November 2026
+
+`src-tauri/src/screen.rs` records one display to an H.264 MP4 through
+ScreenCaptureKit's `SCRecordingOutput` (`screencapturekit` 11.1.2, feature
+`macos_15_0`). `examples/screen_capture.rs` calls it alone.
+
+**No recording was made in this run.** The agent ran while the Mac was locked
+with the display asleep: `CGSessionCopyCurrentDictionary` reported
+`CGSSessionScreenIsLocked = 1` and `CGDisplayIsAsleep(main) = 1`. A plain
+`swiftc` probe (no Rust involved) got 0 displays, 13 windows and 8 applications
+from `SCShareableContent`, with no error. The example stops cleanly in that state:
+`error: Display 1 is not among the capturable displays []`. R5, R6 and the
+30-second playback check are **not measured**. The steps below measure them.
+
+What was checked:
+
+| Check | Result |
+|---|---|
+| `CGPreflightScreenCaptureAccess()` from the agent's shell | `true`. This is inherited from the parent app's grant, as the design doc predicted. It says nothing about dictate's own grant. |
+| Link on this machine (Command Line Tools only, no Xcode) | Failed at first with undefined `__swift_FORCE_LOAD_$_swiftCompatibility56`. Then the binary aborted at launch: `Library not loaded: @rpath/libswift_Concurrency.dylib`. `build.rs` now adds the CLT Swift library path and an `/usr/lib/swift` rpath. Both the example and the `dictate` binary now link and load. `otool -l` shows the rpath on `target/debug/dictate`. |
+| Output size rule | Unit tests: native pixels up to 2560 on the long edge, aspect kept, even dimensions. A 3024×1964 display (this Mac) records at 2560×1662. |
+| Bundled-app wrapper for R3 | Ad-hoc signed `ScreenProbe.app` built with the steps below (`codesign -dv` shows identifier `com.kelechiodom.dictate.screen-probe`). Not launched, because launching it shows a permission prompt on the owner's screen. |
+
+### Manual steps (owner, unlocked Mac)
+
+Build once:
+
+```sh
+cd src-tauri
+cargo build --release --example screen_capture
+```
+
+**30-second recording and R6 (CPU, size, dropped frames at 15 fps).** Leave a
+normal working screen up (an editor and a browser) and move between them during
+the run. Run from Terminal or iTerm2. They hold the Screen Recording grant, so
+this measures cost, not permission.
+
+```sh
+before=$(ps -o time= -p "$(pgrep -x replayd)")
+/usr/bin/time -l ./target/release/examples/screen_capture --seconds 30 --fps 15
+ps -o time= -p "$(pgrep -x replayd)"; echo "replayd before: $before"
+avmediainfo <path printed by the example>
+```
+
+Record here: the example's `duration`, `size`, `frames delivered` and
+`expected`; `/usr/bin/time`'s user + sys seconds (our process); and the change in
+`replayd` CPU time (the system encoder). CPU % of one core = (our CPU s +
+replayd CPU s) / 30. Pass: below 15 %. `avmediainfo` must show one H.264 video
+track of about 30 s at 2560×1662. Then open the file in QuickTime and confirm it
+plays. A dropped frame is a gap, not an `idle` frame: `idle` means the screen did
+not change. If `complete + idle` is well below `expected`, scrub the video for
+stutter and write down what you see.
+
+**R5 (our windows are absent).** The example keeps a hidden window from the start,
+like the real app's hidden main window. With `--overlay-at`, it opens a new red
+400×400 window in the middle of the screen. The window is click-through and never
+takes focus.
+
+```sh
+./target/release/examples/screen_capture --seconds 10 --overlay-at 3
+./target/release/examples/screen_capture --seconds 10 --overlay-at 3 --include-own-windows
+```
+
+You will see the red square on screen in both runs. Open each MP4 in QuickTime
+and scrub to 5 s. Pass: the first video has no red square and printed
+`own windows excluded: yes`. The second video (the control) does show it. If the
+first run prints `own windows excluded: NO`, ScreenCaptureKit did not list our
+process, and the filter could not name it. Record that.
+
+**R3 (permission in a bundled app).** Wrap the example in an app bundle with its
+own identity, so macOS asks for that app and not for the terminal:
+
+```sh
+APP=/tmp/ScreenProbe.app
+rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
+cp target/release/examples/screen_capture "$APP/Contents/MacOS/"
+cat > "$APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.kelechiodom.dictate.screen-probe</string>
+<key>CFBundleName</key><string>ScreenProbe</string>
+<key>CFBundleExecutable</key><string>screen_capture</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>LSUIElement</key><true/>
+</dict></plist>
+PLIST
+codesign --force --sign - "$APP"
+open -W "$APP" --stdout /tmp/probe.out --stderr /tmp/probe.out --args --seconds 5
+cat /tmp/probe.out
+```
+
+1. First launch: expect `permission preflight: false`, a system prompt naming
+   ScreenProbe, and `error: Screen Recording permission is not granted…`.
+2. Allow ScreenProbe in System Settings → Privacy & Security → Screen & System
+   Audio Recording. Run the same `open` line again. Expect preflight `true` and a
+   5 s MP4.
+3. Rebuild (`touch src/screen.rs && cargo build --release --example
+   screen_capture`), repeat the bundle steps so the code signature changes, and
+   run again. Write down whether the grant survived the rebuild.
+4. Remove the test entry afterwards: `tccutil reset ScreenCapture
+   com.kelechiodom.dictate.screen-probe`.
+
+The real dictate bundle (`pnpm tauri build`) cannot run this check yet, because
+no Tauri command calls `screen` until the Annotate session task wires it in. The
+bundle above has the same shape: a bundle id, ad-hoc signed, started by
+LaunchServices.
