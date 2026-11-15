@@ -1046,9 +1046,11 @@ h3 {
   margin: 0;
   gap: var(--space-3);
   container-type: inline-size;
+  border: 1px solid var(--card-edge);
 }
 .ui-model-active {
-  box-shadow: inset 0 0 0 1.5px var(--primary);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 0.5px var(--primary);
 }
 .ui-model-top {
   display: grid;
