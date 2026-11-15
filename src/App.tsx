@@ -15,6 +15,14 @@ import { problem, type Problem } from "./problem";
 import "./App.css";
 
 const OVERLAY_MAX_WIDTH = 420;
+// A notice describes the take or session in progress, so it must not carry
+// over to the done, copied or skipped pill that follows.
+const NOTICE_PHASES = new Set([
+  "recording",
+  "transcribing",
+  "annotating",
+  "packaging",
+]);
 
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -123,7 +131,7 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
                               : { kind: "ready", message: "Ready" }
           }
           notice={
-            status.phase === "idle" || error
+            error || !NOTICE_PHASES.has(status.phase)
               ? undefined
               : (status.notice ?? undefined)
           }

@@ -62,6 +62,9 @@ struct Runtime {
     capturing_shortcut: bool,
     shortcut_registered: bool,
     annotate: annotate::Phase,
+    /// False when the Annotate chord failed to register or equals the
+    /// dictation chord. Its presses then belong to dictation, or to no one.
+    annotate_registered: bool,
     /// Set while an Annotate session records: its clock and what was known at
     /// the start tap.
     annotate_started: Option<(Instant, annotate::Started)>,
@@ -799,14 +802,15 @@ fn hotkey(
     if runtime.capturing_shortcut {
         return;
     }
-    if runtime.settings.annotate_chord().ok().as_ref() == Some(shortcut) {
-        if event == ShortcutState::Pressed {
-            annotate_tap(app, runtime);
+    match shortcut_target(&runtime.settings, runtime.annotate_registered, shortcut) {
+        Some(Target::Dictation) => {}
+        Some(Target::Annotate) => {
+            if event == ShortcutState::Pressed {
+                annotate_tap(app, runtime);
+            }
+            return;
         }
-        return;
-    }
-    if runtime.settings.chord().ok().as_ref() != Some(shortcut) {
-        return;
+        None => return,
     }
     let next = shortcut_transition(runtime.settings.shortcut_mode, runtime.phase, event);
     if next == runtime.phase {
@@ -1016,6 +1020,28 @@ fn failed_capture(start: &TakeStart, model: &Path, total_ms: i64, error: &Proble
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Target {
+    Dictation,
+    Annotate,
+}
+
+/// Which feature a shortcut event belongs to. Dictation is checked first, so a
+/// saved dictation shortcut that equals the Annotate default keeps working.
+fn shortcut_target(
+    settings: &Settings,
+    annotate_registered: bool,
+    shortcut: &tauri_plugin_global_shortcut::Shortcut,
+) -> Option<Target> {
+    let dictation = settings.chord().ok();
+    if dictation.as_ref() == Some(shortcut) {
+        return Some(Target::Dictation);
+    }
+    let annotate = settings.annotate_chord().ok();
+    (annotate_registered && annotate.as_ref() == Some(shortcut) && annotate != dictation)
+        .then_some(Target::Annotate)
+}
+
 /// A dictation take may not start while Annotate holds the microphone or is
 /// still saving: `audio` keeps one shared recording.
 fn dictation_blocked(annotate: annotate::Phase, phase: Phase, next: Phase) -> bool {
@@ -1207,6 +1233,9 @@ fn save_annotation(
     }
 }
 
+const ANNOTATE_SHORTCUT_CLASH: &str =
+    "The Annotate shortcut is the same as your dictation shortcut. Change one in Settings.";
+
 fn shortcut_transition(mode: ShortcutMode, phase: Phase, event: ShortcutState) -> Phase {
     match (mode, phase, event) {
         (_, Phase::Idle, ShortcutState::Pressed) => Phase::Recording,
@@ -1323,27 +1352,34 @@ pub fn run() {
                     false
                 }
             };
-            match settings.annotate_chord().and_then(|chord| {
-                if settings.chord().ok() == Some(chord) {
-                    return Err("It is the same as the dictation shortcut".into());
-                }
-                app.global_shortcut()
-                    .register(chord)
-                    .map_err(|e| e.to_string())
-            }) {
-                Ok(()) => {}
-                Err(error) => {
-                    let problem = Problem::new(
+            let annotate_registered = match settings.annotate_chord() {
+                Ok(chord) if settings.chord().ok() == Some(chord) => Err(Problem::new(
+                    "Annotate shortcut unavailable",
+                    ANNOTATE_SHORTCUT_CLASH,
+                )),
+                Ok(chord) => app.global_shortcut().register(chord).map_err(|error| {
+                    Problem::new(
                         "Annotate shortcut unavailable",
                         "Quit the app that uses ⌥ ⇧ S, then reopen dictate.",
                     )
-                    .because(error);
+                    .because(error)
+                }),
+                Err(error) => Err(Problem::new(
+                    "Annotate shortcut unavailable",
+                    "Quit the app that uses ⌥ ⇧ S, then reopen dictate.",
+                )
+                .because(error)),
+            };
+            let annotate_registered = match annotate_registered {
+                Ok(()) => true,
+                Err(problem) => {
                     startup_error = Some(match startup_error {
                         Some(previous) => previous.and(problem),
                         None => problem,
                     });
+                    false
                 }
-            }
+            };
             let runtime_managed = manage_runtime(
                 app,
                 Runtime {
@@ -1354,6 +1390,7 @@ pub fn run() {
                     capturing_shortcut: false,
                     shortcut_registered,
                     annotate: annotate::Phase::Idle,
+                    annotate_registered,
                     annotate_started: None,
                 },
             );
@@ -1457,8 +1494,43 @@ mod take_tests {
             capturing_shortcut: false,
             shortcut_registered: false,
             annotate: annotate::Phase::Idle,
+            annotate_registered: false,
             annotate_started: None,
         }
+    }
+
+    #[test]
+    fn a_dictation_shortcut_equal_to_the_annotate_one_stays_dictation() {
+        let annotate: tauri_plugin_global_shortcut::Shortcut =
+            Settings::default().annotate_chord().unwrap();
+        let clash = Settings {
+            shortcut: Settings::default().annotate_shortcut,
+            ..Settings::default()
+        };
+        // Even if registration were reported, dictation wins the clash.
+        assert_eq!(
+            shortcut_target(&clash, true, &annotate),
+            Some(Target::Dictation)
+        );
+        assert_eq!(
+            shortcut_target(&clash, false, &annotate),
+            Some(Target::Dictation)
+        );
+
+        let apart = Settings::default();
+        let dictation = apart.chord().unwrap();
+        assert_eq!(
+            shortcut_target(&apart, true, &dictation),
+            Some(Target::Dictation)
+        );
+        assert_eq!(
+            shortcut_target(&apart, true, &annotate),
+            Some(Target::Annotate)
+        );
+        // Annotate's chord did not register: its presses go nowhere.
+        assert_eq!(shortcut_target(&apart, false, &annotate), None);
+        let other: tauri_plugin_global_shortcut::Shortcut = "Alt+KeyQ".parse().unwrap();
+        assert_eq!(shortcut_target(&apart, true, &other), None);
     }
 
     #[test]
