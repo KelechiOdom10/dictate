@@ -157,8 +157,7 @@ pub fn start(target: DisplayTarget, options: CaptureOptions) -> Result<(), Strin
     if !has_permission() && !request_permission() {
         return Err(PERMISSION_DENIED.into());
     }
-    reservation.fill(Recording::begin(target, options)?);
-    Ok(())
+    reservation.fill(Recording::begin(target, options)?)
 }
 
 pub fn stop() -> Result<VideoInfo, StopError> {
@@ -210,10 +209,25 @@ impl StartReservation {
         }
     }
 
-    fn fill(mut self, recording: Recording) {
-        if let Ok(mut slot) = state().lock() {
-            *slot = Slot::Recording(recording);
-            self.filled = true;
+    /// If the lock is poisoned the recording cannot be stored for `stop`, so
+    /// it is stopped here and `start` reports the failure instead of leaving a
+    /// capture running that nothing can reach.
+    fn fill(mut self, recording: Recording) -> Result<(), String> {
+        match state().lock() {
+            Ok(mut slot) => {
+                *slot = Slot::Recording(recording);
+                self.filled = true;
+                Ok(())
+            }
+            Err(_) => {
+                let stopped = match recording.finish() {
+                    Ok(video) => format!("stopped, partial file at {}", video.path.display()),
+                    Err(error) => format!("stop failed: {}", error.message),
+                };
+                Err(format!(
+                    "Screen state lock poisoned after the recording started; {stopped}"
+                ))
+            }
         }
     }
 }

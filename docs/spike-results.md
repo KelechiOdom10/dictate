@@ -423,3 +423,34 @@ cargo test --manifest-path src-tauri/Cargo.toml generated_minute -- --nocapture
 DICTATE_WHISPER_MODEL="$PWD/models/ggml-small.en.bin" cargo test --manifest-path src-tauri/Cargo.toml generated_minute -- --nocapture
 cargo run --manifest-path src-tauri/Cargo.toml --example transcribe_timed -- speech.wav
 ```
+
+### Word times after silence — 15 November 2026
+
+The review of PR #19 found that whisper-cli pulls word times towards the start
+of its window when the audio opens with silence. `transcribe_timed` now cuts
+the audio into runs of speech with a simple energy detector
+(`transcribe::speech_spans`: 20 ms RMS windows, voiced above 4× the quietest
+tenth of windows, clamped to 0.005–0.02; runs split at quiet stretches of
+1.5 s or more, padded by 250 ms), transcribes each run alone and adds its
+offset back. Calls to whisper-cli hold the transcription lock for the whole
+take.
+
+Fixtures are built in the tests from `say -v Samantha` plus generated noise at
+about -50 dBFS. True onset = padding + the first 10 ms window of the `say` clip
+above -40 dBFS. Target: the first word within 300 ms of the true onset.
+
+| Fixture | Word | True onset | Before (base.en) | After (base.en) | After (small.en) |
+|---|---|---:|---:|---:|---:|
+| 4 s silence, "Move the button. Then make it blue.", 4 s silence | Move | 4,000 ms | 0 ms (**−4,000**) | 4,000 ms (0) | 4,000 ms (0) |
+| 1 s silence, "Move the button.", 4 s silence, "Then make it blue.", 1 s | Move | 1,000 ms | 0 ms (**−1,000**) | 1,000 ms (0) | 1,000 ms (0) |
+| same, after the 4 s gap | Then | 6,024 ms | 5,800 ms (−224) | 6,030 ms (+6) | 6,030 ms (+6) |
+
+The 60 s fixture is unchanged: base.en 1,033 ms, 205 words, last word at
+61,760 ms; small.en 2,080 ms. Each extra run costs one more whisper-cli start
+(about 150 ms with base.en), so a take with many long pauses gets slower. The
+padding bounds the leftover error: if whisper snaps a run's first word to the
+start of the run, the time is at most 250 ms early.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --lib transcribe::tests -- --nocapture --test-threads 1
+```
