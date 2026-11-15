@@ -5,9 +5,10 @@
 //!
 //! The WAV must be 16 kHz mono 16-bit PCM, the repo's audio format, e.g.
 //! `afconvert -f WAVE -d LEI16@16000 -c 1 in.aiff out.wav`.
-//! Set DICTATE_WHISPER_MODEL to try another model.
+//! Uses DICTATE_WHISPER_MODEL, else this checkout's `models/ggml-base.en.bin`.
 
 use dictate_lib::transcribe;
+use std::path::{Path, PathBuf};
 
 fn main() {
     if let Err(error) = run() {
@@ -35,7 +36,7 @@ fn run() -> Result<(), String> {
         .map_err(|e| format!("Read {path}: {e}"))?;
 
     let started = std::time::Instant::now();
-    let words = transcribe::transcribe_timed(&samples)?;
+    let words = transcribe::transcribe_timed(&samples, &model())?;
     let elapsed_ms = started.elapsed().as_millis();
 
     for word in &words {
@@ -54,4 +55,10 @@ fn run() -> Result<(), String> {
         words.len()
     );
     Ok(())
+}
+
+fn model() -> PathBuf {
+    std::env::var_os("DICTATE_WHISPER_MODEL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../models/ggml-base.en.bin"))
 }
