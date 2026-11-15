@@ -139,6 +139,7 @@ function mockApp(
     micMode: "onDemand",
     soundFeedback: false,
     debugRecordings: false,
+    annotateShortcut: "Alt+Shift+KeyS",
     ...overrides,
   };
   mockWindows("settings");

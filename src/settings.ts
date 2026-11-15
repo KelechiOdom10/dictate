@@ -23,6 +23,7 @@ export const settingsSchema = z
     micMode: z.enum(["onDemand", "warm"]),
     soundFeedback: z.boolean(),
     debugRecordings: z.boolean(),
+    annotateShortcut: z.string(),
   })
   .strict() satisfies z.ZodType<Settings>;
 

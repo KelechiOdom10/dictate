@@ -67,7 +67,7 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
     };
   }, []);
   useEffect(() => {
-    if (status.phase !== "recording") return;
+    if (status.phase !== "recording" && status.phase !== "annotating") return;
     setSeconds(0);
     setLevel(0);
     const started = Date.now();
@@ -106,20 +106,26 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
                     seconds,
                     level: Math.min(1, Math.sqrt(level) * 2),
                   }
-                : status.phase === "transcribing"
-                  ? { kind: "transcribing" }
-                  : status.phase === "done"
-                    ? { kind: "done" }
-                    : status.phase === "copied"
-                      ? { kind: "copied" }
-                      : status.phase === "skipped"
-                        ? { kind: "skipped" }
-                        : { kind: "ready", message: "Ready" }
+                : status.phase === "annotating"
+                  ? { kind: "annotating", seconds }
+                  : status.phase === "packaging"
+                    ? { kind: "packaging" }
+                    : status.phase === "annotated"
+                      ? { kind: "annotated" }
+                      : status.phase === "transcribing"
+                        ? { kind: "transcribing" }
+                        : status.phase === "done"
+                          ? { kind: "done" }
+                          : status.phase === "copied"
+                            ? { kind: "copied" }
+                            : status.phase === "skipped"
+                              ? { kind: "skipped" }
+                              : { kind: "ready", message: "Ready" }
           }
           notice={
-            status.phase === "recording" || status.phase === "transcribing"
-              ? (status.notice ?? undefined)
-              : undefined
+            status.phase === "idle" || error
+              ? undefined
+              : (status.notice ?? undefined)
           }
           shortcut={
             status.phase === "idle" && !error ? (

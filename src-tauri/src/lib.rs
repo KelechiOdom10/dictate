@@ -15,6 +15,7 @@
 //! floats, which serialises to megabytes of JSON for no benefit; the frontend
 //! receives status and small scalar levels, never raw samples.
 
+mod annotate;
 mod audio;
 #[cfg(target_os = "macos")]
 pub mod frames;
@@ -60,6 +61,10 @@ struct Runtime {
     take_start: Option<TakeStart>,
     capturing_shortcut: bool,
     shortcut_registered: bool,
+    annotate: annotate::Phase,
+    /// Set while an Annotate session records: its clock and what was known at
+    /// the start tap.
+    annotate_started: Option<(Instant, annotate::Started)>,
 }
 
 /// What we know at key-down: when the take began and which app had focus.
@@ -791,11 +796,25 @@ fn hotkey(
     let Ok(mut runtime) = state.lock() else {
         return;
     };
-    if runtime.capturing_shortcut || runtime.settings.chord().ok().as_ref() != Some(shortcut) {
+    if runtime.capturing_shortcut {
+        return;
+    }
+    if runtime.settings.annotate_chord().ok().as_ref() == Some(shortcut) {
+        if event == ShortcutState::Pressed {
+            annotate_tap(app, runtime);
+        }
+        return;
+    }
+    if runtime.settings.chord().ok().as_ref() != Some(shortcut) {
         return;
     }
     let next = shortcut_transition(runtime.settings.shortcut_mode, runtime.phase, event);
     if next == runtime.phase {
+        return;
+    }
+    if dictation_blocked(runtime.annotate, runtime.phase, next) {
+        drop(runtime);
+        flash_notice(app, annotate::DICTATION_BLOCKED);
         return;
     }
     if next == Phase::Recording {
@@ -997,6 +1016,197 @@ fn failed_capture(start: &TakeStart, model: &Path, total_ms: i64, error: &Proble
     }
 }
 
+/// A dictation take may not start while Annotate holds the microphone or is
+/// still saving: `audio` keeps one shared recording.
+fn dictation_blocked(annotate: annotate::Phase, phase: Phase, next: Phase) -> bool {
+    phase == Phase::Idle && next == Phase::Recording && annotate::blocks_dictation(annotate)
+}
+
+/// Show `notice` in the pill for a few seconds, then put back what was there.
+fn flash_notice(app: &AppHandle, notice: &'static str) {
+    let previous = surface::status(app).notice;
+    surface::set_notice(app, Some(notice.into()));
+    surface::refresh(app);
+    if let Err(error) = overlay::show(app) {
+        log::warn!("[annotate] show notice: {error}");
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if surface::status(&app).notice.as_deref() == Some(notice) {
+            surface::set_notice(&app, previous);
+            surface::refresh(&app);
+            if surface::status(&app).should_hide()
+                && let Some(window) = app.get_webview_window("main")
+                && let Err(error) = window.hide()
+            {
+                log::warn!("[annotate] hide notice: {error}");
+            }
+        }
+    });
+}
+
+/// One tap of the Annotate shortcut: start a session, or stop it and save the
+/// package in the background.
+fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>) {
+    let next = annotate::tap(runtime.annotate, runtime.phase == Phase::Idle);
+    if next == runtime.annotate {
+        if runtime.annotate == annotate::Phase::Idle {
+            drop(runtime);
+            flash_notice(app, annotate::DICTATION_BUSY);
+        }
+        return;
+    }
+    let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
+    match next {
+        annotate::Phase::Recording => {
+            if !model.is_file() {
+                drop(runtime);
+                report_error(app, &transcribe::missing_model(&model));
+                return;
+            }
+            let clock = Instant::now();
+            let unix_ms = history::now_ms();
+            surface::clear_error(app);
+            let fallback = match audio::start_device(
+                runtime.settings.microphone.clone(),
+                Default::default(),
+            ) {
+                Ok(fallback) => fallback,
+                Err(error) => {
+                    drop(runtime);
+                    report_error(app, &error);
+                    return;
+                }
+            };
+            let audio_offset_ms = clock.elapsed().as_millis() as u64;
+            runtime.annotate = next;
+            runtime.annotate_started = Some((
+                clock,
+                annotate::Started {
+                    unix_ms,
+                    audio_offset_ms,
+                    display: annotate::main_display(),
+                    frontmost_app: focus::frontmost_app_id(),
+                },
+            ));
+            surface::set_notice(app, microphone_notice(fallback));
+            surface::set_phase(app, "annotating");
+            drop(runtime);
+            log::info!("[annotate] started, audio_offset_ms={audio_offset_ms}");
+            if let Err(error) = overlay::show(app) {
+                report_error(
+                    app,
+                    &Problem::new(
+                        "Overlay couldn’t open",
+                        "Annotate is recording; tap the shortcut to finish.",
+                    )
+                    .because(error),
+                );
+            }
+        }
+        annotate::Phase::Packaging => {
+            let Some((clock, started)) = runtime.annotate_started.take() else {
+                runtime.annotate = annotate::Phase::Idle;
+                return;
+            };
+            let duration_ms = clock.elapsed().as_millis() as u64;
+            let samples = audio::stop();
+            runtime.annotate = next;
+            surface::set_notice(app, None);
+            surface::set_phase(app, "packaging");
+            drop(runtime);
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let outcome = match samples {
+                    Ok(samples) => save_annotation(&app, &samples, started, duration_ms, &model),
+                    Err(error) => Err(error),
+                };
+                let phase = match &outcome {
+                    Ok(()) => "annotated",
+                    Err(_) => "idle",
+                };
+                if let Ok(mut runtime) = app.state::<Mutex<Runtime>>().lock() {
+                    runtime.annotate = annotate::packaged(runtime.annotate);
+                    surface::set_phase(&app, phase);
+                }
+                if let Err(error) = &outcome {
+                    report_error(&app, error);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1800));
+                let state = app.state::<Mutex<Runtime>>();
+                let Ok(runtime) = state.lock() else {
+                    return;
+                };
+                if runtime.phase != Phase::Idle
+                    || runtime.annotate != annotate::Phase::Idle
+                    || surface::status(&app).phase != "annotated"
+                {
+                    return;
+                }
+                surface::set_phase(&app, "idle");
+                drop(runtime);
+                if surface::status(&app).should_hide()
+                    && let Some(window) = app.get_webview_window("main")
+                    && let Err(error) = window.hide()
+                {
+                    log::warn!("[annotate] hide: {error}");
+                }
+            });
+        }
+        annotate::Phase::Idle => {}
+    }
+}
+
+/// Transcribes with word times and writes `audio.wav` and `annotation.json`.
+/// A failed transcription still saves the audio, with an empty transcript,
+/// and then reports the failure.
+fn save_annotation(
+    app: &AppHandle,
+    samples: &[f32],
+    started: annotate::Started,
+    duration_ms: u64,
+    model: &Path,
+) -> Result<(), Problem> {
+    let stopped = Instant::now();
+    let folder = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| Problem::new("Annotation not saved", "Restart dictate.").because(e))?
+        .join(annotate::FOLDER)
+        .join(annotate::session_id(started.unix_ms));
+    let (words, transcribe_error) = match transcribe::transcribe_timed(samples, model) {
+        Ok(words) => (words, None),
+        Err(error) => (Vec::new(), Some(error)),
+    };
+    let transcribe_ms = stopped.elapsed().as_millis();
+    let annotation =
+        annotate::annotation(started, duration_ms, transcribe::model_name(model), words);
+    annotate::write(&folder, samples, &annotation).map_err(|e| {
+        Problem::new(
+            "Annotation not saved",
+            "Check there is free disk space, then try again.",
+        )
+        .because(e)
+    })?;
+    log::info!(
+        "[annotate] saved {} samples={} duration_ms={duration_ms} words={} transcribe_ms={transcribe_ms} stop_to_saved_ms={}",
+        folder.display(),
+        samples.len(),
+        annotation.transcript.words.len(),
+        stopped.elapsed().as_millis()
+    );
+    match transcribe_error {
+        Some(error) => Err(Problem::new(
+            "Annotation saved without a transcript",
+            error.fix.clone(),
+        )
+        .because(error)),
+        None => Ok(()),
+    }
+}
+
 fn shortcut_transition(mode: ShortcutMode, phase: Phase, event: ShortcutState) -> Phase {
     match (mode, phase, event) {
         (_, Phase::Idle, ShortcutState::Pressed) => Phase::Recording,
@@ -1113,6 +1323,27 @@ pub fn run() {
                     false
                 }
             };
+            match settings.annotate_chord().and_then(|chord| {
+                if settings.chord().ok() == Some(chord) {
+                    return Err("It is the same as the dictation shortcut".into());
+                }
+                app.global_shortcut()
+                    .register(chord)
+                    .map_err(|e| e.to_string())
+            }) {
+                Ok(()) => {}
+                Err(error) => {
+                    let problem = Problem::new(
+                        "Annotate shortcut unavailable",
+                        "Quit the app that uses ⌥ ⇧ S, then reopen dictate.",
+                    )
+                    .because(error);
+                    startup_error = Some(match startup_error {
+                        Some(previous) => previous.and(problem),
+                        None => problem,
+                    });
+                }
+            }
             let runtime_managed = manage_runtime(
                 app,
                 Runtime {
@@ -1122,6 +1353,8 @@ pub fn run() {
                     take_start: None,
                     capturing_shortcut: false,
                     shortcut_registered,
+                    annotate: annotate::Phase::Idle,
+                    annotate_started: None,
                 },
             );
             if let Some(model) = pending {
@@ -1223,7 +1456,32 @@ mod take_tests {
             take_start: None,
             capturing_shortcut: false,
             shortcut_registered: false,
+            annotate: annotate::Phase::Idle,
+            annotate_started: None,
         }
+    }
+
+    #[test]
+    fn dictation_cannot_start_during_an_annotate_session() {
+        use annotate::Phase as Annotate;
+        for mode in [ShortcutMode::Hold, ShortcutMode::Toggle] {
+            let next = shortcut_transition(mode, Phase::Idle, ShortcutState::Pressed);
+            assert!(dictation_blocked(Annotate::Recording, Phase::Idle, next));
+            assert!(dictation_blocked(Annotate::Packaging, Phase::Idle, next));
+            assert!(!dictation_blocked(Annotate::Idle, Phase::Idle, next));
+        }
+        // A hold-mode release after a blocked press changes nothing, so the
+        // session keeps its audio.
+        assert_eq!(
+            shortcut_transition(ShortcutMode::Hold, Phase::Idle, ShortcutState::Released),
+            Phase::Idle
+        );
+        // An unrelated transition is never blocked.
+        assert!(!dictation_blocked(
+            Annotate::Recording,
+            Phase::Recording,
+            Phase::Transcribing
+        ));
     }
 
     struct TestSettingsPlatform {
