@@ -18,4 +18,8 @@ export type AnnotationEntry = {
   folder: string;
   hasContactSheet: boolean;
   packagingMs: number | null;
+  /**
+   * What a partial session lost, one sentence each. Empty when whole.
+   */
+  partial: Array<string>;
 };

@@ -14,7 +14,6 @@ const statusSchema = z.object({
     "skipped",
     "annotating",
     "packaging",
-    "annotated",
   ]),
   error: problemSchema.nullable(),
   notice: z.string().nullable().default(null),

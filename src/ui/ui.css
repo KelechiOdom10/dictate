@@ -384,8 +384,7 @@ p {
   background: var(--overlay-accent);
 }
 .ui-capsule-done,
-.ui-capsule-copied,
-.ui-capsule-annotated {
+.ui-capsule-copied {
   color: var(--overlay-success);
 }
 .ui-capsule-error {

@@ -579,6 +579,11 @@ function AnnotationDetail({
         { label: "Folder", value: entry.folder },
       ]}
     >
+      {entry.partial.length > 0 && (
+        <p className="annotation-partial">
+          <strong>Partial session.</strong> {entry.partial.join(" ")}
+        </p>
+      )}
       {entry.text ? (
         <p>{entry.text}</p>
       ) : (

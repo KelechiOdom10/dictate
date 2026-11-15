@@ -15,6 +15,7 @@ export const annotationEntrySchema = z
     folder: z.string(),
     hasContactSheet: z.boolean(),
     packagingMs: z.number().int().nonnegative().nullable(),
+    partial: z.array(z.string()),
   })
   .strict() satisfies z.ZodType<AnnotationEntry>;
 
@@ -45,7 +46,12 @@ export function annotationTitle(entry: AnnotationEntry) {
 
 export function annotationMeta(entry: AnnotationEntry) {
   const frames = entry.frames === 1 ? "1 frame" : `${entry.frames} frames`;
-  return [entry.app, clock(entry.durationMs), frames]
+  return [
+    entry.partial.length > 0 && "Partial",
+    entry.app,
+    clock(entry.durationMs),
+    frames,
+  ]
     .filter(Boolean)
     .join(" · ");
 }

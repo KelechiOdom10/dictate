@@ -28,6 +28,9 @@ use crate::transcribe::Word;
 pub const FOLDER: &str = "annotations";
 pub const AUDIO_FILE: &str = "audio.wav";
 pub const VIDEO_FILE: &str = "recording.mp4";
+/// What a screen recording that failed to stop managed to write. Kept, but
+/// not used for frames: its length and size are unknown.
+pub const PARTIAL_VIDEO_FILE: &str = "recording-partial.mp4";
 pub const ANNOTATION_FILE: &str = "annotation.json";
 pub const SUMMARY_FILE: &str = "summary.md";
 /// History shows at most this many sessions, newest first.
@@ -37,20 +40,34 @@ pub const LIST_LIMIT: usize = 200;
 pub enum Phase {
     #[default]
     Idle,
-    /// The microphone belongs to Annotate.
+    /// The microphone is recording and `screen::start` is running off the
+    /// main thread. Taps do nothing until it finishes, as in `screen.rs`.
+    Starting,
+    /// The microphone and screen belong to Annotate.
     Recording,
     /// Recording stopped; the WAV, transcript and JSON are being written.
     Packaging,
 }
 
 /// The phase after a tap of the Annotate shortcut. A session only starts when
-/// dictation is idle, and a tap while packaging does nothing.
+/// dictation is idle, and a tap while starting or packaging does nothing.
 pub fn tap(phase: Phase, dictation_idle: bool) -> Phase {
     match phase {
-        Phase::Idle if dictation_idle => Phase::Recording,
+        Phase::Idle if dictation_idle => Phase::Starting,
         Phase::Idle => Phase::Idle,
+        Phase::Starting => Phase::Starting,
         Phase::Recording => Phase::Packaging,
         Phase::Packaging => Phase::Packaging,
+    }
+}
+
+/// The phase once `screen::start` returns: recording if it started, idle if
+/// not. Only moves out of `Starting`.
+pub fn screen_started(phase: Phase, started: bool) -> Phase {
+    match (phase, started) {
+        (Phase::Starting, true) => Phase::Recording,
+        (Phase::Starting, false) => Phase::Idle,
+        (other, _) => other,
     }
 }
 
@@ -128,6 +145,8 @@ pub struct Recorded {
     /// `None` when the screen recording failed to finish: the package is
     /// then audio, transcript and ink only, with no frames.
     pub video: Option<Recording>,
+    /// When `video` is `None`, the MP4 the failed stop left behind, if any.
+    pub partial_video: Option<PathBuf>,
 }
 
 /// The `annotation.json` for a session. Without video there is nothing to
@@ -192,17 +211,19 @@ impl Packaged {
 /// was handled; the time from it to here is stored as `packagingMs`.
 ///
 /// A failed transcription or failed frames still leave a package, without
-/// that part, and come back as `warning`. Only failing to write the folder
-/// itself is an error.
+/// that part, and come back as `warning`. So does audio or video that failed
+/// to stop: whatever was captured is kept and the package is marked partial.
+/// Only failing to write the folder itself is an error.
 pub fn package(
     folder: &Path,
-    samples: &[f32],
+    samples: Result<&[f32], Problem>,
     recorded: Recorded,
     stopped: Instant,
     transcribe: impl FnOnce(&[f32]) -> Result<Vec<Word>, Problem>,
 ) -> io::Result<Packaged> {
     std::fs::create_dir_all(folder)?;
     let mut warnings: Vec<Problem> = Vec::new();
+    let mut partial: Vec<String> = Vec::new();
     let video = match recorded.video {
         Some(recording) => match move_file(&recording.path, &folder.join(VIDEO_FILE)) {
             Ok(()) => Some(Video {
@@ -221,19 +242,63 @@ pub fn package(
             }
         },
         None => {
-            warnings.push(no_images().because("The screen recording did not finish"));
+            let kept = recorded.partial_video.and_then(|from| {
+                move_file(&from, &folder.join(PARTIAL_VIDEO_FILE))
+                    .inspect_err(|error| {
+                        log::warn!("[annotate] keep partial {}: {error}", from.display())
+                    })
+                    .ok()
+            });
+            let (note, fix) = match kept {
+                Some(()) => (
+                    format!(
+                        "Video cut short: the screen recording did not finish, so there are no frames. What it caught is in {PARTIAL_VIDEO_FILE}."
+                    ),
+                    format!(
+                        "The screen recording stopped early, so there are no frames. What it caught is in {PARTIAL_VIDEO_FILE}."
+                    ),
+                ),
+                None => (
+                    "No video: the screen recording did not finish, so there are no frames."
+                        .to_string(),
+                    "The screen recording did not finish, so there are no frames. The summary and audio are in the folder."
+                        .to_string(),
+                ),
+            };
+            partial.push(note);
+            warnings.push(partial_saved(fix).because("The screen recording did not finish"));
             None
         }
     };
-    crate::audio::save_wav(&folder.join(AUDIO_FILE), samples).map_err(io::Error::other)?;
+    let samples = match samples {
+        Ok(samples) => Some(samples),
+        Err(error) => {
+            partial.push(
+                "No audio: the microphone did not stop cleanly, so there is no transcript.".into(),
+            );
+            warnings.push(
+                partial_saved("There is no audio or transcript. Record again to get them.")
+                    .because(error),
+            );
+            None
+        }
+    };
+    // Without audio an empty WAV keeps `audio.file` pointing at a real file.
+    crate::audio::save_wav(&folder.join(AUDIO_FILE), samples.unwrap_or_default())
+        .map_err(io::Error::other)?;
 
     let transcribing = Instant::now();
-    let words = transcribe(samples).unwrap_or_else(|error| {
-        warnings.push(
-            Problem::new("Annotation saved without a transcript", error.fix.clone()).because(error),
-        );
-        Vec::new()
-    });
+    let words = match samples.map(transcribe) {
+        Some(Ok(words)) => words,
+        Some(Err(error)) => {
+            warnings.push(
+                Problem::new("Annotation saved without a transcript", error.fix.clone())
+                    .because(error),
+            );
+            Vec::new()
+        }
+        None => Vec::new(),
+    };
     let transcribe_ms = elapsed_ms(transcribing);
 
     let mut annotation = annotation(
@@ -257,6 +322,7 @@ pub fn package(
         false => None,
     };
     annotation.packaging_ms = Some(elapsed_ms(stopped));
+    annotation.partial = partial;
     let summary = package::write_package(folder, &annotation)?;
     Ok(Packaged {
         folder: folder.to_path_buf(),
@@ -267,6 +333,10 @@ pub fn package(
         rendered,
         warning: warnings.into_iter().reduce(Problem::and),
     })
+}
+
+fn partial_saved(fix: impl Into<String>) -> Problem {
+    Problem::new("Partial annotation saved", fix)
 }
 
 fn no_images() -> Problem {
@@ -308,6 +378,8 @@ pub struct AnnotationEntry {
     pub has_contact_sheet: bool,
     #[ts(type = "number | null")]
     pub packaging_ms: Option<u64>,
+    /// What a partial session lost, one sentence each. Empty when whole.
+    pub partial: Vec<String>,
 }
 
 /// The sessions under `dir`, newest first. Folders without a readable
@@ -344,6 +416,7 @@ pub fn list(dir: &Path) -> io::Result<Vec<AnnotationEntry>> {
                 text: annotation.transcript.text,
                 folder: folder.display().to_string(),
                 packaging_ms: annotation.packaging_ms,
+                partial: annotation.partial,
             })
         })
         .take(LIST_LIMIT)
@@ -451,11 +524,21 @@ mod tests {
     fn tap_starts_tap_stops_and_packaging_returns_to_idle() {
         let mut phase = Phase::Idle;
         phase = tap(phase, true);
+        assert_eq!(phase, Phase::Starting);
+        phase = screen_started(phase, true);
         assert_eq!(phase, Phase::Recording);
         phase = tap(phase, true);
         assert_eq!(phase, Phase::Packaging);
         phase = packaged(phase);
         assert_eq!(phase, Phase::Idle);
+    }
+
+    #[test]
+    fn taps_while_the_screen_starts_are_ignored_and_a_failed_start_is_idle() {
+        assert_eq!(tap(Phase::Starting, true), Phase::Starting);
+        assert_eq!(screen_started(Phase::Starting, false), Phase::Idle);
+        assert_eq!(screen_started(Phase::Packaging, true), Phase::Packaging);
+        assert!(blocks_dictation(Phase::Starting));
     }
 
     #[test]
@@ -592,6 +675,7 @@ mod tests {
             model: "ggml-base.en".into(),
             strokes,
             video: None,
+            partial_video: None,
         }
     }
 
@@ -603,7 +687,7 @@ mod tests {
 
         let packaged = package(
             &folder,
-            &samples,
+            Ok(&samples),
             recorded(Vec::new()),
             Instant::now(),
             |_| Ok(vec![word(500, 800, "Hello.")]),
@@ -629,10 +713,88 @@ mod tests {
         );
         assert!(packaged.summary.contains("“Hello.”"));
         assert!(packaged.contact_sheet().is_none());
+        assert_eq!(packaged.warning.unwrap().title, "Partial annotation saved");
         assert_eq!(
-            packaged.warning.unwrap().title,
-            "Annotation saved without images"
+            packaged.annotation.partial,
+            ["No video: the screen recording did not finish, so there are no frames."]
         );
+    }
+
+    #[test]
+    fn a_failed_screen_stop_keeps_its_partial_mp4() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("2026-11-14_14-56-36");
+        let leftover = dir.path().join("dictate-screen-1").join("take.mp4");
+        std::fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+        std::fs::write(&leftover, b"partial").unwrap();
+        let mut session = recorded(Vec::new());
+        session.partial_video = Some(leftover.clone());
+
+        let packaged = package(&folder, Ok(&[0.0; 16_000]), session, Instant::now(), |_| {
+            Ok(vec![word(500, 800, "Hello.")])
+        })
+        .unwrap();
+
+        assert!(!leftover.exists());
+        assert_eq!(
+            std::fs::read(folder.join(PARTIAL_VIDEO_FILE)).unwrap(),
+            b"partial"
+        );
+        assert!(packaged.annotation.video.is_none());
+        assert!(packaged.annotation.partial[0].starts_with("Video cut short"));
+        assert!(
+            packaged
+                .summary
+                .contains("Partial session: Video cut short")
+        );
+        assert!(packaged.summary.contains("“Hello.”"));
+        assert_eq!(
+            list(dir.path()).unwrap()[0].partial,
+            packaged.annotation.partial
+        );
+    }
+
+    #[test]
+    fn a_failed_audio_stop_keeps_the_video_and_marks_the_session_partial() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("2026-11-14_14-56-36");
+        let mp4 = dir.path().join("take.mp4");
+        std::fs::write(&mp4, b"video").unwrap();
+        let mut session = recorded(Vec::new());
+        session.video = Some(Recording {
+            path: mp4,
+            offset_ms: 100,
+            width: 2560,
+            height: 1600,
+            fps: 15,
+            duration_ms: 9_000,
+        });
+
+        let packaged = package(
+            &folder,
+            Err(Problem::new("Microphone stopped badly", "Try again.")),
+            session,
+            Instant::now(),
+            |_| panic!("nothing to transcribe"),
+        )
+        .unwrap();
+
+        assert!(folder.join(VIDEO_FILE).is_file());
+        assert!(packaged.annotation.video.is_some());
+        assert_eq!(
+            hound::WavReader::open(folder.join(AUDIO_FILE))
+                .unwrap()
+                .duration(),
+            0
+        );
+        assert!(packaged.annotation.transcript.words.is_empty());
+        assert_eq!(
+            packaged.annotation.partial,
+            ["No audio: the microphone did not stop cleanly, so there is no transcript."]
+        );
+        let warning = packaged.warning.unwrap();
+        assert_eq!(warning.title, "Partial annotation saved");
+        assert!(warning.detail.unwrap().contains("Microphone stopped badly"));
     }
 
     #[test]
@@ -641,7 +803,7 @@ mod tests {
         let folder = dir.path().join("2026-11-14_14-56-36");
         let packaged = package(
             &folder,
-            &[0.0; 16_000],
+            Ok(&[0.0; 16_000]),
             recorded(Vec::new()),
             Instant::now(),
             |_| Err(Problem::new("Transcription failed", "Try again.")),
@@ -650,7 +812,7 @@ mod tests {
         assert!(folder.join(ANNOTATION_FILE).is_file());
         assert!(packaged.annotation.transcript.words.is_empty());
         let warning = packaged.warning.unwrap();
-        assert!(warning.title.contains("without images"), "{warning}");
+        assert_eq!(warning.title, "Partial annotation saved", "{warning}");
         assert!(warning.fix.contains("without a transcript"), "{warning}");
     }
 
@@ -667,7 +829,7 @@ mod tests {
             fps: 15,
             duration_ms: 9_000,
         });
-        let packaged = package(&folder, &[0.0; 16_000], session, Instant::now(), |_| {
+        let packaged = package(&folder, Ok(&[0.0; 16_000]), session, Instant::now(), |_| {
             Ok(Vec::new())
         })
         .unwrap();
@@ -694,7 +856,7 @@ mod tests {
             let words = vec![word(0, 300, text)];
             package(
                 &dir.path().join(id),
-                &[0.0; 1_600],
+                Ok(&[0.0; 1_600]),
                 session,
                 Instant::now(),
                 |_| Ok(words),
@@ -783,7 +945,7 @@ mod tests {
         let folder = temp.path().join(FOLDER).join(session_id(started().unix_ms));
         let mut session = recorded(Vec::new());
         session.model = crate::transcribe::model_name(&model);
-        let annotation = package(&folder, &samples, session, started_at, |samples| {
+        let annotation = package(&folder, Ok(&samples), session, started_at, |samples| {
             crate::transcribe::transcribe_timed(samples, &model)
         })
         .unwrap()

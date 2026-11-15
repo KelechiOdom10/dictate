@@ -89,6 +89,15 @@ meter {
 .row-warning {
   color: var(--error);
 }
+.annotation-partial {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--warning-surface);
+  color: var(--warning);
+  font-size: var(--font-sm);
+  line-height: var(--leading-body);
+}
 .annotation-actions {
   flex-wrap: wrap;
   margin-block-start: var(--space-3);
