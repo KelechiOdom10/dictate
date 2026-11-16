@@ -1,6 +1,47 @@
+use crate::focus::{focused_window_center, pointer};
 use crate::settings::OverlayPosition;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition};
+use tauri::{App, AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition};
+use tauri_nspanel::WebviewWindowExt;
+
+mod panel {
+    tauri_nspanel::tauri_panel! {
+        panel!(CapsulePanel {
+            config: {
+                can_become_key_window: false,
+                can_become_main_window: false,
+                is_floating_panel: true
+            }
+        })
+    }
+}
+
+/// Every Space, beside full-screen apps, and fixed during Space switches.
+pub fn collection_behavior() -> objc2_app_kit::NSWindowCollectionBehavior {
+    use objc2_app_kit::NSWindowCollectionBehavior as Behavior;
+    Behavior::CanJoinAllSpaces | Behavior::FullScreenAuxiliary | Behavior::Stationary
+}
+
+/// Turns the capsule into a non-activating panel, so it can show over a
+/// full-screen app or on any Space without taking focus from the app the user
+/// dictates into. Called once from `setup`, on the main thread.
+pub fn setup(app: &App) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Err(tauri::Error::WindowNotFound);
+    };
+    window.set_ignore_cursor_events(false)?;
+    window.set_focusable(false)?;
+    let panel = window.to_panel::<panel::CapsulePanel>()?;
+    panel
+        .add_style_mask(objc2_app_kit::NSWindowStyleMask::NonactivatingPanel)
+        .map_err(|e| tauri::Error::Io(std::io::Error::other(format!("{e:?}"))))?;
+    panel.set_level(tauri_nspanel::PanelLevel::Status.value());
+    panel.set_collection_behavior(collection_behavior());
+    panel.set_hides_on_deactivate(false);
+    panel.set_transparent(true);
+    panel.set_has_shadow(false);
+    Ok(())
+}
 
 static VISIBILITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -48,13 +89,20 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("Overlay unavailable")?;
-    let monitor = focused_window_center()
-        .and_then(|(x, y)| window.monitor_from_point(x, y).ok().flatten())
+    let monitor = [focused_window_center(), pointer()]
+        .into_iter()
+        .flatten()
+        .find_map(|(x, y)| window.monitor_from_point(x, y).ok().flatten())
         .or(window.primary_monitor().map_err(|e| e.to_string())?)
         .ok_or("No screen available")?;
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let area = monitor.work_area();
-    let margin = (24.0 * monitor.scale_factor()) as i32;
+    let clearance = if expected.phase == "annotating" {
+        crate::ink::BAR_CLEARANCE
+    } else {
+        0.0
+    };
+    let margin = ((24.0 + clearance) * monitor.scale_factor()) as i32;
     let x = area.position.x + (area.size.width as i32 - size.width as i32) / 2;
     let y = match position {
         OverlayPosition::Top => area.position.y + margin,
@@ -128,91 +176,6 @@ pub fn resize(app: &AppHandle, width: f64, height: f64) -> Result<(), String> {
             },
         ))
         .map_err(|e| e.to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn focused_window_center() -> Option<(f64, f64)> {
-    None
-}
-
-/// How long one Accessibility call may wait on the focused app. The default is
-/// about 6 s, which would stall the hotkey on a hung app; past this we fall
-/// back to the main display.
-#[cfg(target_os = "macos")]
-const AX_TIMEOUT_SECONDS: f32 = 0.1;
-
-#[cfg(target_os = "macos")]
-fn focused_window_center() -> Option<(f64, f64)> {
-    use core_foundation::{
-        base::{CFType, CFTypeID, CFTypeRef, TCFType},
-        string::{CFString, CFStringRef},
-    };
-    use core_graphics::geometry::{CGPoint, CGSize};
-    use std::ffi::c_void;
-    #[link(name = "ApplicationServices", kind = "framework")]
-    unsafe extern "C" {
-        fn AXUIElementCreateSystemWide() -> CFTypeRef;
-        fn AXUIElementSetMessagingTimeout(element: CFTypeRef, timeout: f32) -> i32;
-        fn AXUIElementCopyAttributeValue(
-            element: CFTypeRef,
-            attribute: CFStringRef,
-            value: *mut CFTypeRef,
-        ) -> i32;
-        fn AXValueGetTypeID() -> CFTypeID;
-        fn AXValueGetType(value: CFTypeRef) -> u32;
-        fn AXValueGetValue(value: CFTypeRef, kind: u32, output: *mut c_void) -> bool;
-    }
-    fn attribute(element: &CFType, name: &str) -> Option<CFType> {
-        let mut value = std::ptr::null();
-        // SAFETY: element and key remain alive for the call; successful Copy returns an owned CF object.
-        let result = unsafe {
-            AXUIElementCopyAttributeValue(
-                element.as_CFTypeRef(),
-                CFString::new(name).as_concrete_TypeRef(),
-                &mut value,
-            )
-        };
-        if result != 0 || value.is_null() {
-            return None;
-        }
-        // SAFETY: checked successful Copy ownership above.
-        Some(unsafe { CFType::wrap_under_create_rule(value) })
-    }
-    // SAFETY: CreateSystemWide takes no arguments and returns an owned accessibility element.
-    let system = unsafe { CFType::wrap_under_create_rule(AXUIElementCreateSystemWide()) };
-    let limit = |element: &CFType| {
-        // SAFETY: element is a live AXUIElement for the duration of the call.
-        unsafe { AXUIElementSetMessagingTimeout(element.as_CFTypeRef(), AX_TIMEOUT_SECONDS) }
-    };
-    limit(&system);
-    let app = attribute(&system, "AXFocusedApplication")?;
-    limit(&app);
-    let window = attribute(&app, "AXFocusedWindow")?;
-    let position = attribute(&window, "AXPosition")?;
-    let size = attribute(&window, "AXSize")?;
-    let mut point = CGPoint::new(0.0, 0.0);
-    let mut dimensions = CGSize::new(0.0, 0.0);
-    // SAFETY: AXValue type checks establish the output layouts: CGPoint=1 and CGSize=2.
-    let valid = unsafe {
-        position.type_of() == AXValueGetTypeID()
-            && size.type_of() == AXValueGetTypeID()
-            && AXValueGetType(position.as_CFTypeRef()) == 1
-            && AXValueGetType(size.as_CFTypeRef()) == 2
-            && AXValueGetValue(
-                position.as_CFTypeRef(),
-                1,
-                (&mut point as *mut CGPoint).cast(),
-            )
-            && AXValueGetValue(
-                size.as_CFTypeRef(),
-                2,
-                (&mut dimensions as *mut CGSize).cast(),
-            )
-    };
-    valid.then_some((
-        point.x + dimensions.width / 2.0,
-        point.y + dimensions.height / 2.0,
-    ))
 }
 
 #[cfg(test)]

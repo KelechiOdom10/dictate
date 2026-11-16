@@ -479,41 +479,10 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (y, m, d)
 }
 
-/// The display under the pointer, which is the one Annotate records and draws
-/// on. Falls back to the main display.
+/// The display active at the start of the session; capture and ink keep it.
 #[cfg(target_os = "macos")]
 pub fn recorded_display() -> Display {
-    use core_graphics::display::CGDisplay;
-    let displays: Vec<Display> = CGDisplay::active_displays()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|id| display(CGDisplay::new(id)))
-        .collect();
-    let (x, y) = crate::annotate_ui::pointer().unwrap_or((0.0, 0.0));
-    crate::ink::display_at(&displays, x, y)
-        .cloned()
-        .unwrap_or_else(|| display(CGDisplay::main()))
-}
-
-/// A display in global points, as the package records it.
-#[cfg(target_os = "macos")]
-fn display(display: core_graphics::display::CGDisplay) -> Display {
-    let bounds = display.bounds();
-    let scale = if bounds.size.width > 0.0 {
-        display.pixels_wide() as f64 / bounds.size.width
-    } else {
-        1.0
-    };
-    Display {
-        id: display.id,
-        frame: package::Rect {
-            x: bounds.origin.x,
-            y: bounds.origin.y,
-            w: bounds.size.width,
-            h: bounds.size.height,
-        },
-        scale,
-    }
+    crate::focus::active_display()
 }
 
 #[cfg(test)]

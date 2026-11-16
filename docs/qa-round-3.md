@@ -88,6 +88,32 @@ entries record the phase and whether an error remains, without recording text.
 Do not repeat the whole checklist just to test this backend change. The other
 native gates below remain unverified unless the owner separately confirms them.
 
+## Overlay surfaces follow-up
+
+After a real Annotate capture the owner reported two overlay bugs. The Annotate
+bar ignored a saved Top position, and the dictation capsule did not appear over
+every window. The causes were:
+
+- `ink::bar_frame` always used the bottom edge, and Annotate never read the
+  saved `OverlayPosition`. It now takes the position: Top puts the bar 48 pt
+  below the display's top edge and Bottom keeps the old geometry.
+- The capsule was an ordinary always-on-top window, which macOS keeps out of
+  other Spaces and full-screen apps. It is now a non-activating panel, like
+  the Annotate panels. It cannot become key, it joins all Spaces beside
+  full-screen apps, it stays put during Space switches, and it sits at the
+  status window level.
+- Annotate picked the display under the pointer, and the capsule picked the
+  focused window's display, falling back to the primary display. Both now use
+  one rule: the display holding the focused window's centre, then the pointer's
+  display, then the main display. Annotate records and draws on that one
+  display only.
+- During Annotate the capsule only shows to carry a microphone notice. It now
+  sits clear of the bar, on the same edge, instead of behind it.
+
+Unit tests cover the bar's Top and Bottom geometry and the display choice,
+including displays with negative origins. Native behaviour is unverified. Use
+the overlay checks below.
+
 ## Manual verification
 
 No desktop input was automated. Browser screenshots and tests use an isolated
@@ -129,13 +155,19 @@ not native focus, activation or paste delivery.
 10. Complete one real Annotate session: record, draw, stop, then inspect the
     copied summary and saved package/contact sheet. Generated-video tests do
     not establish native capture, drawing or focus behavior.
+11. Overlay surfaces, with Overlay position set to Top. Start Annotate: the bar
+    sits near the top centre of the display you are working on, then repeat
+    with Bottom. Dictate with a full-screen app focused, then from a second
+    Space: the capsule appears on that display each time and the app keeps
+    keyboard focus, so typing still lands in it. With a second display, focus a
+    window there and start Annotate: only that display is recorded and drawn on.
 
 The owner can launch this checkout without reusing another worktree's frontend
 server. These commands have not been used to launch a native instance by the
 reviewer; port 1437 must be free, and Vite will fail rather than choose another:
 
 ```sh
-cd /Users/kelechiodom/.capy/worktrees/jam_01M7GEN019XF8W6HQQD5ADDRNJ/dictate-tray-restoration
+cd /Users/kelechiodom/.capy/worktrees/jam_01M7GEN019XF8W6HQQD5ADDRNJ/dictate-overlay-surfaces
 export PATH="$HOME/.nvm/versions/node/v24.22.2/bin:/opt/homebrew/bin:$PATH"
 source "$HOME/.cargo/env"
 export CARGO_TARGET_DIR="$HOME/Projects/dictate/target"
