@@ -31,7 +31,6 @@ function RecorderDemo({ disabled = false }: { disabled?: boolean }) {
         }}
         onError={setError}
       />
-      <Text>Press to change your shortcut. Escape or Tab cancels.</Text>
       {error && <Text role="alert">{error}</Text>}
     </VStack>
   );
