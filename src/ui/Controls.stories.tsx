@@ -1,3 +1,6 @@
+import { Mic } from "lucide-react";
+import { Button, IconButton } from "./Button";
+import { ShortcutRecorder } from "./ShortcutRecorder";
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
@@ -157,5 +160,86 @@ export const Search: Story = {
     );
     await expect(input).toHaveValue("");
     await expect(input).toHaveFocus();
+  },
+};
+
+export const ControlsSideBySide: Story = {
+  name: "Controls side by side",
+  render: () => {
+    const [query, setQuery] = useState("");
+    return (
+      <div className="control-comparison">
+        <h1>Controls side by side</h1>
+        <p className="ui-preview">
+          One scale · SF Pro · height / text / icon / gap
+        </p>
+        {(["sm", "md", "lg"] as const).map((size) => (
+          <section key={size}>
+            <h2>
+              {size} ·{" "}
+              {size === "sm"
+                ? "28 / 12 / 14 / 6"
+                : size === "md"
+                  ? "32 / 13 / 16 / 8"
+                  : "40 / 14 / 18 / 10"}{" "}
+              px
+            </h2>
+            <div className="story-row">
+              <Button size={size}>Test microphone</Button>
+              <IconButton size={size} label={`${size} microphone`}>
+                <Mic />
+              </IconButton>
+              <Select size={size} aria-label={`${size} mode`}>
+                <option>Hold to talk</option>
+                <option>Toggle</option>
+              </Select>
+              <SegmentedControl
+                size={size}
+                label={`${size} view`}
+                options={options.slice(0, 2)}
+                value="all"
+                onChange={() => {}}
+              />
+              <ShortcutRecorder
+                size={size}
+                value="Alt+Shift+Space"
+                recording={false}
+                onStart={() => {}}
+                onCancel={() => {}}
+                onCommit={() => {}}
+                onError={() => {}}
+              />
+              <SearchField
+                size={size}
+                label={`${size} search`}
+                value={query}
+                onChange={setQuery}
+              />
+              <Chip size={size}>Starred</Chip>
+              <Toggle size={size} aria-label={`${size} launch at login`} />
+            </div>
+          </section>
+        ))}
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    for (const [size, height, font] of [
+      ["sm", 28, 12],
+      ["md", 32, 13],
+      ["lg", 40, 14],
+    ] as const) {
+      const section = canvasElement
+        .querySelector(`.ui-button.ui-size-${size}`)
+        ?.closest("section");
+      if (!section) throw new Error(`Missing ${size} controls`);
+      for (const control of section.querySelectorAll(
+        "button:not(.ui-search button), select, .ui-search, .ui-segments, .ui-toggle",
+      )) {
+        await expect(control.getBoundingClientRect().height).toBe(height);
+        if (!control.classList.contains("ui-toggle"))
+          await expect(getComputedStyle(control).fontSize).toBe(`${font}px`);
+      }
+    }
   },
 };

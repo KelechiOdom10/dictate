@@ -41,14 +41,19 @@ export default function SettingsWindow() {
           items={pages.map(({ name, icon: Icon }) => ({
             value: name,
             label: name,
-            icon: <Icon size={17} strokeWidth={1.7} aria-hidden="true" />,
+            icon: <Icon size={17} strokeWidth={1.5} aria-hidden="true" />,
           }))}
           value={page}
           onChange={setPage}
         />
         <footer>
           <span>Version {version.data ?? "…"}</span>
-          <Button disabled title="Updates are coming in a later release">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled
+            title="Updates are coming in a later release"
+          >
             Check for updates
           </Button>
         </footer>

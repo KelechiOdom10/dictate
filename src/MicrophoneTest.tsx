@@ -58,11 +58,7 @@ export default function MicrophoneTest({
             : "Check your input level"}
         </span>
       </div>
-      <Button
-        className="text-button"
-        onClick={() => void onToggle()}
-        disabled={disabled}
-      >
+      <Button onClick={() => void onToggle()} disabled={disabled}>
         {testing ? "Stop test" : "Test microphone"}
       </Button>
     </div>

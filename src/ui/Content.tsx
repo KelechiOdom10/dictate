@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from "react";
+import { Check, CircleAlert, Info } from "lucide-react";
 import { Button } from "./Button";
 
 export function Card({ children }: { children: ReactNode }) {
@@ -76,7 +77,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="empty">
+    <div className="ui-empty">
       <h2>{title}</h2>
       <p>{children}</p>
       {action}
@@ -88,7 +89,7 @@ export function Toast({
   children,
   onDismiss,
 }: {
-  tone?: "success" | "warning" | "danger";
+  tone?: "success" | "warning" | "danger" | "info";
   children: ReactNode;
   onDismiss?: () => void;
 }) {
@@ -97,12 +98,14 @@ export function Toast({
       className={`ui-toast ui-toast-${tone}`}
       role={tone === "danger" ? "alert" : "status"}
     >
-      <span className="ui-toast-tone">
-        {tone === "success"
-          ? "Saved"
-          : tone === "warning"
-            ? "Attention"
-            : "Error"}
+      <span aria-hidden="true">
+        {tone === "success" ? (
+          <Check size={16} />
+        ) : tone === "info" ? (
+          <Info size={16} />
+        ) : (
+          <CircleAlert size={16} />
+        )}
       </span>
       <span>{children}</span>
       {onDismiss && (
@@ -157,12 +160,35 @@ export function ModelCard({
         {badge && <span className="ui-badge">{badge}</span>}
       </div>
       <p className="ui-preview">{description}</p>
-      <ProgressBar label="Accuracy" value={accuracy} />
-      <ProgressBar label="Speed" value={speed} />
+      <ModelRating name={name} label="Accuracy" value={accuracy} />
+      <ModelRating name={name} label="Speed" value={speed} />
       <div className="ui-model-footer">
         <span className="ui-date">{size}</span>
         {actions[status.kind]}
       </div>
     </Card>
+  );
+}
+
+function ModelRating({
+  name,
+  label,
+  value,
+}: {
+  name: string;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="ui-progress">
+      <span>{label}</span>
+      <meter
+        min={0}
+        max={100}
+        value={value}
+        aria-label={`${name} ${label.toLowerCase()}`}
+      />
+      <span className="ui-date">{value}%</span>
+    </div>
   );
 }

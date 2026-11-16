@@ -48,7 +48,6 @@ because it was slowing the build down.
 
 - New UI is built from `src/ui` components; every new or changed component ships
   with stories for its states. See `docs/design-system.md` for the component contracts.
-
 - The three pipeline stages stay separate and independently callable. A stage you
   cannot call alone is a stage you cannot measure alone.
 - Audio is 16 kHz mono f32 at every boundary. Convert once, at capture.

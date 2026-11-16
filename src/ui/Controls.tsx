@@ -4,17 +4,20 @@ import {
   type InputHTMLAttributes,
   type SelectHTMLAttributes,
 } from "react";
-import { Search, X } from "lucide-react";
-import { Button, IconButton } from "./Button";
+import { ChevronDown, Search, X } from "lucide-react";
+import { Button, IconButton, type ControlSize } from "./Button";
 
 export function Toggle({
   className = "",
+  size = "md",
   ...props
-}: Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "role">) {
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "role" | "size"> & {
+  size?: ControlSize;
+}) {
   return (
     <input
       {...props}
-      className={`ui-toggle ${className}`}
+      className={`ui-toggle ui-size-${size} ${className}`}
       type="checkbox"
       role="switch"
     />
@@ -22,9 +25,17 @@ export function Toggle({
 }
 export function Select({
   className = "",
+  size = "md",
   ...props
-}: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={`ui-select ${className}`} />;
+}: Omit<SelectHTMLAttributes<HTMLSelectElement>, "size"> & {
+  size?: ControlSize;
+}) {
+  return (
+    <span className={`ui-select-wrap ui-size-${size}`}>
+      <select {...props} className={`ui-select ${className}`} />
+      <ChevronDown aria-hidden="true" />
+    </span>
+  );
 }
 export function Chip({
   selected = false,
@@ -71,11 +82,13 @@ export function FilterChips({
   );
 }
 export function SegmentedControl({
+  size = "md",
   label,
   options,
   value,
   onChange,
 }: {
+  size?: ControlSize;
   label: string;
   options: Choice[];
   value: string;
@@ -83,7 +96,7 @@ export function SegmentedControl({
 }) {
   const name = useId();
   return (
-    <fieldset className="ui-segments">
+    <fieldset className={`ui-segments ui-size-${size}`}>
       <legend className="sr-only">{label}</legend>
       {options.map((option) => (
         <label key={option.value}>
@@ -102,12 +115,14 @@ export function SegmentedControl({
   );
 }
 export function SearchField({
+  size = "md",
   label,
   value,
   onChange,
   disabled,
   placeholder = "Search…",
 }: {
+  size?: ControlSize;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -117,7 +132,7 @@ export function SearchField({
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   return (
-    <div className="ui-search">
+    <div className={`ui-search ui-size-${size}`}>
       <Search size={16} aria-hidden="true" />
       <label className="sr-only" htmlFor={id}>
         {label}
@@ -133,6 +148,7 @@ export function SearchField({
       />
       {value && (
         <IconButton
+          size={size}
           label={`Clear ${label.toLowerCase()}`}
           variant="ghost"
           disabled={disabled}
