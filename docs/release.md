@@ -47,6 +47,17 @@ Individual steps, when you want them alone:
 | `pnpm icons:renders` | Renders every draft to `target/icon-renders/` for comparison |
 | `DICTATE_SIGNING_IDENTITY="…" pnpm sign:mac [app]` | Signs an existing bundle, fails loudly with no identity |
 | `pnpm dmg [app]` | Packs an existing bundle into `release/` |
+| `pnpm check:release-paths` | Proves the scripts find the bundle under `CARGO_TARGET_DIR` |
+
+**`CARGO_TARGET_DIR` is honoured.** The scripts ask cargo for its target
+directory (`scripts/target-dir.sh`, via `cargo metadata`) instead of assuming
+`src-tauri/target`, and `require_app` fails loudly naming the path it looked at.
+This matters because `CARGO_TARGET_DIR` is how the rest of this machine builds —
+[docs/qa-round-3.md](qa-round-3.md) sets it to the owner's checkout. With a
+shared cache the old hardcoded path compiled for seventeen minutes and then died
+at `lipo` with "can't open input file", signing and packing nothing. `pnpm check:release-paths` covers exactly that case, and a
+full run with `CARGO_TARGET_DIR` pointing at a moved cache now builds, signs,
+verifies and packs.
 
 CMake caches the first deployment target it sees, so after changing
 `minimumSystemVersion` the build fails with
@@ -191,11 +202,26 @@ codesign -d -r- src-tauri/target/aarch64-apple-darwin/release/bundle/macos/dicta
 
 With an ad-hoc signature it prints `cdhash H"…"`, which is different for every
 build. With the certificate it prints
-`identifier "com.kelechiodom.dictate" and certificate leaf = H"…"`, which stays
-the same, which is why a Microphone or Accessibility grant should survive the
-next build. That last step — install build two over build one with live grants
-and dictate — has not been run on this machine; it needs a second build and a
-real permission grant.
+`identifier "com.kelechiodom.dictate" and certificate leaf = H"…"`, which names
+the certificate instead of the build.
+
+Run on 16 Nov 2026 with a real certificate, `dictate local signing`, leaf
+`f7a2e7d3…`:
+
+- `pnpm release:mac` with `DICTATE_SIGNING_IDENTITY` set signs, then verifies:
+  `valid on disk`, `satisfies its Designated Requirement`, `origin=dictate local
+  signing`, and `spctl` still says `rejected` as above.
+- `codesign -d --entitlements -` shows `com.apple.security.device.audio-input`.
+- The designated requirement is
+  `identifier "com.kelechiodom.dictate" and certificate leaf = H"f7a2e7d3…"`,
+  and two bundles with **different contents** — one signed with an extra
+  resource file and therefore a different `cdhash` — carry the identical
+  requirement. That is the mechanism by which a grant is expected to survive an
+  update.
+
+Still unmeasured: installing build two over build one with live Microphone and
+Accessibility grants and dictating again. Everything up to that step is now
+observed; the last step needs a second Mac or a wiped permission state.
 
 ## Checking the DMG
 
@@ -218,9 +244,9 @@ Measured on 16 Nov 2026, macOS 27.0.1, Apple Silicon, rustc 1.99.1, with
 |---|---|---|
 | `--release` compile, empty `target/` | — | 3 min 12 s |
 | rebuild after an icon or config change | — | 1 min 31 s |
-| `dictate.app` | 17.57 MiB (17,996 KiB on disk) | |
-| `Contents/MacOS/dictate` | 17.51 MiB (18,358,704 bytes) | |
-| `dictate-0.1.0-arm64.dmg` | 7.54 MiB (7,909,931 bytes) | |
+| `dictate.app` | 17.59 MiB (18,012 KiB on disk) | |
+| `Contents/MacOS/dictate` | 17.53 MiB (18,376,784 bytes) | |
+| `dictate-0.1.0-arm64.dmg` | 7.56 MiB (7,927,596 bytes), signed | |
 
 The app is arm64 only: `lipo -archs` prints `arm64`. Its Info.plist carries
 `com.kelechiodom.dictate`, `LSMinimumSystemVersion 15.0` and the microphone
