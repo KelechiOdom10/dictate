@@ -23,6 +23,8 @@ const grid = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: "var(--spacing-2)",
+  maxWidth: "calc(var(--spacing-10) * 9)",
+  width: "100%",
 };
 
 function Window({ id, side }: { id: ThemeId; side: Side }) {
@@ -119,7 +121,13 @@ function Window({ id, side }: { id: ThemeId; side: Side }) {
 function Preview({ light, dark }: { light?: ThemeId; dark?: ThemeId }) {
   const clip = useId();
   return (
-    <svg viewBox="0 0 120 72" width="100%" aria-hidden="true" display="block">
+    <svg
+      viewBox="0 0 120 72"
+      width="100%"
+      style={{ maxWidth: "calc(var(--spacing-10) * 2)" }}
+      aria-hidden="true"
+      display="block"
+    >
       {light && <Window id={light} side="light" />}
       {dark && (
         <>
@@ -164,13 +172,13 @@ export function AppearancePicker({
   themeLight,
   themeDark,
   mode,
-  disabled,
+  disabledReason,
   onChange,
 }: {
   themeLight: ThemeId;
   themeDark: ThemeId;
   mode: AppearanceMode;
-  disabled: boolean;
+  disabledReason?: string;
   onChange: (patch: Partial<Settings>) => void;
 }) {
   const systemDark = useSystemDark();
@@ -191,7 +199,9 @@ export function AppearancePicker({
             isLabelHidden
             orientation="horizontal"
             value={mode}
-            isDisabled={disabled}
+            isDisabled={!!disabledReason}
+            disabledMessage={disabledReason}
+            size="sm"
             controlStyle={grid}
             onChange={(value) =>
               onChange({
@@ -223,7 +233,9 @@ export function AppearancePicker({
             isLabelHidden
             orientation="horizontal"
             value={themes[editing]}
-            isDisabled={disabled}
+            isDisabled={!!disabledReason}
+            disabledMessage={disabledReason}
+            size="sm"
             controlStyle={grid}
             onChange={(value) => {
               const id = settingsSchema.shape.themeLight.parse(value);

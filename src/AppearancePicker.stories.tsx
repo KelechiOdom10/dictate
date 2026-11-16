@@ -8,7 +8,7 @@ const meta = { title: "Components/AppearancePicker" } satisfies Meta;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-function Picker({ disabled = false }: { disabled?: boolean }) {
+function Picker({ disabledReason }: { disabledReason?: string }) {
   const [value, setValue] = useState<
     Pick<Settings, "themeLight" | "themeDark" | "appearanceMode">
   >({ themeLight: "ember", themeDark: "ember", appearanceMode: "light" });
@@ -17,7 +17,7 @@ function Picker({ disabled = false }: { disabled?: boolean }) {
       themeLight={value.themeLight}
       themeDark={value.themeDark}
       mode={value.appearanceMode}
-      disabled={disabled}
+      disabledReason={disabledReason}
       onChange={(patch) => setValue((current) => ({ ...current, ...patch }))}
     />
   );
@@ -52,11 +52,20 @@ export const EveryTheme: Story = {
   },
 };
 export const Disabled: Story = {
-  name: "AppearancePicker / while saving",
-  render: () => <Picker disabled />,
+  name: "AppearancePicker / while Annotate runs",
+  render: () => (
+    <Picker disabledReason="Stop Annotate before changing appearance." />
+  ),
   play: async ({ canvasElement }) => {
     const radios = within(canvasElement).getAllByRole("radio");
     await expect(radios).toHaveLength(8);
-    for (const radio of radios) await expect(radio).toBeDisabled();
+    for (const radio of radios)
+      await expect(radio).toHaveAttribute("aria-disabled", "true");
+    await userEvent.tab();
+    const light = within(canvasElement).getByRole("radio", { name: "Light" });
+    light.focus();
+    await expect(light).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    await expect(light).toBeChecked();
   },
 };

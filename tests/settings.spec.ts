@@ -38,6 +38,8 @@ async function openSettings(
     suspendFrames = false,
     history = [],
     annotations = [],
+    delaySave = false,
+    saveError = null,
   }: {
     failLoad?: boolean;
     startupError?: { title: string; fix: string; detail: string | null } | null;
@@ -49,6 +51,8 @@ async function openSettings(
     suspendFrames?: boolean;
     history?: { id: number }[];
     annotations?: { id: string }[];
+    delaySave?: boolean;
+    saveError?: string | null;
   } = {},
 ) {
   await page.route("http://dictate.test/**", async (route) => {
@@ -88,6 +92,8 @@ async function openSettings(
       suspendFrames,
       history,
       annotations,
+      delaySave,
+      saveError,
     }) => {
       if (suspendFrames) window.requestAnimationFrame = () => 1;
       const denied: string[] = [];
@@ -235,6 +241,14 @@ async function openSettings(
               return settings;
             }
             if (command === "save_settings") {
+              if (delaySave)
+                await new Promise<void>((resolve) => {
+                  Object.defineProperty(window, "__finishSave", {
+                    value: resolve,
+                    configurable: true,
+                  });
+                });
+              if (saveError) throw saveError;
               if (args.settings?.shortcut === "Super+KeyQ")
                 throw "Shortcut unavailable";
               Object.assign(settings, args.settings);
@@ -295,6 +309,8 @@ async function openSettings(
       suspendFrames,
       history,
       annotations,
+      delaySave,
+      saveError,
     },
   );
   await page.goto(
@@ -2395,6 +2411,180 @@ const rowBoxes = (rows: Locator) =>
       return [box.x, box.y, box.width, box.height].map(Math.round).join();
     }),
   );
+
+for (const initialMode of ["system", "light", "dark"] as const) {
+  test(`Appearance ${initialMode} arrows and Tab survive live palette changes`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await openSettings(page, {
+      pendingPage: "Appearance",
+      stored: { appearanceMode: initialMode },
+    });
+    const modes = page.getByRole("radiogroup", { name: "Mode", exact: true });
+    await expect(modes).toBeVisible();
+    await page.keyboard.press("Tab");
+    await modes
+      .getByRole("radio", {
+        name:
+          initialMode === "system"
+            ? "System"
+            : initialMode === "light"
+              ? "Light"
+              : "Dark",
+        exact: true,
+      })
+      .focus();
+    for (let step = 0; step < 3; step++) {
+      await page.keyboard.press("ArrowRight");
+      await expect
+        .poll(() =>
+          modes.evaluate(
+            (group) =>
+              group.contains(document.activeElement) &&
+              (document.activeElement as HTMLInputElement).checked,
+          ),
+        )
+        .toBe(true);
+    }
+    await page.keyboard.press("Tab");
+    const themes = page.getByRole("radiogroup", {
+      name: /^(Light|Dark) theme$/,
+    });
+    await expect
+      .poll(() =>
+        themes.evaluate((group) => group.contains(document.activeElement)),
+      )
+      .toBe(true);
+    for (const [name, palette] of [
+      ["Paper", "paper"],
+      ["Capy", "capy"],
+      ["Rosé Pine", "rosePine"],
+      ["Neutral", "neutral"],
+      ["Ember", "ember"],
+    ]) {
+      await page.keyboard.press("ArrowRight");
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-palette",
+        palette,
+      );
+      const radio = themes.getByRole("radio", { name, exact: true });
+      await expect(radio).toBeChecked();
+      await expect(radio).toBeFocused();
+    }
+    await page.keyboard.press("Shift+Tab");
+    await expect
+      .poll(() =>
+        modes.evaluate((group) => group.contains(document.activeElement)),
+      )
+      .toBe(true);
+    for (const width of [640, 720, 1100, 1512]) {
+      await page.setViewportSize({ width, height: 900 });
+      const previews = themes.locator("svg");
+      for (const rect of await previews.evaluateAll((els) =>
+        els.map((el) => el.getBoundingClientRect().toJSON()),
+      )) {
+        expect(rect.width).toBeLessThanOrEqual(80);
+        expect(rect.height).toBeLessThanOrEqual(48);
+      }
+    }
+  });
+}
+
+test("Appearance retains focus while saving and when the runtime rejects a save", async ({
+  page,
+}) => {
+  await openSettings(page, {
+    pendingPage: "Appearance",
+    delaySave: true,
+    saveError: "Stop Annotate before changing settings",
+  });
+  const modes = page.getByRole("radiogroup", { name: "Mode", exact: true });
+  const system = modes.getByRole("radio", { name: "System", exact: true });
+  await expect(system).toBeVisible();
+  await page.keyboard.press("Tab");
+  await system.focus();
+  await page.keyboard.press("ArrowRight");
+  const light = modes.getByRole("radio", { name: "Light", exact: true });
+  await expect(light).toBeChecked();
+  await expect(light).toBeFocused();
+  await expect(light).not.toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByRole("status")).toHaveText("Saving…");
+  await page.evaluate(() =>
+    (window as unknown as { __finishSave: () => void }).__finishSave(),
+  );
+  await expect(page.getByRole("alert")).toContainText(
+    "Stop Annotate before changing settings",
+  );
+  await expect(system).toBeChecked();
+  await expect(light).toBeFocused();
+});
+
+for (const phase of ["recording", "transcribing", "annotating", "packaging"]) {
+  test(`Appearance explains ${phase} safety without losing keyboard navigation`, async ({
+    page,
+  }) => {
+    await openSettings(page, { pendingPage: "Appearance" });
+    const mode = page.getByRole("radiogroup", { name: "Mode", exact: true });
+    const themes = page.getByRole("radiogroup", {
+      name: /^(Light|Dark) theme$/,
+    });
+    const system = mode.getByRole("radio", { name: "System", exact: true });
+    await expect(system).toBeVisible();
+    await system.focus();
+    await page.evaluate(
+      (phase) =>
+        window.postMessage(
+          {
+            type: "dictate-test",
+            event: "dictation-state",
+            payload: { phase, error: null },
+          },
+          "*",
+        ),
+      phase,
+    );
+    const reason =
+      phase === "annotating" || phase === "packaging"
+        ? "Stop Annotate before changing appearance."
+        : "Finish dictating before changing appearance.";
+    await expect(
+      page.getByRole("status").filter({ hasText: reason }),
+    ).toBeVisible();
+    await expect(system).toHaveAttribute("aria-disabled", "true");
+    await expect(system).toBeFocused();
+    await system.press("Tab");
+    await expect
+      .poll(() =>
+        themes.evaluate((group) => group.contains(document.activeElement)),
+      )
+      .toBe(true);
+    const before = await sentCommands(page);
+    await page.keyboard.press("ArrowRight");
+    await expect(
+      themes.getByRole("radio", { name: "Ember", exact: true }),
+    ).toBeChecked();
+    expect(
+      (await sentCommands(page)).filter((c) => c === "save_settings"),
+    ).toEqual(before.filter((c) => c === "save_settings"));
+    await page.evaluate(() =>
+      window.postMessage(
+        {
+          type: "dictate-test",
+          event: "dictation-state",
+          payload: { phase: "idle", error: null },
+        },
+        "*",
+      ),
+    );
+    await expect(system).not.toHaveAttribute("aria-disabled", "true");
+    await expect
+      .poll(() =>
+        themes.evaluate((group) => group.contains(document.activeElement)),
+      )
+      .toBe(true);
+  });
+}
 
 test("General keyboard order and control actions survive the focus polish", async ({
   page,
