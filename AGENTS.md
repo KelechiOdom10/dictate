@@ -31,6 +31,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 | `src-tauri/src/screen.rs` | Annotate screen recording. `start`/`stop`, one display to MP4 |
 | `models/` | Whisper GGML weights. Never committed. |
 | `docs/` | The spike question, and later the kickoff docs |
+| `site/` | The static download page for dictate.kellycooks.dev; see `site/README.md` |
 
 ## Who writes what
 

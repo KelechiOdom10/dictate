@@ -1,0 +1,260 @@
+---
+import Icon from "../components/Icon.astro";
+import Mark from "../components/Mark.astro";
+import geist from "../assets/fonts/geist-latin.woff2?url";
+import { release } from "../release";
+import "../styles/site.css";
+
+const requirement = `Apple Silicon, macOS 15 or later, ${release.size}`;
+
+const themes = [
+  {
+    name: "Ember",
+    light: { plate: "oklch(0.985 0.003 75)", ink: "oklch(0.22 0.006 75)", live: "#DF5822" },
+    dark: { plate: "oklch(0.25 0.008 75)", ink: "oklch(0.95 0.006 75)", live: "#F67D51" },
+  },
+  {
+    name: "Paper",
+    light: { plate: "#fbfaf7", ink: "#1c1b19", live: "#1c1b19" },
+    dark: { plate: "#252421", ink: "#f3f1ec", live: "#f3f1ec" },
+  },
+  {
+    name: "Capy",
+    light: { plate: "#f5f6fc", ink: "#1a1d38", live: "#a99cf5" },
+    dark: { plate: "#171a34", ink: "#d2daf6", live: "#a99cf5" },
+  },
+  {
+    name: "Rosé Pine",
+    light: { plate: "#fffaf3", ink: "#575279", live: "#c4a7e7" },
+    dark: { plate: "#26233a", ink: "#e0def4", live: "#c4a7e7" },
+  },
+  {
+    name: "Neutral",
+    light: { plate: "#ffffff", ink: "#18181b", live: "#18181b" },
+    dark: { plate: "#18181b", ink: "#f4f4f5", live: "#f4f4f5" },
+  },
+];
+
+const swatch = (colors: { plate: string; ink: string; live: string }) =>
+  `--plate: ${colors.plate}; --ink: ${colors.ink}; --live: ${colors.live}`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dictate: hold a key, speak, and it types</title>
+    <meta
+      name="description"
+      content="Hold Option-Shift-Space, speak, and the text appears wherever you are. Local, on-device dictation for Mac. No account."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href={geist} as="font" type="font/woff2" crossorigin />
+    <script is:inline>
+      try {
+        const mode = localStorage.getItem("dictate-mode");
+        if (mode === "light" || mode === "dark") document.documentElement.dataset.mode = mode;
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="bar-top wrap">
+      <a class="brand" href="/" aria-label="dictate home">
+        <Mark class="brand-mark" />
+        <span>dictate</span>
+      </a>
+      <fieldset class="modes">
+        <legend class="visually-hidden">Appearance</legend>
+        <label title="Match system">
+          <input type="radio" name="mode" value="system" checked />
+          <Icon name="monitor" />
+          <span class="visually-hidden">Match system</span>
+        </label>
+        <label title="Light">
+          <input type="radio" name="mode" value="light" />
+          <Icon name="sun" />
+          <span class="visually-hidden">Light</span>
+        </label>
+        <label title="Dark">
+          <input type="radio" name="mode" value="dark" />
+          <Icon name="moon" />
+          <span class="visually-hidden">Dark</span>
+        </label>
+      </fieldset>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="title">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <h1 id="title">Talk where you&nbsp;type.</h1>
+            <p class="lead">
+              Hold Option-Shift-Space, speak, and the text appears wherever you are. Local,
+              on-device, no account.
+            </p>
+            <div class="cta">
+              <a class="button" href={release.href} download>
+                <Icon name="download" />
+                Download for Mac
+              </a>
+              <p class="meta">{requirement}</p>
+            </div>
+          </div>
+
+          <div class="stage" data-stage>
+            <span class="tile tile-mic"><Icon name="mic" /></span>
+            <span class="tile tile-lock"><Icon name="lock" /></span>
+            <span class="tile tile-type"><Icon name="type" /></span>
+            <span class="tile tile-pen"><Icon name="pen" /></span>
+            <Mark class="hero-mark" label="The dictate icon: five bars, the middle one lit" />
+            <button
+              class="keys"
+              type="button"
+              data-keys
+              aria-label="Option Shift Space: hold to listen"
+              aria-pressed="false"
+              aria-describedby="keys-hint"
+            >
+              <kbd>⌥</kbd><kbd>⇧</kbd><kbd class="space">Space</kbd>
+            </button>
+            <p class="hint" id="keys-hint" aria-live="polite" data-hint>Hold the keys</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="wrap section" id="download" aria-labelledby="download-title">
+        <h2 id="download-title" class="visually-hidden">Download and install</h2>
+        <dl class="install">
+          <div>
+            <dt>Download</dt>
+            <dd>
+              <a class="file" href={release.href} download>{release.file}</a>
+              <span class="meta">{requirement}</span>
+            </dd>
+          </div>
+          <div>
+            <dt>Install</dt>
+            <dd>
+              Drag dictate into Applications. The first time, right-click it and choose Open,
+              because it is not notarised by Apple. Then allow the microphone and Accessibility,
+              and download a speech model (about 700 MB) from Models.
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="wrap section split" aria-labelledby="annotate-title">
+        <div>
+          <h2 id="annotate-title">Annotate</h2>
+          <p class="lead">Show an AI agent what you mean, not just what you said.</p>
+          <ol class="steps">
+            <li><strong>Record.</strong> Tap Option-Shift-A to record your screen and voice.</li>
+            <li><strong>Draw.</strong> Hold the shortcut and move the pointer. Ink follows, then fades.</li>
+            <li><strong>Talk.</strong> Say what you are pointing at, the way you would to a colleague.</li>
+            <li><strong>Copy.</strong> Tap again. A summary is on your clipboard, pointing at the package.</li>
+          </ol>
+        </div>
+        <figure class="package">
+          <figcaption><Icon name="folder" /> One package per take</figcaption>
+          <ul>
+            <li>recording.mp4</li>
+            <li>audio.wav</li>
+            <li>frames/frame-01.png</li>
+            <li>contact-sheet.png</li>
+            <li>annotation.json</li>
+            <li class="pasted">summary.md <span>on your clipboard</span></li>
+          </ul>
+        </figure>
+      </section>
+
+      <section class="wrap section" aria-labelledby="themes-title">
+        <h2 id="themes-title">Five themes, light and dark</h2>
+        <p class="lead">Each one follows your system, or stays where you put it.</p>
+        <ul class="themes">
+          {
+            themes.map((theme) => (
+              <li>
+                <span class="pair">
+                  <span class="swatch" style={swatch(theme.light)}>
+                    <Mark />
+                  </span>
+                  <span class="swatch" style={swatch(theme.dark)}>
+                    <Mark />
+                  </span>
+                </span>
+                {theme.name}
+              </li>
+            ))
+          }
+        </ul>
+      </section>
+    </main>
+
+    <footer class="wrap foot">
+      <p>
+        dictate {release.version}. Speech is turned into text on your Mac; the only thing it
+        downloads is the speech model.
+      </p>
+    </footer>
+
+    <script>
+      const root = document.documentElement;
+      const stage = document.querySelector<HTMLElement>("[data-stage]")!;
+      const keys = document.querySelector<HTMLButtonElement>("[data-keys]")!;
+      const hint = document.querySelector<HTMLElement>("[data-hint]")!;
+
+      const listen = (on: boolean) => {
+        if (stage.hasAttribute("data-listening") === on) return;
+        stage.toggleAttribute("data-listening", on);
+        keys.setAttribute("aria-pressed", String(on));
+        hint.textContent = on ? "Listening" : "Hold the keys";
+      };
+      const stop = () => listen(false);
+
+      keys.addEventListener("pointerdown", (event) => {
+        keys.setPointerCapture(event.pointerId);
+        listen(true);
+      });
+      keys.addEventListener("pointerup", stop);
+      keys.addEventListener("pointercancel", stop);
+      keys.addEventListener("lostpointercapture", stop);
+      keys.addEventListener("blur", stop);
+      keys.addEventListener("keydown", (event) => {
+        if (event.key !== " " && event.key !== "Enter") return;
+        event.preventDefault();
+        listen(true);
+      });
+      keys.addEventListener("keyup", (event) => {
+        if (event.key === " " || event.key === "Enter") stop();
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.code !== "Space" || !event.altKey || !event.shiftKey) return;
+        event.preventDefault();
+        listen(true);
+      });
+      window.addEventListener("keyup", (event) => {
+        if (event.code === "Space" || event.key === "Alt" || event.key === "Shift") stop();
+      });
+      window.addEventListener("blur", stop);
+
+      const saved = root.dataset.mode ?? "system";
+      for (const input of document.querySelectorAll<HTMLInputElement>('input[name="mode"]')) {
+        input.checked = input.value === saved;
+        input.addEventListener("change", () => {
+          if (input.value === "system") {
+            delete root.dataset.mode;
+            localStorage.removeItem("dictate-mode");
+          } else {
+            root.dataset.mode = input.value;
+            localStorage.setItem("dictate-mode", input.value);
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

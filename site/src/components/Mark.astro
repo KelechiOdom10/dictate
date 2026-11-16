@@ -1,0 +1,22 @@
+---
+interface Props {
+  class?: string;
+  label?: string;
+}
+const { class: className, label } = Astro.props;
+---
+
+<svg
+  class:list={["mark", className]}
+  viewBox="100 100 824 824"
+  role={label ? "img" : undefined}
+  aria-label={label}
+  aria-hidden={label ? undefined : "true"}
+>
+  <rect class="plate" x="100.5" y="100.5" width="823" height="823" rx="184.5"></rect>
+  <rect class="bar" x="280" y="430" width="64" height="164" rx="32"></rect>
+  <rect class="bar" x="380" y="360" width="64" height="304" rx="32"></rect>
+  <rect class="bar live" x="480" y="280" width="64" height="464" rx="32"></rect>
+  <rect class="bar" x="580" y="340" width="64" height="344" rx="32"></rect>
+  <rect class="bar" x="680" y="410" width="64" height="204" rx="32"></rect>
+</svg>
