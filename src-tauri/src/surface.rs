@@ -62,8 +62,8 @@ fn icon(phase: &str) -> Image<'static> {
     let mut pixels = vec![0; 22 * 22 * 4];
     let heights = match phase {
         "error" => [20, 4, 20, 4, 20],
-        "recording" => [6, 14, 20, 12, 6],
-        "transcribing" => [12, 6, 12, 6, 12],
+        "recording" | "annotating" => [6, 14, 20, 12, 6],
+        "transcribing" | "packaging" => [12, 6, 12, 6, 12],
         _ => [4, 8, 12, 8, 4],
     };
     for (bar, height) in heights.into_iter().enumerate() {
@@ -94,6 +94,13 @@ fn refresh_tray(app: &AppHandle) {
         if let Err(error) = tray.set_tooltip(Some(tooltip)) {
             log::warn!("[tray] {error}");
         }
+    }
+}
+
+/// Tell the overlay to read the status again, after a notice changed.
+pub fn refresh(app: &AppHandle) {
+    if let Err(error) = app.emit("dictation-state", status(app).phase) {
+        log::warn!("[tray] {error}");
     }
 }
 

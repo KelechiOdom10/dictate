@@ -77,6 +77,7 @@ async function openSettings(
         micMode: "onDemand",
         soundFeedback: false,
         debugRecordings: false,
+        annotateShortcut: "Alt+Shift+KeyS",
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
         value: { unregisterListener: () => {} },
@@ -319,6 +320,7 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           micMode: "onDemand",
           soundFeedback: false,
           debugRecordings: false,
+          annotateShortcut: "Alt+Shift+KeyS",
         },
       },
       "*",
@@ -492,6 +494,7 @@ test("overlay applies appearance events live, including System changes", async (
                 micMode: "onDemand",
                 soundFeedback: false,
                 debugRecordings: false,
+                annotateShortcut: "Alt+Shift+KeyS",
               },
             },
             "*",
@@ -549,6 +552,40 @@ test("overlay renders live level, resets its timer and keeps terminal states dis
   await expect(page.getByRole("status")).toContainText("Hold the shortcut");
 });
 
+test("overlay shows an Annotate session, its blocked-dictation notice and the save", async ({
+  page,
+}) => {
+  await openSettings(page, { overlay: true });
+  const state = async (phase: string, notice: string | null = null) => {
+    await page.evaluate(
+      ({ phase, notice }) =>
+        window.postMessage(
+          {
+            type: "dictate-test",
+            event: "dictation-state",
+            payload: { phase, error: null, notice },
+          },
+          "*",
+        ),
+      { phase, notice },
+    );
+  };
+  await state("annotating");
+  await expect(page.getByRole("status")).toHaveText("Annotating");
+  await expect(page.locator(".ui-timer")).toHaveText("00:01");
+  await expect(page.getByRole("meter")).toHaveCount(0);
+  await state("annotating", "Dictation is off while Annotate records");
+  await expect(page.getByRole("status")).toHaveText(
+    "AnnotatingDictation is off while Annotate records",
+  );
+  await page.screenshot({ path: "target/overlay-annotate-blocked.png" });
+  await state("packaging");
+  await expect(page.getByRole("status")).toHaveText("Saving annotation…");
+  await expect(page.locator(".ui-timer")).toHaveCount(0);
+  await state("annotated");
+  await expect(page.getByRole("status")).toHaveText("Annotation saved");
+});
+
 test("invalid appearance events show a recoverable overlay error", async ({
   page,
 }) => {
@@ -600,6 +637,7 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 micMode: "onDemand",
                 soundFeedback: false,
                 debugRecordings: false,
+                annotateShortcut: "Alt+Shift+KeyS",
               },
             },
             "*",
@@ -616,6 +654,9 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
         "transcribing",
         "done",
         "skipped",
+        "annotating",
+        "packaging",
+        "annotated",
         "error",
       ]) {
         await page.evaluate(

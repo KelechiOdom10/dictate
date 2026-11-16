@@ -24,4 +24,5 @@ export type Settings = {
   micMode: MicMode;
   soundFeedback: boolean;
   debugRecordings: boolean;
+  annotateShortcut: string;
 };

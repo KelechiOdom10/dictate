@@ -66,6 +66,9 @@ export const AllStates: Story = {
         state={{ kind: "recording", seconds: 33, level: 0.65 }}
       />
       <RecordingCapsule state={{ kind: "transcribing" }} />
+      <RecordingCapsule state={{ kind: "annotating", seconds: 10 }} />
+      <RecordingCapsule state={{ kind: "packaging" }} />
+      <RecordingCapsule state={{ kind: "annotated" }} />
       <RecordingCapsule state={{ kind: "done" }} />
       <RecordingCapsule state={{ kind: "copied" }} />
       <RecordingCapsule state={{ kind: "skipped" }} />
@@ -106,4 +109,31 @@ export const MissingMicrophone: Story = {
     notice: "Using the default microphone",
     shortcut: <KeyboardShortcut value="Alt+Shift+Space" />,
   },
+};
+
+export const Annotating: Story = {
+  args: { state: { kind: "annotating", seconds: 10 } },
+  play: async ({ canvasElement }) => {
+    const capsule = within(canvasElement);
+    await expect(capsule.getByRole("status")).toHaveTextContent("Annotating");
+    await expect(capsule.getByText("00:10")).toBeVisible();
+  },
+};
+export const AnnotatingDictationBlocked: Story = {
+  name: "Annotating / dictation blocked",
+  args: {
+    state: { kind: "annotating", seconds: 42 },
+    notice: "Dictation is off while Annotate records",
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("status")).toHaveTextContent(
+      "AnnotatingDictation is off while Annotate records",
+    );
+  },
+};
+export const AnnotationPackaging: Story = {
+  args: { state: { kind: "packaging" } },
+};
+export const AnnotationSaved: Story = {
+  args: { state: { kind: "annotated" } },
 };

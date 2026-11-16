@@ -3,6 +3,7 @@ import {
   Check,
   CircleAlert,
   ClipboardCheck,
+  FolderCheck,
   LoaderCircle,
   Mic,
   MicOff,
@@ -33,8 +34,15 @@ export function LevelMeter({
     </div>
   );
 }
+function clock(seconds: number) {
+  const pad = (value: number) => Math.floor(value).toString().padStart(2, "0");
+  return `${pad(seconds / 60)}:${pad(seconds % 60)}`;
+}
 export type RecordingState =
   | { kind: "recording"; seconds: number; level?: number }
+  | { kind: "annotating"; seconds: number }
+  | { kind: "packaging" }
+  | { kind: "annotated" }
   | { kind: "transcribing" }
   | { kind: "done" }
   | { kind: "copied" }
@@ -57,6 +65,9 @@ export function RecordingCapsule({
     done: "Text inserted",
     copied: "Copied to clipboard",
     skipped: "No speech captured",
+    annotating: "Annotating",
+    packaging: "Saving annotation…",
+    annotated: "Annotation saved",
   };
   const icons: Record<RecordingState["kind"], ReactNode> = {
     ready: <Mic size={18} />,
@@ -65,6 +76,9 @@ export function RecordingCapsule({
     done: <Check size={18} />,
     copied: <ClipboardCheck size={18} />,
     skipped: <MicOff size={18} />,
+    annotating: <span className="ui-record-dot" />,
+    packaging: <LoaderCircle size={18} className="ui-spin" />,
+    annotated: <FolderCheck size={18} />,
     error: <CircleAlert size={18} />,
   };
   return (
@@ -91,19 +105,11 @@ export function RecordingCapsule({
           <span className="ui-capsule-message">{state.fix}</span>
         )}
       </div>
-      {state.kind === "recording" && (
-        <>
-          <span className="ui-timer">
-            {Math.floor(state.seconds / 60)
-              .toString()
-              .padStart(2, "0")}
-            :
-            {Math.floor(state.seconds % 60)
-              .toString()
-              .padStart(2, "0")}
-          </span>
-          {state.level !== undefined && <LevelMeter level={state.level} />}
-        </>
+      {(state.kind === "recording" || state.kind === "annotating") && (
+        <span className="ui-timer">{clock(state.seconds)}</span>
+      )}
+      {state.kind === "recording" && state.level !== undefined && (
+        <LevelMeter level={state.level} />
       )}
       {shortcut}
     </div>

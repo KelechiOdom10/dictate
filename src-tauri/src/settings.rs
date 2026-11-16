@@ -112,6 +112,8 @@ pub struct Settings {
     pub sound_feedback: bool,
     #[serde(default)]
     pub debug_recordings: bool,
+    #[serde(default = "default_annotate_shortcut")]
+    pub annotate_shortcut: String,
 }
 
 fn enabled() -> bool {
@@ -122,6 +124,10 @@ const CURRENT_VERSION: u32 = 1;
 
 fn default_shortcut() -> String {
     "Alt+Shift+Space".into()
+}
+
+fn default_annotate_shortcut() -> String {
+    "Alt+Shift+KeyS".into()
 }
 
 impl Default for Settings {
@@ -144,6 +150,7 @@ impl Default for Settings {
             mic_mode: MicMode::OnDemand,
             sound_feedback: false,
             debug_recordings: false,
+            annotate_shortcut: default_annotate_shortcut(),
         }
     }
 }
@@ -165,9 +172,15 @@ impl Settings {
                 crate::models::info(self.speech_model).name
             ));
         }
+        if self.annotate_shortcut != previous.annotate_shortcut {
+            return Err("The Annotate shortcut can’t be changed yet".into());
+        }
         let shortcut = if self.shortcut != previous.shortcut {
             let old = previous.chord()?;
             let new = self.chord()?;
+            if self.annotate_chord().ok() == Some(new) {
+                return Err("That shortcut starts Annotate. Choose another.".into());
+            }
             (old != new).then_some((old, new))
         } else {
             None
@@ -182,15 +195,23 @@ impl Settings {
     }
 
     pub fn chord(&self) -> Result<Shortcut, String> {
-        let chord: Shortcut = self
-            .shortcut
-            .parse()
-            .map_err(|e| format!("Invalid shortcut: {e}"))?;
-        if chord.mods.is_empty() {
-            return Err("Choose a shortcut with Command, Option, Control or Shift".into());
-        }
-        Ok(chord)
+        parse_chord(&self.shortcut)
     }
+
+    /// Tap to start an Annotate session, tap again to stop.
+    pub fn annotate_chord(&self) -> Result<Shortcut, String> {
+        parse_chord(&self.annotate_shortcut)
+    }
+}
+
+fn parse_chord(shortcut: &str) -> Result<Shortcut, String> {
+    let chord: Shortcut = shortcut
+        .parse()
+        .map_err(|e| format!("Invalid shortcut: {e}"))?;
+    if chord.mods.is_empty() {
+        return Err("Choose a shortcut with Command, Option, Control or Shift".into());
+    }
+    Ok(chord)
 }
 
 pub fn load(path: &Path) -> Result<Settings, String> {
@@ -357,6 +378,7 @@ mod tests {
         assert_eq!(settings.mic_mode, MicMode::OnDemand);
         assert!(!settings.sound_feedback);
         assert!(!settings.debug_recordings);
+        assert_eq!(settings.annotate_shortcut, "Alt+Shift+KeyS");
         fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.version, 2);
@@ -430,5 +452,32 @@ mod tests {
             );
         }
         assert!(Settings::default().chord().is_ok());
+        assert!(Settings::default().annotate_chord().is_ok());
+    }
+
+    #[test]
+    fn the_annotate_shortcut_is_fixed_and_cannot_be_taken_by_dictation() {
+        let previous = Settings::default();
+        let no_devices = || Ok(Vec::new());
+        let changed = Settings {
+            annotate_shortcut: "Alt+Shift+KeyA".into(),
+            ..previous.clone()
+        };
+        assert!(
+            changed
+                .validate_changes(&previous, no_devices, |_| true)
+                .is_err()
+        );
+        let clash = Settings {
+            shortcut: previous.annotate_shortcut.clone(),
+            ..previous.clone()
+        };
+        assert_eq!(
+            clash
+                .validate_changes(&previous, no_devices, |_| true)
+                .err()
+                .as_deref(),
+            Some("That shortcut starts Annotate. Choose another.")
+        );
     }
 }
