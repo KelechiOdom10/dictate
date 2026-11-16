@@ -1495,11 +1495,13 @@ test("the sidebar sits a step behind the page in every theme and mode", async ({
 }) => {
   for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
     for (const mode of ["light", "dark"]) {
-      await openSettings(page, {
-        stored: { theme, appearanceMode: mode },
-      });
-      await expect(page.getByRole("navigation")).toBeVisible();
-      const surfaces = await page.evaluate(() => {
+      // A tab each: the settings mock seeds settings at load, so a second
+      // mount in one tab keeps the first theme it saw.
+      const tab = await page.context().newPage();
+      await openSettings(tab, { stored: { theme, appearanceMode: mode } });
+      await expect(tab.getByRole("navigation")).toBeVisible();
+      await expect(tab.locator("html")).toHaveAttribute("data-mode", mode);
+      const surfaces = await tab.evaluate(() => {
         const nav = document.querySelector(".astryx-side-nav")!;
         const main =
           document.querySelector("[role=main]") ??
@@ -1515,6 +1517,7 @@ test("the sidebar sits a step behind the page in every theme and mode", async ({
       expect(surfaces.nav, `${theme} ${mode} paints one surface`).not.toBe(
         surfaces.main,
       );
+      await tab.close();
     }
   }
 });
@@ -1600,5 +1603,172 @@ test("a label and its description never run together", async ({ page }) => {
         .filter(Boolean),
     );
     expect(touching, `${name} stacks a label on its description`).toEqual([]);
+  }
+});
+
+test("cancelling the shortcut recorder leaves nothing painted", async ({
+  page,
+}) => {
+  await openSettings(page);
+  const recorder = page.getByRole("button", { name: /^Shortcut,/ });
+  await expect(recorder).toBeVisible();
+  const paint = () =>
+    recorder.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { boxShadow: style.boxShadow, outline: style.outlineStyle };
+    });
+  await page.mouse.move(0, 0);
+  const resting = await paint();
+  await recorder.click();
+  await expect(recorder).toHaveAccessibleName(/Press shortcut Esc to cancel/);
+  await page.keyboard.press("Escape");
+  await expect(recorder).toHaveAccessibleName(/^Shortcut, /);
+  await page.mouse.move(0, 0);
+  await expect.poll(async () => (await paint()).outline).toBe(resting.outline);
+  expect((await paint()).boxShadow).toBe(resting.boxShadow);
+});
+
+const settingsRows = (page: Page) =>
+  page.getByRole("main").evaluate(() =>
+    [...document.querySelectorAll("li.astryx-item")].map((row) => {
+      const box = row.getBoundingClientRect();
+      return {
+        height: Math.round(box.height),
+        top: Math.round(box.top),
+        label: (row.textContent ?? "").trim().slice(0, 24),
+      };
+    }),
+  );
+
+test("every stateful row keeps its height and the rows below it never move", async ({
+  page,
+}) => {
+  // A row allowed to change height is named here, on purpose. It is empty:
+  // no settings row may grow or shrink when its control changes state.
+  const allowed: string[] = [];
+  await openSettings(page);
+  const compare = async (
+    what: string,
+    before: Awaited<ReturnType<typeof settingsRows>>,
+  ) => {
+    const after = await settingsRows(page);
+    expect(
+      after.map((row) => row.height),
+      what + " heights",
+    ).toEqual(before.map((row) => row.height));
+    expect(
+      after.map((row) => row.top),
+      what + " tops",
+    ).toEqual(before.map((row) => row.top));
+    expect(allowed, what).toEqual([]);
+  };
+  const before = await settingsRows(page);
+
+  await page.getByRole("button", { name: "Test microphone" }).click();
+  await expect(page.getByRole("button", { name: "Stop test" })).toBeVisible();
+  await compare("Test microphone listening", before);
+  await page.getByRole("button", { name: "Stop test" }).click();
+  await expect(
+    page.getByRole("button", { name: "Test microphone" }),
+  ).toBeVisible();
+  await compare("Test microphone stopped", before);
+
+  const launch = page.getByRole("switch", { name: "Launch at login" });
+  await launch.click();
+  await compare("Launch at login on", before);
+  await launch.click();
+  await compare("Launch at login off", before);
+
+  const recorder = page.getByRole("button", { name: /^Shortcut,/ });
+  await recorder.click();
+  await page.keyboard.press("Escape");
+  await expect(recorder).toHaveAccessibleName(/^Shortcut, /);
+  await compare("shortcut capture", before);
+
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Annotate", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Annotate", exact: true, level: 1 }),
+  ).toBeVisible();
+  const annotateBefore = await settingsRows(page);
+  // Only the plain switches: turning Annotate itself on asks macOS for Screen
+  // Recording, and that answer is a banner, not a row.
+  for (const name of ["Show in screen recordings"]) {
+    const toggle = page.getByRole("switch", { name });
+    await toggle.click();
+    await compare(name + " on", annotateBefore);
+    await toggle.click();
+    await compare(name + " off", annotateBefore);
+  }
+});
+
+test("a keycap is a different surface from the button it sits in", async ({
+  page,
+}) => {
+  for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
+    for (const mode of ["light", "dark"]) {
+      const tab = await page.context().newPage();
+      await openSettings(tab, { stored: { theme, appearanceMode: mode } });
+      const slug = {
+        ember: "ember",
+        paper: "paper",
+        capy: "capy",
+        rosePine: "rose-pine",
+        neutral: "zinc",
+      }[theme];
+      await expect(tab.locator("html")).toHaveAttribute(
+        "data-astryx-theme",
+        slug!,
+      );
+      await expect(tab.locator("html")).toHaveAttribute("data-mode", mode);
+      const first = tab.getByRole("button", { name: /^Shortcut,/ }).first();
+      await expect(first).toBeVisible();
+      // Composited luminance, not a string compare: a 92% fill and an opaque
+      // one of the same colour are different strings and the same surface.
+      const surfaces = await first.evaluate((el) => {
+        const keycap = el.querySelector("kbd");
+        if (!keycap) return null;
+        const card = el.closest(".astryx-card");
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d")!;
+        const paint = (layers: string[]) => {
+          context.clearRect(0, 0, 1, 1);
+          for (const layer of layers) {
+            context.fillStyle = layer;
+            context.fillRect(0, 0, 1, 1);
+          }
+          const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+          const channel = (value: number) => {
+            const srgb = value / 255;
+            return srgb <= 0.03928
+              ? srgb / 12.92
+              : ((srgb + 0.055) / 1.055) ** 2.4;
+          };
+          return (
+            0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+          );
+        };
+        const under = [getComputedStyle(card ?? document.body).backgroundColor];
+        const button = paint([...under, getComputedStyle(el).backgroundColor]);
+        const withKeycap = paint([
+          ...under,
+          getComputedStyle(el).backgroundColor,
+          getComputedStyle(keycap).backgroundColor,
+        ]);
+        const lighter = Math.max(button, withKeycap);
+        const darker = Math.min(button, withKeycap);
+        return {
+          ratio: (lighter + 0.05) / (darker + 0.05),
+          buttonCss: getComputedStyle(el).backgroundColor,
+          keycapCss: getComputedStyle(keycap).backgroundColor,
+        };
+      });
+      expect(surfaces, theme + " " + mode).not.toBeNull();
+      expect(surfaces!.ratio, theme + " " + mode).toBeGreaterThan(1.1);
+      await tab.close();
+    }
   }
 });

@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Kbd } from "@astryxdesign/core/Kbd";
 
@@ -40,7 +40,7 @@ function spokenKeys(value: string) {
     .join(" + ");
 }
 export function KeyboardShortcut({ value }: { value: string }) {
-  return <Kbd keys={shortcutKeys(value)} />;
+  return <Kbd className="ui-keycap" keys={shortcutKeys(value)} />;
 }
 type Props = {
   value: string;
@@ -86,8 +86,33 @@ export function ShortcutRecorder({
     }
     onCommit([...modifiers, event.code].join("+"));
   }
+  // A capture that ends puts focus back on the button, and a focus ring left
+  // behind after Escape reads as a stray line. The ring returns on the next
+  // key or pointer, so keyboard navigation still shows it.
+  const button = useRef<HTMLButtonElement>(null);
+  const [quiet, setQuiet] = useState(false);
+  const wasRecording = useRef(recording);
+  useEffect(() => {
+    if (wasRecording.current && !recording) {
+      setQuiet(true);
+      button.current?.focus({ preventScroll: true });
+    }
+    wasRecording.current = recording;
+  }, [recording]);
+  useEffect(() => {
+    if (!quiet) return;
+    const clear = () => setQuiet(false);
+    window.addEventListener("keydown", clear, { once: true });
+    window.addEventListener("pointerdown", clear, { once: true });
+    return () => {
+      window.removeEventListener("keydown", clear);
+      window.removeEventListener("pointerdown", clear);
+    };
+  }, [quiet]);
   return (
     <Button
+      ref={button}
+      className={quiet ? "ui-quiet-focus" : undefined}
       label={
         recording
           ? `${label}, Press shortcut Esc to cancel`
@@ -106,7 +131,7 @@ export function ShortcutRecorder({
     >
       {recording ? (
         <>
-          Press shortcut <Kbd keys="escape" />
+          Press shortcut <Kbd className="ui-keycap" keys="escape" />
         </>
       ) : (
         <KeyboardShortcut value={value} />

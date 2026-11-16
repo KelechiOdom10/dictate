@@ -71,9 +71,6 @@ export const controlStyles = {
       boxShadow: "none",
       backgroundColor: "color-mix(in oklch, var(--color-neutral), transparent 8%)",
       ":hover": { boxShadow: "inset 0 0 0 1px var(--color-border)" },
-      ":focus-visible": {
-        boxShadow: "inset 0 0 0 1px var(--color-border-emphasized)",
-      },
     },
   },
   selector: {

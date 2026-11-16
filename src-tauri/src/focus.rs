@@ -224,23 +224,27 @@ pub fn pointer() -> Option<(f64, f64)> {
 /// down, from the session's combined input state.
 #[cfg(target_os = "macos")]
 pub fn shift_and_button() -> Option<(bool, bool)> {
-    use core_graphics::event::{CGEvent, CGEventFlags, CGMouseButton};
-    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::event::{CGEventFlags, CGMouseButton};
+    use core_graphics::event_source::CGEventSourceStateID;
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
         fn CGEventSourceButtonState(state: CGEventSourceStateID, button: CGMouseButton) -> bool;
+        /// The live modifier flags of the session. A freshly created event has
+        /// no flags of its own, so reading one always said "nothing held".
+        fn CGEventSourceFlagsState(state: CGEventSourceStateID) -> u64;
     }
     let state = CGEventSourceStateID::CombinedSessionState;
-    let flags = CGEvent::new(CGEventSource::new(state).ok()?)
-        .ok()?
-        .get_flags();
-    let held = flags
-        & (CGEventFlags::CGEventFlagShift
-            | CGEventFlags::CGEventFlagCommand
-            | CGEventFlags::CGEventFlagControl
-            | CGEventFlags::CGEventFlagAlternate);
+    let flagged = unsafe { CGEventSourceFlagsState(state) };
+    let modifiers = (CGEventFlags::CGEventFlagShift
+        | CGEventFlags::CGEventFlagCommand
+        | CGEventFlags::CGEventFlagControl
+        | CGEventFlags::CGEventFlagAlternate)
+        .bits();
     let button = unsafe { CGEventSourceButtonState(state, CGMouseButton::Left) };
-    Some((held == CGEventFlags::CGEventFlagShift, button))
+    Some((
+        flagged & modifiers == CGEventFlags::CGEventFlagShift.bits(),
+        button,
+    ))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -293,8 +297,28 @@ pub fn active_display() -> crate::package::Display {
 
 #[cfg(test)]
 mod tests {
-    use super::{selected_display, window_center};
+    use super::{selected_display, shift_and_button, window_center};
     use crate::package::{Display, Rect};
+
+    /// Why `shift_and_button` reads the session instead of an event: a new
+    /// event carries no flags, so `CGEvent::new(..).get_flags()` answered
+    /// "no modifiers held" forever and Shift-draw never started natively.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_new_event_carries_no_modifier_flags() {
+        use core_graphics::event::{CGEvent, CGEventFlags};
+        use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+        let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).unwrap();
+        let event = CGEvent::new(source).unwrap();
+        assert_eq!(event.get_flags(), CGEventFlags::empty());
+    }
+
+    /// The session read itself must work with nothing held, and must not panic.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_session_flags_can_be_read() {
+        assert!(shift_and_button().is_some());
+    }
 
     fn display(id: u32, x: f64, y: f64, w: f64, h: f64) -> Display {
         Display {

@@ -54,7 +54,7 @@ export default function MicrophoneTest({
   return (
     <SettingsRow
       label="Input level"
-      help={testing ? "Listening · audio is not saved" : undefined}
+      help={testing ? "Listening · audio is not saved" : "Audio is not saved"}
     >
       <HStack gap={4} vAlign="center">
         <HStack gap={2} vAlign="center">

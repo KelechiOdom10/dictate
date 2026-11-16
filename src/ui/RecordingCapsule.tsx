@@ -19,7 +19,7 @@ export function LevelMeter({
 }) {
   const value = Math.max(0, Math.min(1, level));
   return (
-    <div className={`ui-level ${value === 0 ? "ui-level-idle" : ""}`}>
+    <div className="ui-level">
       <meter min={0} max={1} value={value} aria-label={label} />
       <div className="ui-level-bars" aria-hidden="true">
         {Array.from({ length: 12 }, (_, index) => (
