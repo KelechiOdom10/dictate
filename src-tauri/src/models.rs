@@ -76,7 +76,7 @@ const PARAKEET_UNIFIED_EN: &str = "https://huggingface.co/handy-computer/parakee
 
 const NVIDIA_OPEN_MODEL_LICENSE: Licence = Licence {
     name: "NVIDIA Open Model License",
-    url: "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+    url: "https://huggingface.co/nvidia/parakeet-unified-en-0.6b",
 };
 
 /// How long a download may go without receiving a byte before it fails.

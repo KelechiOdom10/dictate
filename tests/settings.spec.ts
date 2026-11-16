@@ -90,7 +90,7 @@ async function openSettings(
         emit(data.event, data.payload);
       });
       const settings = {
-        version: 2,
+        version: 1,
         shortcut: "Alt+Shift+Space",
         shortcutMode: "hold",
         microphone: null,
@@ -110,7 +110,6 @@ async function openSettings(
         annotateShortcut: "Alt+Shift+KeyS",
         annotateEnabled: true,
         annotateShowInRecordings: false,
-        offerParakeet: false,
         ...stored,
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
@@ -343,7 +342,7 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
         type: "dictate-test",
         event: "settings-changed",
         payload: {
-          version: 2,
+          version: 1,
           shortcut: "Control+KeyD",
           shortcutMode: "hold",
           microphone: null,
@@ -363,7 +362,6 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           annotateShortcut: "Alt+Shift+KeyS",
           annotateEnabled: true,
           annotateShowInRecordings: false,
-          offerParakeet: false,
         },
       },
       "*",
@@ -520,7 +518,7 @@ test("overlay applies appearance events live, including System changes", async (
               type: "dictate-test",
               event: "settings-changed",
               payload: {
-                version: 2,
+                version: 1,
                 shortcut: "Alt+Shift+Space",
                 shortcutMode: "hold",
                 microphone: null,
@@ -540,7 +538,6 @@ test("overlay applies appearance events live, including System changes", async (
                 annotateShortcut: "Alt+Shift+KeyS",
                 annotateEnabled: true,
                 annotateShowInRecordings: false,
-                offerParakeet: false,
               },
             },
             "*",
@@ -713,7 +710,7 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
               type: "dictate-test",
               event: "settings-changed",
               payload: {
-                version: 2,
+                version: 1,
                 shortcut: "Alt+Shift+Space",
                 shortcutMode: "hold",
                 microphone: null,
@@ -733,7 +730,6 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 annotateShortcut: "Alt+Shift+KeyS",
                 annotateEnabled: true,
                 annotateShowInRecordings: false,
-                offerParakeet: false,
               },
             },
             "*",

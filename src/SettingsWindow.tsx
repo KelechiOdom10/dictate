@@ -9,7 +9,6 @@ import ModelsPage from "./ModelsPage";
 import OutputPage from "./OutputPage";
 import AdvancedPage from "./AdvancedPage";
 import AboutPage from "./AboutPage";
-import ParakeetOffer from "./ParakeetOffer";
 import { Button, SidebarNav, Toast } from "./ui";
 import {
   AudioLines,
@@ -97,7 +96,6 @@ export default function SettingsWindow({
             {status.error.title}. {status.error.fix}
           </Toast>
         )}
-        <ParakeetOffer onDownload={() => setPage("Models")} />
         {page === "General" ? (
           <General onOpenModels={() => setPage("Models")} />
         ) : page === "Models" ? (

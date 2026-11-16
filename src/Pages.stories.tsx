@@ -161,7 +161,7 @@ function mockApp(
         entry.id === args.model,
     )!;
   let settings: Settings = {
-    version: 2,
+    version: 1,
     shortcut: "Alt+Shift+Space",
     shortcutMode: "hold",
     microphone: null,
@@ -181,7 +181,6 @@ function mockApp(
     annotateShortcut: "Alt+Shift+KeyS",
     annotateEnabled: true,
     annotateShowInRecordings: false,
-    offerParakeet: false,
     ...overrides,
   };
   mockWindows("settings");
@@ -338,85 +337,8 @@ export const GeneralFreshProfile: Story = {
     await expect(
       c.getByRole("option", { name: "Parakeet English (Recommended)" }),
     ).toBeInTheDocument();
-    await expect(
-      c.queryByRole("region", { name: /now the recommended model/ }),
-    ).toBeNull();
   },
 };
-export const GeneralParakeetOffer: Story = {
-  beforeEach: ({ globals }) =>
-    mockApp(
-      globals,
-      [],
-      {
-        states: {
-          "base.en": { kind: "installed" },
-          "small.en": { kind: "installed" },
-        },
-      },
-      { offerParakeet: true },
-    ),
-  render: () => <GeneralPage />,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement);
-    const offer = await c.findByRole("region", {
-      name: "Try Parakeet English, now the recommended model",
-    });
-    await expect(offer).toHaveTextContent("faster than Base English");
-    await expect(
-      within(offer).getByRole("button", { name: "Download (731 MB)" }),
-    ).toBeVisible();
-  },
-};
-export const GeneralParakeetOfferDismissed: Story = {
-  beforeEach: ({ globals }) =>
-    mockApp(
-      globals,
-      [],
-      { states: { "base.en": { kind: "installed" } } },
-      { offerParakeet: true },
-    ),
-  render: () => <GeneralPage />,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement);
-    await userEvent.click(await c.findByRole("button", { name: "Not now" }));
-    await waitFor(() =>
-      expect(
-        c.queryByRole("region", { name: /now the recommended model/ }),
-      ).toBeNull(),
-    );
-    await expect(c.getByRole("combobox", { name: "Speech model" })).toHaveValue(
-      "base.en",
-    );
-  },
-};
-export const GeneralParakeetOfferAccepted: Story = {
-  beforeEach: ({ globals }) =>
-    mockApp(
-      globals,
-      [],
-      { states: { "base.en": { kind: "installed" } } },
-      { offerParakeet: true },
-    ),
-  render: () => <GeneralPage />,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement);
-    await userEvent.click(
-      await c.findByRole("button", { name: "Download (731 MB)" }),
-    );
-    const card = await c.findByRole("region", { name: "Parakeet English" });
-    await expect(
-      within(card).getByRole("progressbar", { name: "Downloading" }),
-    ).toBeVisible();
-    await expect(
-      c.getByRole("region", { name: "Base English" }),
-    ).toHaveTextContent("In use");
-    await expect(
-      c.queryByRole("region", { name: /now the recommended model/ }),
-    ).toBeNull();
-  },
-};
-
 export const GeneralLoading: Story = {
   beforeEach: () => {
     mockWindows("settings");

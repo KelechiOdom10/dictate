@@ -593,7 +593,7 @@ Streaming and batch hear the same words but punctuate differently. On the memo,
 streaming wrote "…on the launch. We moved…" and "…upgrade the night before.
 Can we meet…", where batch ran the sentences together with commas.
 Streaming also dropped the final full stop after "Thanks" in one run. The word
-check ignores punctuation for that reason.
+check ignores punctuation for that reason. The next section fixes the full stop.
 
 Not measured yet: `release_to_text_ms` from physical takes, which needs the
 manual step in the PR. The app logs `[transcribe] streamed: finish_ms=…` or
@@ -605,4 +605,42 @@ Reproduce:
 ```sh
 DICTATE_PARAKEET_MODEL=/path/to/parakeet-unified-en-0.6b-Q8_0.gguf \
   cargo test --manifest-path src-tauri/Cargo.toml --lib transcribe::tests -- --nocapture --test-threads=1
+```
+
+### Streamed takes keep their final full stop — 15 November 2026
+
+Parakeet writes a take's closing punctuation only once it hears audio after the
+last word. A real take ends at release, so the stream finalized with nothing
+after "Thanks". `decode_live` now feeds 500 ms of silence before `finalize`.
+Handy's live path finalizes without padding, and the transcribe-cpp stream API
+has no flush option.
+
+Memo, streamed with the default commit policy, by length of silence fed before
+`finalize` (one run each, frames fed as fast as possible):
+
+| Silence | Ending | `finalize` |
+|---:|---|---:|
+| 0 ms | "…Friday morning. Thanks" | 84–103 ms |
+| 80 ms | "…Friday morning. Thanks" | 94 ms |
+| 160–320 ms | "…Friday morning. Thanks." | 95–106 ms |
+| 400–500 ms | "…Friday morning, thanks." (batch's text) | 95–102 ms |
+
+The `OnFinalize` commit policy gave the same endings. Feeding the silence took
+under 1 ms.
+
+`measure_parakeet_streamed_finish` (ignored by default) streams the memo in
+real time three times after a warm-up:
+
+| Build | Ending | `finish_ms` |
+|---|---|---:|
+| Without the silence | "…Friday morning. Thanks" | 117 ms |
+| With 500 ms of silence, 9 runs over 4 invocations | "…Friday morning, thanks." in all 9 | 115–131 ms, with outliers of 155 and 185 ms |
+
+The outliers came while other builds shared the machine (load average 4 to 20).
+That is why the 150 ms check now lives in the ignored measure test, not in the
+default `cargo test`.
+
+```sh
+DICTATE_PARAKEET_MODEL=/path/to/parakeet-unified-en-0.6b-Q8_0.gguf \
+  cargo test --manifest-path src-tauri/Cargo.toml --lib measure_parakeet_streamed_finish -- --ignored --nocapture --test-threads=1
 ```

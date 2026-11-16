@@ -140,6 +140,12 @@ pub const STREAM_MIN_SAMPLES: usize = 4 * SAMPLE_RATE;
 const LAST_FRAMES_WAIT: Duration = Duration::from_secs(1);
 /// How often a waiting worker checks whether its take was discarded.
 const DISCARD_CHECK: Duration = Duration::from_millis(100);
+/// Silence fed after a take's last frame, before `finalize`. Parakeet emits a
+/// take's closing punctuation only once it hears audio after the last word:
+/// without it the memo streamed as "…morning. Thanks" where batch gave
+/// "…morning, thanks.", and 500 ms gave batch's text. Feeding it is free, and
+/// `finalize` took the same ~100 ms with or without it.
+static FINAL_SILENCE: [f32; SAMPLE_RATE / 2] = [0.0; SAMPLE_RATE / 2];
 
 /// Whether `model` can decode a take while it records. Only the in-process
 /// engine streams; whisper-cli models stay batch-only.
@@ -322,6 +328,9 @@ fn decode_live(
         let Some(reply) = reply.or_else(|| requests.recv().ok()) else {
             return Ok(());
         };
+        stream
+            .feed(&FINAL_SILENCE)
+            .map_err(|e| format!("feed silence: {e}"))?;
         stream.finalize().map_err(|e| format!("finalize: {e}"))?;
         let _ = reply.send(Ok(Streamed {
             text: stream.text().full,
@@ -1368,7 +1377,33 @@ Priya that the design review is now on Friday morning. Thanks.";
         );
         assert_eq!(decoded, Decoded::Streamed);
         assert_eq!(spoken_words(&text), spoken_words(&batch));
-        assert!(finish_ms <= 150, "finish took {finish_ms} ms");
+        assert!(text.ends_with('.'), "streamed text lost its full stop");
+    }
+
+    /// The memo streamed in real time, three times, after one warm-up. Asserts
+    /// each finishes within 150 ms of release and ends with its full stop. Run
+    /// alone, so other tests don't share the GPU.
+    #[test]
+    #[ignore = "measurement; run with --ignored --test-threads=1"]
+    fn measure_parakeet_streamed_finish() {
+        let _turn = transcription_turn();
+        let Some(memo) = parakeet_speech("measure streamed finish", MEMO) else {
+            return;
+        };
+        let model = parakeet_model();
+        prepare(&model).unwrap();
+        paced_take(&memo, &model, Duration::ZERO);
+        for run in 1..=3 {
+            let (text, decoded, finish_ms) = paced_take(&memo, &model, Duration::from_millis(100));
+            let ending: String = text
+                .chars()
+                .skip(text.chars().count().saturating_sub(30))
+                .collect();
+            eprintln!("streamed memo run {run}: finish_ms={finish_ms} ending={ending:?}");
+            assert_eq!(decoded, Decoded::Streamed);
+            assert!(text.ends_with('.'), "run {run} lost its full stop");
+            assert!(finish_ms <= 150, "run {run} finish took {finish_ms} ms");
+        }
     }
 
     #[test]
@@ -1380,6 +1415,7 @@ Priya that the design review is now on Friday morning. Thanks.";
         let long: Vec<f32> = memo.iter().chain(&memo).chain(&memo).copied().collect();
         let model = parakeet_model();
         prepare(&model).unwrap();
+        let batch = transcribe(&long, &model).unwrap();
         let (text, decoded, finish_ms) = paced_take(&long, &model, Duration::from_millis(25));
         eprintln!(
             "parakeet minute: audio_ms={} finish_ms={finish_ms} words={} text={text:?}",
@@ -1388,6 +1424,7 @@ Priya that the design review is now on Friday morning. Thanks.";
         );
         assert_eq!(decoded, Decoded::Streamed);
         assert_eq!(word_count(&text), 3 * word_count(MEMO));
+        assert_eq!(spoken_words(&text), spoken_words(&batch));
     }
 
     #[test]
