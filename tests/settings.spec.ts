@@ -975,7 +975,7 @@ for (const exit of ["tab", "window-blur", "navigation"]) {
       name: /^Shortcut,/,
     });
     await recorder.click();
-    await expect(recorder).toContainText("Press shortcut");
+    await expect(recorder).toHaveAccessibleName(/Press shortcut Esc to cancel/);
     if (exit === "tab") await page.keyboard.press("Tab");
     else if (exit === "navigation")
       await page.getByRole("button", { name: "Output", exact: true }).click();
@@ -986,13 +986,13 @@ for (const exit of ["tab", "window-blur", "navigation"]) {
           "*",
         ),
       );
-    await expect(page.getByText("Press shortcut")).toHaveCount(0);
+    await expect(recorder).toHaveAccessibleName(/^Shortcut, /);
     await page.evaluate(() =>
       (window as unknown as { __finishCapture: () => void }).__finishCapture(),
     );
     if (exit === "navigation")
       await page.getByRole("button", { name: "General", exact: true }).click();
-    await expect(recorder).not.toContainText("Press shortcut");
+    await expect(recorder).not.toHaveAccessibleName(/Press shortcut/);
   });
 }
 
@@ -1197,10 +1197,8 @@ for (const mode of ["light", "dark"]) {
     });
     await page.getByRole("button", { name: /^Shortcut,/ }).click();
     await expect(
-      page
-        .getByRole("button", { name: /^Shortcut,/ })
-        .filter({ hasText: "Press shortcut" }),
-    ).toBeVisible();
+      page.getByRole("button", { name: /^Shortcut,/ }),
+    ).toHaveAccessibleName(/Press shortcut Esc to cancel/);
     await page.screenshot({
       path: `target/qa-round-3/${output}-recorder-${mode}.png`,
     });
@@ -1771,4 +1769,87 @@ test("a keycap is a different surface from the button it sits in", async ({
       await tab.close();
     }
   }
+});
+
+test("a shortcut capture adds nothing to the row and keeps the button its size", async ({
+  page,
+}) => {
+  await openSettings(page);
+  const recorder = page.getByRole("button", { name: /^Shortcut,/ });
+  await expect(recorder).toBeVisible();
+  const box = async () => {
+    const rect = await recorder.boundingBox();
+    return { width: Math.round(rect!.width), height: Math.round(rect!.height) };
+  };
+  const rowOf = (locator: typeof recorder) =>
+    locator.evaluate((el) => {
+      const row = el.closest("li")!;
+      const rect = row.getBoundingClientRect();
+      return { top: Math.round(rect.top), height: Math.round(rect.height) };
+    });
+  const restBox = await box();
+  const restRow = await rowOf(recorder);
+  await recorder.click();
+  await expect(recorder).toHaveAccessibleName(/Press shortcut Esc to cancel/);
+  await expect(recorder).not.toHaveText(/Press shortcut/);
+  expect(await box()).toEqual(restBox);
+  expect(await rowOf(recorder)).toEqual(restRow);
+  await expect(recorder.locator(".astryx-status-dot")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(recorder).toHaveAccessibleName(/^Shortcut, /);
+  expect(await box()).toEqual(restBox);
+  expect(await rowOf(recorder)).toEqual(restRow);
+});
+
+test("cancelling leaves the row's own hairline and no focus line", async ({
+  page,
+}) => {
+  await openSettings(page);
+  const rows = page.getByRole("main").locator("li.astryx-item");
+  // The list draws its own hairline under every row but the last, and that
+  // stays: what has to go is the thicker line a cancelled capture leaves.
+  const divider = await rows.first().evaluate((row) => {
+    const style = getComputedStyle(row);
+    return style.borderBottomWidth + " " + style.borderBottomStyle;
+  });
+  expect(divider).toBe("1px solid");
+  const recorder = page.getByRole("button", { name: /^Shortcut,/ });
+  await recorder.click();
+  await page.keyboard.press("Escape");
+  // Pointer still on the button: the thick 2px focus line must be gone.
+  await expect
+    .poll(() => recorder.evaluate((el) => getComputedStyle(el).outlineStyle))
+    .toBe("none");
+});
+
+test("the microphone button keeps one width across its two labels", async ({
+  page,
+}) => {
+  await openSettings(page);
+  const button = page.getByRole("button", { name: "Test microphone" });
+  const resting = await button.boundingBox();
+  await button.click();
+  const stopped = page.getByRole("button", { name: "Stop test" });
+  await expect(stopped).toBeVisible();
+  const listening = await stopped.boundingBox();
+  expect(Math.round(listening!.width)).toBe(Math.round(resting!.width));
+  await expect(stopped).toHaveAccessibleName("Stop test");
+});
+
+test("the active model card carries its own hairline, not only a badge", async ({
+  page,
+}) => {
+  await openSettings(page, { pendingPage: "Models" });
+  const active = page.locator(
+    'section[aria-label="Base English"] .astryx-card',
+  );
+  await expect(active).toBeVisible();
+  const shadow = await active.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(shadow).toMatch(/inset/);
+  expect(shadow).not.toBe("none");
+  const idle = page.locator('section[aria-label="Tiny English"] .astryx-card');
+  const idleShadow = await idle.evaluate(
+    (el) => getComputedStyle(el).boxShadow,
+  );
+  expect(idleShadow).not.toMatch(/inset/);
 });

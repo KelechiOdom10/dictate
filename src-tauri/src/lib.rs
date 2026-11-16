@@ -1777,6 +1777,21 @@ fn copy_annotation(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// History's "Delete": the whole session folder, with the same confirm the
+/// dictations have.
+#[tauri::command]
+fn delete_annotation(app: AppHandle, id: String) -> Result<(), String> {
+    let deleted = annotate::delete(&annotations_dir(&app)?, &id)
+        .map_err(|e| format!("Delete annotation: {e}"))?;
+    if !deleted {
+        return Err(format!("No annotation {id}"));
+    }
+    if let Err(error) = app.emit("annotations-changed", ()) {
+        log::warn!("[annotate] emit annotations-changed: {error}");
+    }
+    Ok(())
+}
+
 /// The floating bar's "Copy image": the contact sheet of the session that
 /// just finished.
 #[tauri::command]
@@ -1901,6 +1916,7 @@ pub fn run() {
             list_annotations,
             reveal_annotation,
             copy_annotation,
+            delete_annotation,
             screen_permission,
             development_build,
             open_screen_recording_settings,

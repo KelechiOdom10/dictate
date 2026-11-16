@@ -25,6 +25,8 @@ export const revealAnnotation = (id: string) =>
   invoke<null>("reveal_annotation", { id });
 export const copyAnnotation = (id: string) =>
   invoke<null>("copy_annotation", { id });
+export const deleteAnnotation = (id: string) =>
+  invoke<null>("delete_annotation", { id });
 export const readScreenPermission = async () =>
   z.boolean().parse(await invoke("screen_permission"));
 export const openScreenRecordingSettings = () =>

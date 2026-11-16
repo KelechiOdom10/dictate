@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Kbd } from "@astryxdesign/core/Kbd";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
 
 const keyNames: Record<string, string> = {
   CommandOrControl: "meta",
@@ -39,8 +40,19 @@ function spokenKeys(value: string) {
     .map((key) => spokenNames[key] ?? key.replace(/^(Key|Digit|Arrow)/, ""))
     .join(" + ");
 }
-export function KeyboardShortcut({ value }: { value: string }) {
-  return <Kbd className="ui-keycap" keys={shortcutKeys(value)} />;
+export function KeyboardShortcut({
+  value,
+  className,
+}: {
+  value: string;
+  className?: string;
+}) {
+  return (
+    <Kbd
+      className={className ? `ui-keycap ${className}` : "ui-keycap"}
+      keys={shortcutKeys(value)}
+    />
+  );
 }
 type Props = {
   value: string;
@@ -92,6 +104,13 @@ export function ShortcutRecorder({
   const button = useRef<HTMLButtonElement>(null);
   const [quiet, setQuiet] = useState(false);
   const wasRecording = useRef(recording);
+  // The capture state adds a dot and dims the keys, so the button's own width
+  // is pinned to its resting width and the row cannot move.
+  const [resting, setResting] = useState<number>();
+  useEffect(() => {
+    if (recording || !button.current) return;
+    setResting(button.current.getBoundingClientRect().width);
+  }, [recording, value]);
   useEffect(() => {
     if (wasRecording.current && !recording) {
       setQuiet(true);
@@ -128,11 +147,12 @@ export function ShortcutRecorder({
       onBlur={() => {
         if (recording) onCancel();
       }}
+      style={recording && resting ? { inlineSize: resting } : undefined}
     >
       {recording ? (
-        <>
-          Press shortcut <Kbd className="ui-keycap" keys="escape" />
-        </>
+        <span className="ui-capture-wait">
+          <StatusDot variant="error" label="Waiting for a shortcut" isPulsing />
+        </span>
       ) : (
         <KeyboardShortcut value={value} />
       )}

@@ -213,7 +213,10 @@ export function ModelCard({
           hadFocus.current = card.current?.contains(e.relatedTarget) ?? false;
       }}
     >
-      <Card variant={active ? "muted" : "default"}>
+      <Card
+        className={active ? "ui-model-active" : undefined}
+        variant={active ? "muted" : "default"}
+      >
         <VStack gap={4}>
           <VStack gap={3}>
             <VStack gap={1}>

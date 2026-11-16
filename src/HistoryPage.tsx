@@ -62,6 +62,7 @@ import {
   annotationTitle,
   clock,
   copyAnnotation,
+  deleteAnnotation,
   readAnnotations,
   revealAnnotation,
   type AnnotationEntry,
@@ -631,6 +632,12 @@ function Annotations() {
           entry={selected}
           now={now}
           onError={setError}
+          onDeleted={() => {
+            const index = entries.indexOf(selected);
+            const next = entries[index + 1] ?? entries[index - 1];
+            setSelectedId(next?.id ?? null);
+            void client.invalidateQueries({ queryKey: ["annotations"] });
+          }}
         />
       </Grid>
     </>
@@ -641,15 +648,31 @@ function AnnotationDetail({
   entry,
   now,
   onError,
+  onDeleted,
 }: {
   entry: AnnotationEntry;
   now: number;
   onError: (error: string) => void;
+  onDeleted: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const reset = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(reset.current), []);
   const started = Date.parse(entry.startedAt);
+  async function remove() {
+    onError("");
+    setDeleting(true);
+    try {
+      await deleteAnnotation(entry.id);
+      onDeleted();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }
   async function copy() {
     onError("");
     try {
@@ -728,10 +751,31 @@ function AnnotationDetail({
           icon={<FolderOpen size={16} aria-hidden="true" />}
           onClick={() => void reveal()}
         />
+        <Button
+          size="sm"
+          variant="ghost"
+          label="Delete annotation"
+          icon={<Trash2 size={16} aria-hidden="true" />}
+          isDisabled={deleting || confirming}
+          onClick={() => setConfirming(true)}
+        >
+          Delete
+        </Button>
         <VisuallyHidden role="status" aria-live="polite">
           {copied ? "Summary copied to clipboard" : ""}
         </VisuallyHidden>
       </HStack>
+      <AlertDialog
+        isOpen={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this annotation?"
+        description="The recording, the frames and the summary are removed. It can’t be recovered."
+        actionLabel="Delete annotation"
+        onAction={() => {
+          setConfirming(false);
+          void remove();
+        }}
+      />
     </Detail>
   );
 }

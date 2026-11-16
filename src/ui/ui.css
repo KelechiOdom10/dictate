@@ -29,6 +29,23 @@ html {
 .astryx-button.ui-quiet-focus:focus-visible {
   outline: none;
 }
+/* Both labels share one grid cell, so the button is always as wide as the
+   longer one and never changes width when the test starts. */
+.ui-mic-stack {
+  display: grid;
+}
+.ui-mic-stack > * {
+  grid-area: 1 / 1;
+}
+.ui-mic-ghost {
+  visibility: hidden;
+}
+/* The capture state shows a dot where the keys were, inside the button's own
+   size, so nothing is added to the row and no content can wrap. */
+.ui-capture-wait {
+  display: grid;
+  place-items: center;
+}
 /* A keycap has to read against the button it sits in, and those buttons are
    the neutral fill. Mixing the theme's text colour into it steps the cap away
    from that fill in every theme, darker in light and lighter in dark, which a
@@ -284,6 +301,12 @@ html {
 }
 .ui-capsule .ui-timer {
   white-space: nowrap;
+}
+/* The active model reads as chosen even without its badge: an accent hairline
+   inside the card, at the theme's own accent, in every theme. */
+.ui-model-active {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--color-accent), transparent 55%);
 }
 /* Stacked model metrics: one metric per line, label beside a fixed-width
    meter, so the values line up without the label wrapping. */

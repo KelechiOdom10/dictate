@@ -242,6 +242,14 @@ function mockApp(
       if (command === "list_annotations") return annotate.entries ?? [];
       if (command === "development_build") return false;
       if (command === "screen_permission") return annotate.permission ?? true;
+      if (command === "delete_annotation") {
+        const { id } = args as { id: string };
+        annotateCalls.push(`delete_annotation ${id}`);
+        annotate.entries = (annotate.entries ?? []).filter(
+          (entry) => entry.id !== id,
+        );
+        return null;
+      }
       if (
         command === "copy_annotation" ||
         command === "reveal_annotation" ||
@@ -507,6 +515,30 @@ export const HistoryAnnotationActions: Story = {
     await expect(
       c.getByRole("region", { name: "Annotation" }),
     ).toHaveTextContent(/Partial session\.\s*Video cut short/);
+  },
+};
+export const HistoryAnnotationDelete: Story = {
+  beforeEach: annotationsHistory,
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("radio", { name: "Annotations" }));
+    const detail = await c.findByRole("region", { name: "Annotation" });
+    await userEvent.click(
+      within(detail).getByRole("button", { name: "Delete annotation" }),
+    );
+    const dialog = await within(document.body).findByRole("alertdialog");
+    await userEvent.click(
+      await within(dialog).findByRole("button", { name: "Delete annotation" }),
+    );
+    await waitFor(() =>
+      expect(annotateCalls).toContain("delete_annotation 2026-11-15_10-42-08"),
+    );
+    await waitFor(() =>
+      expect(
+        c.queryByRole("button", { name: /This toggle should be on the right/ }),
+      ).not.toBeInTheDocument(),
+    );
   },
 };
 export const HistoryAnnotationsEmpty: Story = {

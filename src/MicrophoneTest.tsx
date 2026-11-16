@@ -65,7 +65,14 @@ export default function MicrophoneTest({
           label={testing ? "Stop test" : "Test microphone"}
           isDisabled={disabled}
           onClick={() => void onToggle()}
-        />
+        >
+          <span className="ui-mic-stack">
+            <span aria-hidden="true" className="ui-mic-ghost">
+              Test microphone
+            </span>
+            <span>{testing ? "Stop test" : "Test microphone"}</span>
+          </span>
+        </Button>
       </HStack>
     </SettingsRow>
   );

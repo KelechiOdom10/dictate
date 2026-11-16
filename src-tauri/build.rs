@@ -30,6 +30,7 @@ const APP_COMMANDS: &[&str] = &[
     "list_annotations",
     "reveal_annotation",
     "copy_annotation",
+    "delete_annotation",
     "screen_permission",
     "development_build",
     "open_screen_recording_settings",

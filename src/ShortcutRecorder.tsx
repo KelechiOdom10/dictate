@@ -83,7 +83,9 @@ export default function ShortcutRecorder({
       help={
         conflict ||
         (startupConflict ? "Used by another app — pick another" : "") ||
-        (recording ? "Press a key combination. Escape cancels." : idleHelp) ||
+        // Nothing is added to the row while a capture runs: the button itself
+        // shows it is waiting, and its label carries the Escape instruction.
+        idleHelp ||
         undefined
       }
     >
