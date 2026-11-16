@@ -2434,10 +2434,25 @@ for (const initialMode of ["system", "light", "dark"] as const) {
       for (const rect of await previews.evaluateAll((els) =>
         els.map((el) => el.getBoundingClientRect().toJSON()),
       )) {
-        expect(rect.width).toBeLessThanOrEqual(80);
-        expect(rect.height).toBeLessThanOrEqual(48);
+        expect(rect.width).toBeLessThanOrEqual(64);
+        expect(rect.height).toBeLessThanOrEqual(39);
+      }
+      const tiles = await page.getByRole("radio").evaluateAll((radios) =>
+        radios.map((radio) =>
+          [...radio.closest('[role="radiogroup"]')!.children]
+            .find((tile) => tile.contains(radio))!
+            .getBoundingClientRect()
+            .toJSON(),
+        ),
+      );
+      for (const tile of tiles) {
+        expect(tile.width).toBeGreaterThanOrEqual(44);
+        expect(tile.height).toBeGreaterThanOrEqual(44);
       }
     }
+    await expect(
+      page.getByRole("switch", { name: "Translucent window" }),
+    ).toHaveCount(0);
   });
 }
 

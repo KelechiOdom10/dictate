@@ -21,9 +21,10 @@ const nameOf = (id: ThemeId) =>
 
 const grid = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns:
+    "repeat(auto-fill, minmax(calc(var(--spacing-10) * 2.5), 1fr))",
   gap: "var(--spacing-2)",
-  maxWidth: "calc(var(--spacing-10) * 9)",
+  maxWidth: "calc(var(--spacing-10) * 14)",
   width: "100%",
 };
 
@@ -124,7 +125,7 @@ function Preview({ light, dark }: { light?: ThemeId; dark?: ThemeId }) {
     <svg
       viewBox="0 0 120 72"
       width="100%"
-      style={{ maxWidth: "calc(var(--spacing-10) * 2)" }}
+      style={{ maxWidth: "calc(var(--spacing-10) * 1.6)" }}
       aria-hidden="true"
       display="block"
     >
@@ -188,7 +189,7 @@ export function AppearancePicker({
   const sideName = { light: "Light", dark: "Dark" };
   return (
     <Card>
-      <VStack gap={6}>
+      <VStack gap={4}>
         <VStack gap={2}>
           <VStack gap={1}>
             <Text weight="medium">Mode</Text>
