@@ -17,6 +17,7 @@ export const Transcribing: Story = {
 };
 export const Skipped: Story = { args: { state: { kind: "skipped" } } };
 export const Done: Story = { args: { state: { kind: "done" } } };
+export const Copied: Story = { args: { state: { kind: "copied" } } };
 export const Error: Story = {
   args: {
     state: {
@@ -66,6 +67,7 @@ export const AllStates: Story = {
       />
       <RecordingCapsule state={{ kind: "transcribing" }} />
       <RecordingCapsule state={{ kind: "done" }} />
+      <RecordingCapsule state={{ kind: "copied" }} />
       <RecordingCapsule state={{ kind: "skipped" }} />
       <RecordingCapsule
         state={{

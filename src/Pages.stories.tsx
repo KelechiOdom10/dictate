@@ -87,6 +87,8 @@ type ModelsMock = {
   whisperMissing?: boolean;
 };
 const MB = 1_000_000;
+/** Locations the About page asked the app to open, newest last. */
+const opened: string[] = [];
 
 async function mockSettings({ globals }: { globals: Record<string, unknown> }) {
   return mockApp(globals, [], {
@@ -100,6 +102,7 @@ function mockApp(
   globals: Record<string, unknown>,
   initialHistory: HistoryEntry[],
   models: ModelsMock = { states: { "base.en": { kind: "installed" } } },
+  overrides: Partial<Settings> = {},
 ) {
   let history = initialHistory;
   const states = { ...models.states };
@@ -129,8 +132,17 @@ function mockApp(
     historyRetention: "week",
     appearanceMode: globals.mode === "dark" ? "dark" : "light",
     speechModel: models.active ?? "base.en",
+    pasteMethod: "paste",
+    restoreClipboard: true,
+    trailingSpace: false,
+    capitalizeFirst: false,
+    micMode: "onDemand",
+    soundFeedback: false,
+    debugRecordings: false,
+    ...overrides,
   };
   mockWindows("settings");
+  opened.length = 0;
   mockIPC(
     (command, args) => {
       if (command === "pipeline_status") return { phase: "idle", error: null };
@@ -145,6 +157,15 @@ function mockApp(
         return ["Built-in Microphone", "USB Microphone"];
       if (command === "microphone_level") return 0.12;
       if (command === "plugin:app|version") return "0.1.0";
+      if (command === "app_folders")
+        return {
+          data: "/Users/you/Library/Application Support/com.kelechiodom.dictate",
+          logs: "/Users/you/Library/Logs/com.kelechiodom.dictate",
+        };
+      if (command === "open_location") {
+        opened.push(String(args && "location" in args ? args.location : ""));
+        return null;
+      }
       if (command === "list_history") {
         const search = String(
           args && "search" in args ? args.search : "",
@@ -212,6 +233,19 @@ export const General: Story = {
   },
 };
 
+export const GeneralNoModel: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, [], { states: {} }),
+  render: () => <GeneralPage />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(
+      await c.findByText("Download a speech model in Settings › Models."),
+    ).toBeVisible();
+    await expect(
+      c.getByRole("button", { name: "Download a model" }),
+    ).toBeVisible();
+  },
+};
 export const GeneralLoading: Story = {
   beforeEach: () => {
     mockWindows("settings");
@@ -504,6 +538,87 @@ export const ModelsError: Story = {
     await expect(
       c.getByRole("button", { name: "Retry Large v3 Turbo download" }),
     ).toBeVisible();
+  },
+};
+export const Output: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, []),
+  render: () => <GeneralPage page="Output" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const method = await c.findByRole("combobox", {
+      name: "After you dictate",
+    });
+    const restore = c.getByRole("switch", { name: "Restore clipboard" });
+    await expect(restore).toBeChecked();
+    await userEvent.selectOptions(method, "copyOnly");
+    await waitFor(() => expect(restore).toBeDisabled());
+    await expect(restore).not.toBeChecked();
+    await expect(c.getByText(/Paste with ⌘V when you’re ready/)).toBeVisible();
+    await userEvent.selectOptions(method, "paste");
+    await waitFor(() => expect(restore).toBeChecked());
+    const capitalise = c.getByRole("switch", {
+      name: "Capitalise the first letter",
+    });
+    await userEvent.click(capitalise);
+    await waitFor(() => expect(capitalise).toBeChecked());
+  },
+};
+export const OutputCopyOnly: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], undefined, {
+      pasteMethod: "copyOnly",
+      trailingSpace: true,
+      capitalizeFirst: true,
+    }),
+  render: () => <GeneralPage page="Output" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(
+      await c.findByRole("switch", { name: "Restore clipboard" }),
+    ).toBeDisabled();
+    await expect(
+      c.getByRole("switch", { name: "Add a trailing space" }),
+    ).toBeChecked();
+  },
+};
+export const Advanced: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, []),
+  render: () => <GeneralPage page="Advanced" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const warm = await c.findByRole("switch", {
+      name: "Keep the microphone ready",
+    });
+    await expect(warm).not.toBeChecked();
+    await userEvent.click(warm);
+    await waitFor(() => expect(warm).toBeChecked());
+    await expect(c.getByText(/first word isn’t clipped/)).toBeVisible();
+    const position = c.getByRole("combobox", { name: "Overlay position" });
+    await userEvent.selectOptions(position, "top");
+    await waitFor(() => expect(position).toHaveValue("top"));
+    await waitFor(() => expect(position).toBeEnabled());
+    await userEvent.selectOptions(position, "bottom");
+  },
+};
+export const About: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, []),
+  render: () => <GeneralPage page="About" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(await c.findByText(/Logs\/com\.kelechiodom/)).toBeVisible();
+    await expect(c.getByRole("status", { name: "Version" })).toHaveTextContent(
+      "0.1.0",
+    );
+    await userEvent.click(
+      c.getByRole("button", { name: "Show in Finder, app data" }),
+    );
+    await userEvent.click(
+      c.getByRole("button", { name: "Show in Finder, logs" }),
+    );
+    await userEvent.click(
+      c.getByRole("button", { name: "View on GitHub, source code" }),
+    );
+    await expect(opened).toEqual(["data", "logs", "source"]);
   },
 };
 export const Overlay: Story = {

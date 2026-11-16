@@ -3,6 +3,8 @@ export type ShortcutMode = "hold" | "toggle";
 export type Theme = "ember" | "paper";
 export type AppearanceMode = "system" | "light" | "dark";
 export type OverlayPosition = "top" | "bottom";
+export type PasteMethod = "paste" | "copyOnly";
+export type MicMode = "onDemand" | "warm";
 export type HistoryRetention = "day" | "week" | "month" | "forever";
 export type Settings = {
   version: number;
@@ -15,4 +17,11 @@ export type Settings = {
   overlayPosition: OverlayPosition;
   historyRetention: HistoryRetention;
   speechModel: SpeechModel;
+  pasteMethod: PasteMethod;
+  restoreClipboard: boolean;
+  trailingSpace: boolean;
+  capitalizeFirst: boolean;
+  micMode: MicMode;
+  soundFeedback: boolean;
+  debugRecordings: boolean;
 };

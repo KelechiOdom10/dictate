@@ -110,9 +110,11 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
                   ? { kind: "transcribing" }
                   : status.phase === "done"
                     ? { kind: "done" }
-                    : status.phase === "skipped"
-                      ? { kind: "skipped" }
-                      : { kind: "ready", message: "Ready" }
+                    : status.phase === "copied"
+                      ? { kind: "copied" }
+                      : status.phase === "skipped"
+                        ? { kind: "skipped" }
+                        : { kind: "ready", message: "Ready" }
           }
           notice={
             status.phase === "recording" || status.phase === "transcribing"

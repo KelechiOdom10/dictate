@@ -8,7 +8,7 @@ export function SettingsRow({
 }: {
   id: string;
   label: string;
-  help: string;
+  help: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -67,5 +67,12 @@ export function SidebarNav({
         </button>
       ))}
     </nav>
+  );
+}
+export function PathText({ children }: { children: string }) {
+  return (
+    <code className="ui-path" title={children}>
+      {children}
+    </code>
   );
 }

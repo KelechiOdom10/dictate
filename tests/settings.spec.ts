@@ -70,6 +70,13 @@ async function openSettings(
         historyRetention: "week",
         appearanceMode: "system",
         speechModel: "base.en",
+        pasteMethod: "paste",
+        restoreClipboard: true,
+        trailingSpace: false,
+        capitalizeFirst: false,
+        micMode: "onDemand",
+        soundFeedback: false,
+        debugRecordings: false,
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
         value: { unregisterListener: () => {} },
@@ -180,10 +187,18 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
     page.getByRole("region", { name: "Base English" }),
   ).toContainText("In use");
   await page.getByRole("button", { name: "Output", exact: true }).click();
+  await page
+    .getByLabel("After you dictate", { exact: true })
+    .selectOption("copyOnly");
   await expect(
-    page.getByRole("heading", { name: "Coming soon" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Back to General" }).click();
+    page.getByRole("switch", { name: "Restore clipboard" }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByRole("switch", { name: "Sound feedback" }).click();
+  await expect(
+    page.getByRole("switch", { name: "Sound feedback" }),
+  ).toBeChecked();
+  await page.getByRole("button", { name: "General", exact: true }).click();
   await expect(page.getByLabel("Microphone", { exact: true })).toHaveValue(
     "USB Microphone",
   );
@@ -297,6 +312,13 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           historyRetention: "week",
           appearanceMode: "system",
           speechModel: "base.en",
+          pasteMethod: "paste",
+          restoreClipboard: true,
+          trailingSpace: false,
+          capitalizeFirst: false,
+          micMode: "onDemand",
+          soundFeedback: false,
+          debugRecordings: false,
         },
       },
       "*",
@@ -463,6 +485,13 @@ test("overlay applies appearance events live, including System changes", async (
                 historyRetention: "week",
                 appearanceMode,
                 speechModel: "base.en",
+                pasteMethod: "paste",
+                restoreClipboard: true,
+                trailingSpace: false,
+                capitalizeFirst: false,
+                micMode: "onDemand",
+                soundFeedback: false,
+                debugRecordings: false,
               },
             },
             "*",
@@ -564,6 +593,13 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 overlayPosition: "bottom",
                 historyRetention: "week",
                 speechModel: "base.en",
+                pasteMethod: "paste",
+                restoreClipboard: true,
+                trailingSpace: false,
+                capitalizeFirst: false,
+                micMode: "onDemand",
+                soundFeedback: false,
+                debugRecordings: false,
               },
             },
             "*",

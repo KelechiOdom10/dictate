@@ -1,4 +1,5 @@
 use crate::problem::Problem;
+use crate::settings::{PasteMethod, Settings};
 use tauri::AppHandle;
 
 pub fn accessibility_needed() -> Problem {
@@ -8,9 +9,46 @@ pub fn accessibility_needed() -> Problem {
     )
 }
 
-pub fn paste(_app: &AppHandle, text: &str) -> Result<(), Problem> {
+/// How a finished transcript reaches the user, read from Output settings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Delivery {
+    pub method: PasteMethod,
+    pub restore_clipboard: bool,
+}
+
+impl Delivery {
+    pub fn from_settings(settings: &Settings) -> Self {
+        Self {
+            method: settings.paste_method,
+            restore_clipboard: settings.restore_clipboard,
+        }
+    }
+}
+
+/// Applies the Output text options to a trimmed transcript.
+pub fn shape(text: &str, capitalize_first: bool, trailing_space: bool) -> String {
+    let mut shaped = String::with_capacity(text.len() + 1);
+    let mut capitalize = capitalize_first;
+    for c in text.chars() {
+        if capitalize && c.is_alphabetic() {
+            shaped.extend(c.to_uppercase());
+            capitalize = false;
+        } else {
+            if capitalize && c.is_alphanumeric() {
+                capitalize = false;
+            }
+            shaped.push(c);
+        }
+    }
+    if trailing_space && !shaped.is_empty() && !shaped.ends_with(char::is_whitespace) {
+        shaped.push(' ');
+    }
+    shaped
+}
+
+pub fn paste(_app: &AppHandle, text: &str, delivery: Delivery) -> Result<(), Problem> {
     #[cfg(target_os = "macos")]
-    return objc2::rc::autoreleasepool(|_| macos::paste(text));
+    return objc2::rc::autoreleasepool(|_| macos::paste(text, delivery));
     #[cfg(not(target_os = "macos"))]
     Err(Problem::new(
         "Paste unavailable",
@@ -21,6 +59,7 @@ pub fn paste(_app: &AppHandle, text: &str) -> Result<(), Problem> {
 #[cfg(target_os = "macos")]
 mod macos {
     use crate::problem::Problem;
+    use crate::settings::PasteMethod;
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use objc2::{rc::Retained, runtime::ProtocolObject};
@@ -42,16 +81,19 @@ mod macos {
         fn AXIsProcessTrusted() -> bool;
     }
 
-    pub(super) fn paste(text: &str) -> Result<(), Problem> {
+    pub(super) fn paste(text: &str, delivery: super::Delivery) -> Result<(), Problem> {
         let _guard = PASTE
             .try_lock()
             .map_err(|_| Problem::new("Still pasting", "Wait a moment, then dictate again."))?;
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+        if delivery.method == PasteMethod::CopyOnly {
+            return copy_to_board(&NSPasteboard::generalPasteboard(), text);
+        }
         // SAFETY: AXIsProcessTrusted has no arguments or caller preconditions.
         if !unsafe { AXIsProcessTrusted() } {
             return Err(super::accessibility_needed());
-        }
-        if text.trim().is_empty() {
-            return Ok(());
         }
         let source = CGEventSource::new(CGEventSourceStateID::Private)
             .map_err(|_| paste_failed("Could not create keyboard event source"))?;
@@ -62,10 +104,33 @@ mod macos {
         down.set_flags(CGEventFlags::CGEventFlagCommand);
         up.set_flags(CGEventFlags::CGEventFlagCommand);
 
-        paste_to_board(&NSPasteboard::generalPasteboard(), text, || {
+        let send = || {
             down.post(CGEventTapLocation::HID);
             up.post(CGEventTapLocation::HID);
-        })
+        };
+        let board = NSPasteboard::generalPasteboard();
+        if delivery.restore_clipboard {
+            paste_to_board(&board, text, send)
+        } else {
+            copy_to_board(&board, text)?;
+            send();
+            Ok(())
+        }
+    }
+
+    /// Leaves the transcript on the clipboard, replacing what was there.
+    fn copy_to_board(board: &NSPasteboard, text: &str) -> Result<(), Problem> {
+        board.clearContents();
+        // SAFETY: AppKit exports this immutable pasteboard type constant.
+        if board.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString }) {
+            Ok(())
+        } else {
+            Err(Problem::new(
+                "Couldn’t copy",
+                "Your words are in History. Copy them from there.",
+            )
+            .because("Could not put transcript on clipboard"))
+        }
     }
 
     fn clipboard_unsaved(cause: &str) -> Problem {
@@ -126,7 +191,7 @@ mod macos {
             send();
             let posted = Instant::now();
             thread::sleep(RESTORE_DELAY);
-            println!("[insert] restore_delay_ms={}", posted.elapsed().as_millis());
+            log::info!("[insert] restore_delay_ms={}", posted.elapsed().as_millis());
         }
         if board.changeCount() != transcript_count {
             return Err(Problem::new(
@@ -199,6 +264,22 @@ mod macos {
         }
 
         #[test]
+        fn copy_only_replaces_the_clipboard_with_the_transcript() {
+            let board = NSPasteboard::pasteboardWithUniqueName();
+            // SAFETY: AppKit exports this immutable pasteboard type constant.
+            let string = unsafe { NSPasteboardTypeString };
+            assert!(board.setString_forType(&NSString::from_str("before"), string));
+            copy_to_board(&board, "spoken words ").unwrap();
+            let items = board.pasteboardItems().unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(
+                board.stringForType(string).unwrap().to_string(),
+                "spoken words "
+            );
+            board.clearContents();
+        }
+
+        #[test]
         fn restores_empty_clipboard_and_preserves_a_new_copy_during_paste() {
             let board = NSPasteboard::pasteboardWithUniqueName();
             paste_to_board(&board, "spoken words", || {}).unwrap();
@@ -223,5 +304,47 @@ mod macos {
             );
             board.clearContents();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shape_capitalizes_the_first_letter_and_adds_one_trailing_space() {
+        assert_eq!(shape("hello world", false, false), "hello world");
+        assert_eq!(shape("hello world", true, false), "Hello world");
+        assert_eq!(shape("hello world", false, true), "hello world ");
+        assert_eq!(shape("hello world", true, true), "Hello world ");
+        assert_eq!(shape("\"quoted\" text", true, false), "\"Quoted\" text");
+        assert_eq!(shape("éclair", true, false), "Éclair");
+        assert_eq!(shape("42 apples", true, false), "42 apples");
+        assert_eq!(shape("Already.", true, true), "Already. ");
+        assert_eq!(shape("ends with space ", false, true), "ends with space ");
+        assert_eq!(shape("", true, true), "");
+    }
+
+    #[test]
+    fn delivery_follows_output_settings() {
+        let settings = Settings {
+            paste_method: PasteMethod::CopyOnly,
+            restore_clipboard: false,
+            ..Settings::default()
+        };
+        assert_eq!(
+            Delivery::from_settings(&settings),
+            Delivery {
+                method: PasteMethod::CopyOnly,
+                restore_clipboard: false
+            }
+        );
+        assert_eq!(
+            Delivery::from_settings(&Settings::default()),
+            Delivery {
+                method: PasteMethod::Paste,
+                restore_clipboard: true
+            }
+        );
     }
 }

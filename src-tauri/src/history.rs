@@ -14,6 +14,7 @@ use crate::settings::HistoryRetention;
 #[serde(rename_all = "camelCase")]
 pub enum TakeStatus {
     Pasted,
+    Copied,
     Skipped,
     Failed,
 }
@@ -22,6 +23,7 @@ impl TakeStatus {
     fn as_str(self) -> &'static str {
         match self {
             Self::Pasted => "pasted",
+            Self::Copied => "copied",
             Self::Skipped => "skipped",
             Self::Failed => "failed",
         }
@@ -30,6 +32,7 @@ impl TakeStatus {
     fn parse(value: &str) -> rusqlite::Result<Self> {
         match value {
             "pasted" => Ok(Self::Pasted),
+            "copied" => Ok(Self::Copied),
             "skipped" => Ok(Self::Skipped),
             "failed" => Ok(Self::Failed),
             other => Err(rusqlite::Error::FromSqlConversionFailure(
@@ -85,7 +88,8 @@ pub struct HistoryList {
 }
 
 /// Each entry upgrades the schema by one `user_version`. Append, never edit.
-const MIGRATIONS: &[&str] = &["CREATE TABLE takes (
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE takes (
         id INTEGER PRIMARY KEY,
         text TEXT NOT NULL,
         created_at_ms INTEGER NOT NULL,
@@ -97,7 +101,24 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE takes (
         status TEXT NOT NULL CHECK (status IN ('pasted', 'skipped', 'failed')),
         detail TEXT
     );
-    CREATE INDEX takes_created_at ON takes (created_at_ms);"];
+    CREATE INDEX takes_created_at ON takes (created_at_ms);",
+    "CREATE TABLE takes_v2 (
+        id INTEGER PRIMARY KEY,
+        text TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        app TEXT,
+        model TEXT NOT NULL,
+        audio_ms INTEGER NOT NULL,
+        inference_ms INTEGER,
+        total_ms INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pasted', 'copied', 'skipped', 'failed')),
+        detail TEXT
+    );
+    INSERT INTO takes_v2 SELECT * FROM takes;
+    DROP TABLE takes;
+    ALTER TABLE takes_v2 RENAME TO takes;
+    CREATE INDEX takes_created_at ON takes (created_at_ms);",
+];
 
 /// Why history could not open. A newer schema needs a newer app; anything
 /// else may clear up on restart.
@@ -396,6 +417,46 @@ mod tests {
                 "{retention:?}"
             );
         }
+    }
+
+    #[test]
+    fn version_one_history_keeps_its_takes_and_accepts_copied() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch(MIGRATIONS[0]).unwrap();
+        connection
+            .pragma_update(None, "user_version", 1_i64)
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO takes (text, created_at_ms, model, audio_ms, total_ms, status)
+                 VALUES ('before upgrade', 5, 'ggml-base.en', 10, 20, 'pasted')",
+                [],
+            )
+            .unwrap();
+        assert!(
+            connection
+                .execute(
+                    "INSERT INTO takes (text, created_at_ms, model, audio_ms, total_ms, status)
+                     VALUES ('x', 6, 'm', 1, 1, 'copied')",
+                    [],
+                )
+                .is_err()
+        );
+        drop(connection);
+        let store = Store::open(&path).unwrap();
+        store
+            .insert(&NewTake {
+                status: TakeStatus::Copied,
+                ..take("copied take", 7)
+            })
+            .unwrap();
+        let entries = store.list("", 500).unwrap().entries;
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].status, TakeStatus::Copied);
+        assert_eq!(entries[1].text, "before upgrade");
+        assert_eq!(entries[1].status, TakeStatus::Pasted);
     }
 
     #[test]

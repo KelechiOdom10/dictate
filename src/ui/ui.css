@@ -383,7 +383,8 @@ p {
 .ui-capsule .ui-level-bars span {
   background: var(--overlay-accent);
 }
-.ui-capsule-done {
+.ui-capsule-done,
+.ui-capsule-copied {
   color: var(--overlay-success);
 }
 .ui-capsule-error {
@@ -701,6 +702,18 @@ kbd {
   margin-top: var(--space-1);
   font-size: var(--font-sm);
   max-width: 48ch;
+}
+.ui-path {
+  display: block;
+  margin-top: var(--space-1);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: var(--font-sm);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.ui-row-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
 }
 .ui-settings-group + .ui-settings-group {
   margin-top: var(--space-8);

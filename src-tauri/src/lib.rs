@@ -24,12 +24,13 @@ mod models;
 mod overlay;
 mod problem;
 mod settings;
+mod sound;
 mod surface;
 
 use history::{HistoryList, NewTake, TakeStatus};
 use models::{ModelEntry, SpeechModel};
 use problem::Problem;
-use settings::{HistoryRetention, Settings, ShortcutMode};
+use settings::{HistoryRetention, MicMode, PasteMethod, Settings, ShortcutMode};
 use std::{
     path::{Path, PathBuf},
     sync::Mutex,
@@ -229,12 +230,153 @@ fn record_stop() -> Result<usize, String> {
 #[tauri::command]
 fn finish_dictation(app: AppHandle) -> Result<String, String> {
     let samples = audio::stop()?;
+    let settings = app
+        .state::<Mutex<Runtime>>()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .settings
+        .clone();
+    save_debug_recording(&app, &samples, settings.debug_recordings);
     let model = active_model_path(&app)?;
-    let text = dictation_text(&samples, &model)?.text;
+    let text = output_text(&dictation_text(&samples, &model)?.text, &settings);
     if !text.is_empty() {
-        insert::paste(&app, &text)?;
+        insert::paste(&app, &text, insert::Delivery::from_settings(&settings))?;
     }
     Ok(text)
+}
+
+/// The transcript as Output settings shape it. Empty stays empty.
+fn output_text(text: &str, settings: &Settings) -> String {
+    insert::shape(text, settings.capitalize_first, settings.trailing_space)
+}
+
+const DEBUG_RECORDINGS_KEPT: usize = 20;
+
+fn debug_recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("debug-recordings"))
+}
+
+/// Saves a take's audio when Advanced → Save debug recordings is on, or when
+/// launched with `DICTATE_DEBUG_WAV=1`. Keeps the newest 20.
+fn save_debug_recording(app: &AppHandle, samples: &[f32], enabled: bool) {
+    let forced = std::env::var_os("DICTATE_DEBUG_WAV").is_some_and(|value| value == "1");
+    if !(enabled || forced) || samples.is_empty() {
+        return;
+    }
+    let result = debug_recordings_dir(app).and_then(|dir| {
+        let path = write_debug_recording(&dir, samples, history::now_ms())?;
+        prune_debug_recordings(&dir, DEBUG_RECORDINGS_KEPT)?;
+        Ok(path)
+    });
+    match result {
+        Ok(path) => log::info!("[audio] debug WAV: {}", path.display()),
+        Err(error) => log::warn!("[audio] debug WAV: {error}"),
+    }
+}
+
+fn write_debug_recording(dir: &Path, samples: &[f32], now_ms: i64) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("Create {}: {e}", dir.display()))?;
+    let path = dir.join(format!("take-{now_ms}.wav"));
+    audio::save_wav(&path, samples)?;
+    Ok(path)
+}
+
+fn prune_debug_recordings(dir: &Path, keep: usize) -> Result<(), String> {
+    let mut takes: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "wav")
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("take-"))
+        })
+        .collect();
+    takes.sort_by_key(|path| {
+        path.file_stem()
+            .and_then(|stem| {
+                stem.to_string_lossy()
+                    .strip_prefix("take-")?
+                    .parse::<i64>()
+                    .ok()
+            })
+            .unwrap_or(0)
+    });
+    let excess = takes.len().saturating_sub(keep);
+    for path in &takes[..excess] {
+        std::fs::remove_file(path).map_err(|e| format!("Remove {}: {e}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Opens or closes the always-on microphone to match Advanced settings.
+fn apply_mic_mode(settings: &Settings) -> Result<(), Problem> {
+    let device = (settings.mic_mode == MicMode::Warm).then(|| settings.microphone.clone());
+    audio::keep_warm(device).map_err(|cause| {
+        Problem::new(
+            "Microphone couldn’t stay ready",
+            "It opens when you dictate instead. Check it in Settings → General.",
+        )
+        .because(cause)
+    })
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppFolders {
+    data: String,
+    logs: String,
+}
+
+#[tauri::command]
+fn app_folders(app: AppHandle) -> Result<AppFolders, String> {
+    let path = app.path();
+    Ok(AppFolders {
+        data: path
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .display()
+            .to_string(),
+        logs: path
+            .app_log_dir()
+            .map_err(|e| e.to_string())?
+            .display()
+            .to_string(),
+    })
+}
+
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum Location {
+    Data,
+    Logs,
+    Source,
+}
+
+const SOURCE_URL: &str = "https://github.com/KelechiOdom10/dictate";
+
+#[tauri::command]
+fn open_location(app: AppHandle, location: Location) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let folder = match location {
+        Location::Source => {
+            return app
+                .opener()
+                .open_url(SOURCE_URL, None::<&str>)
+                .map_err(|e| e.to_string());
+        }
+        Location::Data => app.path().app_data_dir(),
+        Location::Logs => app.path().app_log_dir(),
+    }
+    .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&folder).map_err(|e| format!("Create {}: {e}", folder.display()))?;
+    app.opener()
+        .open_path(folder.display().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 const MIN_TAKE_SAMPLES: usize = 4_800;
@@ -266,7 +408,7 @@ struct Transcript {
 
 fn dictation_text(samples: &[f32], model: &Path) -> Result<Transcript, Problem> {
     if let Some(reason) = take_skip_reason(samples) {
-        println!("[hotkey] skipped: {reason}");
+        log::info!("[hotkey] skipped: {reason}");
         return Ok(Transcript {
             text: String::new(),
             inference_ms: None,
@@ -277,7 +419,7 @@ fn dictation_text(samples: &[f32], model: &Path) -> Result<Transcript, Problem> 
     let text = transcribe::transcribe(samples, model)?;
     let inference_ms = Some(started.elapsed().as_millis() as i64);
     if !transcript_has_text(&text) {
-        println!("[hotkey] skipped: transcript has no letters or numbers");
+        log::info!("[hotkey] skipped: transcript has no letters or numbers");
         return Ok(Transcript {
             text: String::new(),
             inference_ms,
@@ -308,10 +450,10 @@ fn record_take(app: &AppHandle, take: &NewTake, retention: HistoryRetention) {
     match result {
         Ok(_) => {
             if let Err(error) = app.emit("history-changed", ()) {
-                eprintln!("[history] emit: {error}");
+                log::warn!("[history] emit: {error}");
             }
         }
-        Err(error) => eprintln!("[history] {error}"),
+        Err(error) => log::warn!("[history] {error}"),
     }
 }
 
@@ -359,7 +501,7 @@ fn list_models(app: AppHandle) -> Result<Vec<ModelEntry>, String> {
 
 fn models_changed(app: &AppHandle) {
     if let Err(error) = app.emit("models-changed", ()) {
-        eprintln!("[models] emit: {error}");
+        log::warn!("[models] emit: {error}");
     }
 }
 
@@ -388,8 +530,8 @@ fn download_model(app: AppHandle, model: SpeechModel) -> Result<(), String> {
             }
         });
         match &result {
-            Ok(()) => println!("[models] downloaded {}", models::info(model).file_name),
-            Err(error) => eprintln!("[models] {}: {error}", models::info(model).file_name),
+            Ok(()) => log::info!("[models] downloaded {}", models::info(model).file_name),
+            Err(error) => log::warn!("[models] {}: {error}", models::info(model).file_name),
         }
         if let Ok(mut downloads) = app.state::<Models>().downloads.lock() {
             downloads.finish(model, &result);
@@ -451,8 +593,14 @@ fn get_settings(app: AppHandle) -> Result<Settings, String> {
 fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let state = app.state::<Mutex<Runtime>>();
     let mut runtime = state.lock().map_err(|e| e.to_string())?;
+    let previous = runtime.settings.clone();
     let shortcut_changed = runtime.save_settings(settings.clone(), &app)?;
     drop(runtime);
+    if (previous.mic_mode, &previous.microphone) != (settings.mic_mode, &settings.microphone)
+        && let Err(problem) = apply_mic_mode(&settings)
+    {
+        report_error(&app, &problem);
+    }
     if shortcut_changed {
         surface::clear_error(&app);
     }
@@ -546,13 +694,13 @@ fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String>
 /// holding the `Runtime` lock: showing the overlay asks the focused app for
 /// its window over Accessibility.
 fn report_error(app: &AppHandle, error: &Problem) {
-    eprintln!("[dictate] {error}");
+    log::warn!("[dictate] {error}");
     surface::set_error(app, error);
     if let Err(error) = overlay::show(app) {
-        eprintln!("[dictate] show error: {error}");
+        log::warn!("[dictate] show error: {error}");
     }
     if let Err(error) = app.emit("dictation-error", error) {
-        eprintln!("[dictate] emit error: {error}");
+        log::warn!("[dictate] emit error: {error}");
     }
 }
 
@@ -573,6 +721,12 @@ fn hotkey(
         return;
     }
     if next == Phase::Recording {
+        let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
+        if !model.is_file() {
+            drop(runtime);
+            report_error(app, &transcribe::missing_model(&model));
+            return;
+        }
         runtime.take_id += 1;
         runtime.take_start = Some(TakeStart {
             started_at_ms: history::now_ms(),
@@ -589,6 +743,9 @@ fn hotkey(
         }
         runtime.phase = Phase::Recording;
         surface::set_phase(app, "recording");
+        if runtime.settings.sound_feedback {
+            sound::play(sound::Cue::Start);
+        }
         let take_id = runtime.take_id;
         drop(runtime);
         if let Err(error) = overlay::show(app) {
@@ -624,26 +781,37 @@ fn hotkey(
         });
         let retention = runtime.settings.history_retention;
         let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
+        let settings = runtime.settings.clone();
         match audio::stop() {
             Ok(samples) => {
+                if settings.sound_feedback {
+                    sound::play(sound::Cue::Stop);
+                }
                 runtime.phase = Phase::Transcribing;
                 surface::set_phase(app, "transcribing");
                 let take_id = runtime.take_id;
                 let app = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    let transcript = dictation_text(&samples, &model);
+                    save_debug_recording(&app, &samples, settings.debug_recordings);
+                    let delivery = insert::Delivery::from_settings(&settings);
+                    let transcript = dictation_text(&samples, &model).map(|t| Transcript {
+                        text: output_text(&t.text, &settings),
+                        ..t
+                    });
                     let result = transcript.as_ref().map_err(Clone::clone).and_then(|t| {
                         if !t.text.is_empty() {
-                            insert::paste(&app, &t.text)?;
+                            insert::paste(&app, &t.text, delivery)?;
                         }
                         Ok(!t.text.is_empty())
                     });
                     let total_ms = released.elapsed().as_millis() as i64;
                     let (text, inference_ms, skip_reason) = match transcript {
-                        Ok(t) => (t.text, t.inference_ms, t.skip_reason),
+                        Ok(t) => (t.text.trim_end().to_string(), t.inference_ms, t.skip_reason),
                         Err(_) => (String::new(), None, None),
                     };
+                    let copy_only = delivery.method == PasteMethod::CopyOnly;
                     let (status, detail) = match &result {
+                        Ok(true) if copy_only => (TakeStatus::Copied, None),
                         Ok(true) => (TakeStatus::Pasted, None),
                         Ok(false) => (TakeStatus::Skipped, skip_reason),
                         Err(error) => (TakeStatus::Failed, Some(error.to_string())),
@@ -664,6 +832,7 @@ fn hotkey(
                         retention,
                     );
                     let outcome = match result {
+                        Ok(true) if copy_only => "copied",
                         Ok(true) => "done",
                         Ok(false) => "skipped",
                         Err(error) => {
@@ -671,16 +840,15 @@ fn hotkey(
                             "idle"
                         }
                     };
-                    println!("[dictate] release_to_complete_ms={total_ms}");
+                    log::info!("[dictate] release_to_complete_ms={total_ms}");
                     if let Ok(mut runtime) = app.state::<Mutex<Runtime>>().lock() {
                         surface::set_phase(&app, outcome);
                         runtime.phase = Phase::Idle;
                     }
                     let completed = surface::status(&app);
-                    std::thread::sleep(std::time::Duration::from_millis(if outcome == "done" {
-                        900
-                    } else {
-                        1800
+                    std::thread::sleep(std::time::Duration::from_millis(match outcome {
+                        "done" => 900,
+                        _ => 1800,
                     }));
                     let state = app.state::<Mutex<Runtime>>();
                     let Ok(runtime) = state.lock() else {
@@ -756,6 +924,19 @@ fn shortcut_transition(mode: ShortcutMode, phase: Phase, event: ShortcutState) -
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("dictate".into()),
+                    }),
+                ])
+                .level(log::LevelFilter::Info)
+                .max_file_size(2_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
@@ -787,14 +968,27 @@ pub fn run() {
             download_model,
             cancel_download,
             delete_model,
-            whisper_status
+            whisper_status,
+            app_folders,
+            open_location
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let data_dir = app.path().app_data_dir()?;
-            let (settings, mut startup_error) =
+            let (mut settings, mut startup_error) =
                 settings::load_or_default(&data_dir.join("settings.json"));
+            let models_dir = data_dir.join("models");
+            let removed = models::remove_partials(&models_dir);
+            if removed > 0 {
+                log::info!("[models] removed {removed} unfinished download(s)");
+            }
+            if let Some(model) = models::adopt_legacy(&models_dir, &models::legacy_candidates()) {
+                settings.speech_model = model;
+                if let Err(error) = settings::save(&data_dir.join("settings.json"), &settings) {
+                    log::warn!("[models] save adopted model: {error}");
+                }
+            }
             let store = history::Store::open(&data_dir.join("history.sqlite3")).and_then(|store| {
                 store
                     .prune(settings.history_retention, history::now_ms())
@@ -812,7 +1006,7 @@ pub fn run() {
             });
             app.manage::<History>(Mutex::new(store));
             app.manage(Models {
-                dir: data_dir.join("models"),
+                dir: models_dir,
                 downloads: Mutex::default(),
             });
             let shortcut_registered = match settings.chord().and_then(|chord| {
@@ -843,6 +1037,14 @@ pub fn run() {
                 shortcut_registered,
             }));
             app.manage(Mutex::new(settings.overlay_position));
+            if settings.mic_mode == MicMode::Warm
+                && let Err(problem) = apply_mic_mode(&settings)
+            {
+                startup_error = Some(match startup_error {
+                    Some(previous) => previous.and(problem),
+                    None => problem,
+                });
+            }
             surface::setup(app, &settings)?;
             if let Some(window) = app.get_webview_window("main") {
                 window.set_ignore_cursor_events(true)?;
@@ -865,13 +1067,13 @@ pub fn run() {
             {
                 api.prevent_close();
                 if let Err(error) = capture_shortcut(window.app_handle().clone(), false) {
-                    eprintln!("[settings] {error}");
+                    log::warn!("[settings] {error}");
                 }
                 if let Err(error) = window.hide() {
-                    eprintln!("[settings] {error}");
+                    log::warn!("[settings] {error}");
                 }
                 if let Err(error) = audio::monitor_stop() {
-                    eprintln!("[settings] {error}");
+                    log::warn!("[settings] {error}");
                 }
             }
         })
@@ -1198,6 +1400,38 @@ mod take_tests {
             assert_eq!(transcript.inference_ms, None);
             assert!(transcript.skip_reason.is_some());
         }
+    }
+
+    #[test]
+    fn debug_recordings_keep_only_the_newest_takes() {
+        let dir = tempfile::tempdir().unwrap();
+        let recordings = dir.path().join("debug-recordings");
+        for now_ms in [5, 30, 100, 2_000] {
+            write_debug_recording(&recordings, &[0.1, -0.1], now_ms).unwrap();
+        }
+        std::fs::write(recordings.join("notes.txt"), "kept").unwrap();
+        prune_debug_recordings(&recordings, 2).unwrap();
+        let mut left: Vec<String> = std::fs::read_dir(&recordings)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["notes.txt", "take-100.wav", "take-2000.wav"]);
+    }
+
+    #[test]
+    fn output_text_applies_settings_and_leaves_skips_empty() {
+        let settings = Settings {
+            capitalize_first: true,
+            trailing_space: true,
+            ..Settings::default()
+        };
+        assert_eq!(output_text("send it now", &settings), "Send it now ");
+        assert_eq!(output_text("", &settings), "");
+        assert_eq!(
+            output_text("send it now", &Settings::default()),
+            "send it now"
+        );
     }
 
     #[test]

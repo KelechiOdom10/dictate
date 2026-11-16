@@ -36,6 +36,18 @@ const modelsReady = {
   "pages--models-error": (page) =>
     page.getByText("brew install whisper.cpp").waitFor(),
 };
+const settingsReady = {
+  "pages--output": (page) =>
+    page.locator("#capitalize-first:checked:enabled").waitFor(),
+  "pages--output-copy-only": (page) =>
+    page.locator("#restore-clipboard:disabled").waitFor(),
+  "pages--advanced": (page) =>
+    page.locator("#mic-warm:checked:enabled").waitFor(),
+  "pages--about": (page) =>
+    page.locator("output#version", { hasText: "0.1.0" }).waitFor(),
+  "pages--general-no-model": (page) =>
+    page.getByRole("button", { name: "Download a model" }).waitFor(),
+};
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({
@@ -82,7 +94,8 @@ try {
             ? 1440
             : entry.id === "pages--general" ||
                 entry.id in historyReady ||
-                entry.id in modelsReady
+                entry.id in modelsReady ||
+                entry.id in settingsReady
               ? 820
               : 1000,
           height:
@@ -107,6 +120,7 @@ try {
           await page.locator("#login").waitFor();
         if (entry.id in historyReady) await historyReady[entry.id](page);
         if (entry.id in modelsReady) await modelsReady[entry.id](page);
+        if (entry.id in settingsReady) await settingsReady[entry.id](page);
         await page.evaluate(async () => {
           await document.fonts.ready;
           for (const weight of [400, 500, 600]) {
@@ -186,6 +200,9 @@ try {
         "pages--history",
         "pages--models-downloading",
         "pages--models-error",
+        "pages--output",
+        "pages--advanced",
+        "pages--about",
         "components-recordingcapsule--all-states",
       ]) {
         await page.goto(
@@ -196,6 +213,7 @@ try {
           .first()
           .waitFor({ state: "visible" });
         if (id in modelsReady) await modelsReady[id](page);
+        if (id in settingsReady) await settingsReady[id](page);
         if (
           await page.evaluate(
             () => document.documentElement.scrollWidth > innerWidth,

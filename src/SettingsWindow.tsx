@@ -5,7 +5,10 @@ import { useQuery } from "@tanstack/react-query";
 import General from "./GeneralSettings";
 import HistoryPage from "./HistoryPage";
 import ModelsPage from "./ModelsPage";
-import { Button, EmptyState, SidebarNav, Toast } from "./ui";
+import OutputPage from "./OutputPage";
+import AdvancedPage from "./AdvancedPage";
+import AboutPage from "./AboutPage";
+import { Button, SidebarNav, Toast } from "./ui";
 import {
   AudioLines,
   SlidersHorizontal,
@@ -14,9 +17,18 @@ import {
   TextCursorInput,
   Settings2,
   Info,
-  ArrowLeft,
 } from "lucide-react";
 import { useDictationStatus } from "./useDictationStatus";
+
+const subtitles: Record<string, string> = {
+  General: "Make dictate feel like second nature.",
+  Models:
+    "Choose how dictate turns speech into text. Everything runs on this Mac.",
+  History: "Everything you’ve dictated, kept on this Mac.",
+  Output: "Decide what happens to your words once you stop speaking.",
+  Advanced: "Fine-tune the microphone, overlay and troubleshooting.",
+  About: "Version, source code and where dictate keeps its files.",
+};
 
 const pages = [
   { name: "General", icon: SlidersHorizontal },
@@ -67,15 +79,7 @@ export default function SettingsWindow({
       <main className="settings-content">
         <header>
           <h1>{page}</h1>
-          <p>
-            {page === "General"
-              ? "Make dictate feel like second nature."
-              : page === "History"
-                ? "Everything you’ve dictated, kept on this Mac."
-                : page === "Models"
-                  ? "Choose how dictate turns speech into text. Everything runs on this Mac."
-                  : `Your ${page.toLowerCase()} preferences, all in one place.`}
-          </p>
+          <p>{subtitles[page]}</p>
         </header>
         {status.error && (
           <Toast
@@ -93,17 +97,12 @@ export default function SettingsWindow({
           <ModelsPage />
         ) : page === "History" ? (
           <HistoryPage />
+        ) : page === "Output" ? (
+          <OutputPage />
+        ) : page === "Advanced" ? (
+          <AdvancedPage />
         ) : (
-          <EmptyState
-            title="Coming soon"
-            action={
-              <Button onClick={() => setPage("General")}>
-                <ArrowLeft size={14} aria-hidden="true" /> Back to General
-              </Button>
-            }
-          >
-            {page} will be available in a future release.
-          </EmptyState>
+          <AboutPage />
         )}
       </main>
     </div>
