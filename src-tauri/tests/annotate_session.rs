@@ -123,13 +123,15 @@ fn a_stopped_session_with_three_marks_becomes_a_full_package() {
             fps: FPS as u32,
             duration_ms: SECONDS * 1000,
         }),
+        partial_video: None,
     };
     let annotations = temp.path().join(annotate::FOLDER);
     let folder = annotations.join(annotate::session_id(started.unix_ms));
     let samples = samples();
 
     let stopped = Instant::now();
-    let packaged = annotate::package(&folder, &samples, recorded, stopped, |_| Ok(spoken)).unwrap();
+    let packaged =
+        annotate::package(&folder, Ok(&samples), recorded, stopped, |_| Ok(spoken)).unwrap();
     let stop_to_package = stopped.elapsed();
     eprintln!("{}", packaged.summary);
     eprintln!(
@@ -181,10 +183,10 @@ fn a_stopped_session_with_three_marks_becomes_a_full_package() {
     // The copied text names files that exist, by absolute path.
     let summary = std::fs::read_to_string(folder.join(annotate::SUMMARY_FILE)).unwrap();
     assert_eq!(summary, packaged.summary);
-    let sheet_line = format!("Before you answer, open {}:", sheet.display());
+    let sheet_line = format!("Before you answer, open `{}`:", sheet.display());
     assert!(summary.contains(&sheet_line), "{summary}");
     let first = folder.join("frames/frame-01.png");
-    assert!(summary.contains(&format!("{} … frame-03.png", first.display())));
+    assert!(summary.contains(&format!("`{}` … `frame-03.png`", first.display())));
     assert!(summary.contains("- #1 (0:03) circled region"));
     for path in absolute_paths(&summary) {
         assert!(Path::new(&path).exists(), "{path} is named but missing");
@@ -206,8 +208,8 @@ fn a_stopped_session_with_three_marks_becomes_a_full_package() {
 
 /// Every `/…​.png` path in `text`.
 fn absolute_paths(text: &str) -> Vec<String> {
-    text.split([' ', ':', '\n'])
-        .filter(|word| word.starts_with('/') && word.ends_with(".png"))
+    text.split('`')
+        .filter(|part| part.starts_with('/') && part.ends_with(".png"))
         .map(str::to_string)
         .collect()
 }

@@ -1198,7 +1198,7 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
     }
     let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
     match next {
-        annotate::Phase::Recording => {
+        annotate::Phase::Starting => {
             if !model.is_file() {
                 drop(runtime);
                 report_error(app, &transcribe::missing_model(&model));
@@ -1228,56 +1228,31 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 }
             };
             let audio_offset_ms = clock.elapsed().as_millis() as u64;
-            let display = annotate::recorded_display();
-            let options = screen::CaptureOptions {
-                include_own_windows: runtime.settings.annotate_show_in_recordings,
-                ..Default::default()
-            };
-            if let Err(error) = screen::start(screen::DisplayTarget::Id(display.id), options) {
-                if let Err(stop) = audio::stop() {
-                    log::warn!("[annotate] release microphone: {stop}");
-                }
-                drop(runtime);
-                report_error(
-                    app,
-                    &if error == screen::PERMISSION_DENIED {
-                        annotate::screen_permission_needed()
-                    } else {
-                        annotate::screen_start_failed(error)
-                    },
-                );
-                return;
-            }
-            let video_offset_ms = clock.elapsed().as_millis() as u64;
-            runtime.annotate = next;
-            runtime.annotate_started = Some((
+            let start = ScreenStart {
                 clock,
-                annotate::Started {
-                    unix_ms,
-                    audio_offset_ms,
-                    video_offset_ms,
-                    display: display.clone(),
-                    frontmost_app: focus::frontmost_app_id(),
+                unix_ms,
+                audio_offset_ms,
+                display: annotate::recorded_display(),
+                frontmost_app: focus::frontmost_app_id(),
+                options: screen::CaptureOptions {
+                    include_own_windows: runtime.settings.annotate_show_in_recordings,
+                    ..Default::default()
                 },
-            ));
-            let notice = microphone_notice(fallback);
-            let show_pill = notice.is_some();
-            surface::set_notice(app, notice);
-            surface::set_phase(app, "annotating");
+                fallback,
+            };
+            runtime.annotate = next;
             drop(runtime);
-            log::info!(
-                "[annotate] started, audio_offset_ms={audio_offset_ms} video_offset_ms={video_offset_ms} display={} at ({}, {}) own_windows_in_video={}",
-                display.id,
-                display.frame.x,
-                display.frame.y,
-                options.include_own_windows,
-            );
-            annotate_ui::begin(app, display, clock, unix_ms);
-            // The floating bar shows the session; the pill only appears to
-            // carry a notice.
-            if show_pill && let Err(error) = overlay::show(app) {
-                log::warn!("[annotate] show notice: {error}");
-            }
+            // `screen::start` lists shareable content and starts the capture,
+            // both blocking system calls, so it runs here and not on the main
+            // thread that delivers shortcuts.
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let began = Instant::now();
+                let result =
+                    screen::start(screen::DisplayTarget::Id(start.display.id), start.options);
+                let screen_start_ms = began.elapsed().as_millis() as u64;
+                finish_annotate_start(&app, start, result, screen_start_ms);
+            });
         }
         annotate::Phase::Packaging => {
             let Some((clock, started)) = runtime.annotate_started.take() else {
@@ -1299,16 +1274,29 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
             }
             let app = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let video = stop_screen(&started);
+                let (video, partial_video) = stop_screen(&started);
                 let recorded = annotate::Recorded {
                     started,
                     duration_ms,
                     model: transcribe::model_name(&model),
                     strokes,
                     video,
+                    partial_video,
                 };
-                let outcome = samples
-                    .and_then(|samples| save_annotation(&app, &samples, recorded, stopped, &model));
+                // Whatever was captured is kept: only a session with neither
+                // audio nor any video is lost.
+                let outcome = match &samples {
+                    Err(error) if recorded.video.is_none() && recorded.partial_video.is_none() => {
+                        Err(error.clone())
+                    }
+                    _ => save_annotation(
+                        &app,
+                        samples.as_deref().map_err(Clone::clone),
+                        recorded,
+                        stopped,
+                        &model,
+                    ),
+                };
                 if let Ok(mut runtime) = app.state::<Mutex<Runtime>>().lock() {
                     runtime.annotate = annotate::packaged(runtime.annotate);
                     surface::set_phase(&app, "idle");
@@ -1345,13 +1333,91 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 annotate_ui::show_copied(&app, packaged.contact_sheet());
             });
         }
-        annotate::Phase::Idle => {}
+        annotate::Phase::Idle | annotate::Phase::Recording => {}
+    }
+}
+
+/// What the start tap knew, carried to the thread that starts the screen.
+struct ScreenStart {
+    clock: Instant,
+    unix_ms: i64,
+    audio_offset_ms: u64,
+    display: package::Display,
+    frontmost_app: Option<package::App>,
+    options: screen::CaptureOptions,
+    fallback: bool,
+}
+
+/// `screen::start` returned: move `Starting` to `Recording` and show the
+/// panels, or release the microphone and report why it did not start.
+fn finish_annotate_start(
+    app: &AppHandle,
+    start: ScreenStart,
+    result: Result<(), String>,
+    screen_start_ms: u64,
+) {
+    let state = app.state::<Mutex<Runtime>>();
+    let mut runtime = state.lock().unwrap_or_else(|e| e.into_inner());
+    runtime.annotate = annotate::screen_started(runtime.annotate, result.is_ok());
+    if let Err(error) = result {
+        if let Err(stop) = audio::stop() {
+            log::warn!("[annotate] release microphone: {stop}");
+        }
+        drop(runtime);
+        log::warn!("[annotate] screen start failed after screen_start_ms={screen_start_ms}");
+        report_error(
+            app,
+            &if error == screen::PERMISSION_DENIED {
+                annotate::screen_permission_needed()
+            } else {
+                annotate::screen_start_failed(error)
+            },
+        );
+        return;
+    }
+    let ScreenStart {
+        clock,
+        unix_ms,
+        audio_offset_ms,
+        display,
+        frontmost_app,
+        options,
+        fallback,
+    } = start;
+    let video_offset_ms = clock.elapsed().as_millis() as u64;
+    runtime.annotate_started = Some((
+        clock,
+        annotate::Started {
+            unix_ms,
+            audio_offset_ms,
+            video_offset_ms,
+            display: display.clone(),
+            frontmost_app,
+        },
+    ));
+    let notice = microphone_notice(fallback);
+    let show_pill = notice.is_some();
+    surface::set_notice(app, notice);
+    surface::set_phase(app, "annotating");
+    drop(runtime);
+    log::info!(
+        "[annotate] started, screen_start_ms={screen_start_ms} audio_offset_ms={audio_offset_ms} video_offset_ms={video_offset_ms} display={} at ({}, {}) own_windows_in_video={}",
+        display.id,
+        display.frame.x,
+        display.frame.y,
+        options.include_own_windows,
+    );
+    annotate_ui::begin(app, display, clock, unix_ms);
+    // The floating bar shows the session; the pill only appears to carry a
+    // notice.
+    if show_pill && let Err(error) = overlay::show(app) {
+        log::warn!("[annotate] show notice: {error}");
     }
 }
 
 /// Stops the screen recording. A failure leaves a session without video,
-/// not a lost session.
-fn stop_screen(started: &annotate::Started) -> Option<annotate::Recording> {
+/// not a lost session, and hands back any MP4 the failed stop left behind.
+fn stop_screen(started: &annotate::Started) -> (Option<annotate::Recording>, Option<PathBuf>) {
     match screen::stop() {
         Ok(video) => {
             log::info!(
@@ -1365,18 +1431,19 @@ fn stop_screen(started: &annotate::Started) -> Option<annotate::Recording> {
                 video.wall_ms,
                 video.own_windows_excluded,
             );
-            Some(annotate::Recording {
+            let recording = annotate::Recording {
                 path: video.path,
                 offset_ms: started.video_offset_ms,
                 width: video.width,
                 height: video.height,
                 fps: video.fps,
                 duration_ms: video.duration_ms,
-            })
+            };
+            (Some(recording), None)
         }
         Err(error) => {
             log::warn!("[annotate] screen stop: {error}");
-            None
+            (None, error.partial_recording)
         }
     }
 }
@@ -1400,14 +1467,19 @@ fn notify_copied(app: &AppHandle) {
 /// `annotation.json` as `packagingMs`.
 fn save_annotation(
     app: &AppHandle,
-    samples: &[f32],
+    samples: Result<&[f32], Problem>,
     recorded: annotate::Recorded,
     stopped: Instant,
     model: &Path,
 ) -> Result<annotate::Packaged, Problem> {
     let dir = annotations_dir(app)?;
     let folder = dir.join(annotate::session_id(recorded.started.unix_ms));
-    let temp_video = recorded.video.as_ref().map(|video| video.path.clone());
+    let temp_video = recorded
+        .video
+        .as_ref()
+        .map(|video| video.path.clone())
+        .or_else(|| recorded.partial_video.clone());
+    let sample_count = samples.as_ref().map_or(0, |samples| samples.len());
     let packaged = annotate::package(&folder, samples, recorded, stopped, |samples| {
         transcribe::transcribe_timed(samples, model)
     })
@@ -1427,9 +1499,9 @@ fn save_annotation(
     }
     let annotation = &packaged.annotation;
     log::info!(
-        "[annotate] packaged {} samples={} duration_ms={} words={} strokes={} marks={} frames={} transcribe_ms={} stop_to_package_ms={} render={:?}",
+        "[annotate] packaged {} samples={} duration_ms={} words={} strokes={} marks={} frames={} transcribe_ms={} stop_to_package_ms={} partial={} render={:?}",
         folder.display(),
-        samples.len(),
+        sample_count,
         annotation.duration_ms,
         annotation.transcript.words.len(),
         annotation.strokes.len(),
@@ -1437,6 +1509,7 @@ fn save_annotation(
         annotation.frames.len(),
         packaged.transcribe_ms,
         annotation.packaging_ms.unwrap_or_default(),
+        !annotation.partial.is_empty(),
         packaged.rendered,
     );
     Ok(packaged)
@@ -1796,6 +1869,85 @@ mod take_tests {
             annotate_registered: false,
             annotate_started: None,
         }
+    }
+
+    /// `build.rs` declares the app commands, so a window may call only what
+    /// its capability grants. The declared list must match what is
+    /// registered, every command must reach some window, and the Annotate
+    /// panels get only their own buttons' commands.
+    #[test]
+    fn every_command_is_declared_and_the_annotate_panels_get_only_their_own() {
+        use std::collections::BTreeSet;
+        fn between<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
+            let from = text.find(start).unwrap() + start.len();
+            &text[from..from + text[from..].find(end).unwrap()]
+        }
+        let declared: BTreeSet<String> = between(
+            include_str!("../build.rs"),
+            "const APP_COMMANDS: &[&str] = &[",
+            "];",
+        )
+        .split(',')
+        .map(|name| name.trim().trim_matches('"').to_string())
+        .filter(|name| !name.is_empty())
+        .collect();
+        let registered: BTreeSet<String> =
+            between(include_str!("lib.rs"), "generate_handler![", "])")
+                .split(',')
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .collect();
+        assert_eq!(declared, registered);
+
+        let grants = |json: &str| -> (Vec<String>, BTreeSet<String>) {
+            let capability: serde_json::Value = serde_json::from_str(json).unwrap();
+            let windows = capability["windows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|w| w.as_str().unwrap().to_string())
+                .collect();
+            let commands = capability["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|p| p.as_str()?.strip_prefix("allow-"))
+                .map(|name| name.replace('-', "_"))
+                .collect();
+            (windows, commands)
+        };
+        let set = |names: &[&str]| -> BTreeSet<String> {
+            names.iter().map(|name| name.to_string()).collect()
+        };
+        let (ink_windows, ink) = grants(include_str!("../capabilities/annotate.json"));
+        let (bar_windows, bar) = grants(include_str!("../capabilities/annotate-bar.json"));
+        let (default_windows, default) = grants(include_str!("../capabilities/default.json"));
+        assert_eq!(ink_windows, ["ink"]);
+        assert_eq!(
+            ink,
+            set(&["get_settings", "annotate_pen_down", "annotate_pen_up"])
+        );
+        assert_eq!(bar_windows, ["annotate-bar"]);
+        assert_eq!(
+            bar,
+            set(&[
+                "get_settings",
+                "annotate_bar_state",
+                "annotate_pen",
+                "annotate_stop",
+                "annotate_copy_image",
+                "annotate_dismiss",
+            ])
+        );
+        assert_eq!(default_windows, ["main", "settings"]);
+        // Every window themes itself from the stored settings, so get_settings is
+        // the one read-only command the panels share with main and settings.
+        let shared = set(&["get_settings"]);
+        assert_eq!(&default & &ink, shared);
+        assert_eq!(&default & &bar, shared);
+        assert_eq!(&ink & &bar, shared);
+        let granted: BTreeSet<String> = default.union(&ink).chain(&bar).cloned().collect();
+        assert_eq!(granted, declared);
     }
 
     #[test]

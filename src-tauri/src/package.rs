@@ -88,6 +88,10 @@ pub struct Annotation {
     /// contact sheet), in ms. Written by the session; `build` leaves it out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub packaging_ms: Option<u64>,
+    /// What a partial session lost, one sentence each: the audio or video
+    /// stopped badly but the rest was kept. Empty when the session is whole.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partial: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -279,6 +283,7 @@ pub fn build(session: Session) -> Annotation {
         contact_sheet: CONTACT_SHEET.to_string(),
         missing_permissions: session.missing_permissions,
         packaging_ms: None,
+        partial: Vec::new(),
     }
 }
 
@@ -386,11 +391,17 @@ pub fn summary(annotation: &Annotation, folder: &Path) -> String {
     if let Some(app) = &annotation.frontmost_app {
         header.push(app.name.clone());
     }
-    header.push(folder.display().to_string());
+    header.push(format!("`{}`", folder.display()));
 
     let mut out = format!("[{}]\n", header.join(" · "));
+    if !annotation.partial.is_empty() {
+        out.push_str(&format!(
+            "Partial session: {}\n",
+            annotation.partial.join(" ")
+        ));
+    }
     if let (Some(first), Some(last)) = (annotation.frames.first(), annotation.frames.last()) {
-        let path = |file: &str| folder.join(file).display().to_string();
+        let path = |file: &str| format!("`{}`", folder.join(file).display());
         out.push_str(&format!(
             "Before you answer, open {}: every frame below, numbered, with the ink drawn in. The marks only make sense on the images.\n",
             path(&annotation.contact_sheet)
@@ -401,7 +412,7 @@ pub fn summary(annotation: &Annotation, folder: &Path) -> String {
             let last_name = Path::new(&last.file)
                 .file_name()
                 .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-            format!("{} … {last_name}", path(&first.file))
+            format!("{} … `{last_name}`", path(&first.file))
         };
         out.push_str(&format!("Each frame on its own: {range}.\n"));
     }
@@ -1073,9 +1084,9 @@ mod tests {
         assert_eq!(
             summary(&annotation, Path::new(EXAMPLE_FOLDER)),
             "\
-[annotation 0:31 · System Settings · /Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36]
-Before you answer, open /Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36/contact-sheet.png: every frame below, numbered, with the ink drawn in. The marks only make sense on the images.
-Each frame on its own: /Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36/frames/frame-01.png … frame-03.png.
+[annotation 0:31 · System Settings · `/Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36`]
+Before you answer, open `/Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36/contact-sheet.png`: every frame below, numbered, with the ink drawn in. The marks only make sense on the images.
+Each frame on its own: `/Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36/frames/frame-01.png` … `frame-03.png`.
 Positions are fractions of the screen, x left→right, y top→bottom. Full data: annotation.json.
 - #1 (0:08) circled region x 0.62–0.91, y 0.18–0.33 (3 strokes) — “Here is the settings page. This toggle should be on the right.”
 - #2 (0:21) circled region x 0.20–0.74, y 0.18–0.70; stroke across x 0.80–0.95, y 0.75–0.76 — “And this list is too dense.”
@@ -1136,7 +1147,7 @@ Positions are fractions of the screen, x left→right, y top→bottom. Full data
         assert!(value.get("video").is_none());
         assert!(value.get("frontmostApp").is_none());
         assert!(
-            summary(&annotation, Path::new("/tmp/a")).starts_with("[annotation 0:31 · /tmp/a]\n")
+            summary(&annotation, Path::new("/tmp/a")).starts_with("[annotation 0:31 · `/tmp/a`]\n")
         );
         let back: Annotation = serde_json::from_value(value).unwrap();
         assert_eq!(back, annotation);
@@ -1153,12 +1164,33 @@ Positions are fractions of the screen, x left→right, y top→bottom. Full data
     }
 
     #[test]
+    fn a_partial_session_says_what_it_lost_under_the_header() {
+        let mut annotation = build(example_session());
+        annotation.partial = vec!["No audio: the microphone did not stop cleanly.".into()];
+        let text = summary(&annotation, Path::new("/tmp/a"));
+        assert!(
+            text.contains(
+                "`/tmp/a`]\nPartial session: No audio: the microphone did not stop cleanly.\n"
+            ),
+            "{text}"
+        );
+        let value = serde_json::to_value(&annotation).unwrap();
+        assert_eq!(value["partial"][0], annotation.partial[0]);
+        assert!(
+            serde_json::to_value(build(example_session()))
+                .unwrap()
+                .get("partial")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn a_single_frame_is_named_on_its_own() {
         let mut annotation = build(example_session());
         annotation.frames.truncate(1);
         let text = summary(&annotation, Path::new("/tmp/a"));
         assert!(
-            text.contains("Each frame on its own: /tmp/a/frames/frame-01.png.\n"),
+            text.contains("Each frame on its own: `/tmp/a/frames/frame-01.png`.\n"),
             "{text}"
         );
     }

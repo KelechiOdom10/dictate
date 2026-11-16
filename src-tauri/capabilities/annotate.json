@@ -1,14 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "annotate-panels",
-  "description": "Annotate's ink panel and floating bar: core defaults and events only. They call dictate's own annotate_* commands, never a plugin.",
-  "windows": [
-    "ink",
-    "annotate-bar"
-  ],
+  "identifier": "annotate-ink",
+  "description": "Annotate's ink panel: core defaults and events, read-only settings for the theme, and the two commands that mark a pen-mode drag. No plugins.",
+  "windows": ["ink"],
   "permissions": [
     "core:default",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "allow-get-settings",
+    "allow-annotate-pen-down",
+    "allow-annotate-pen-up"
   ]
 }

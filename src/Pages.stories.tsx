@@ -101,6 +101,7 @@ const sampleAnnotations = (now: number): AnnotationEntry[] => [
     folder: `${annotationsFolder}/2026-11-15_10-42-08`,
     hasContactSheet: true,
     packagingMs: 3_180,
+    partial: [],
   },
   {
     id: "2026-11-14_16-05-51",
@@ -112,7 +113,10 @@ const sampleAnnotations = (now: number): AnnotationEntry[] => [
     text: "",
     folder: `${annotationsFolder}/2026-11-14_16-05-51`,
     hasContactSheet: false,
-    packagingMs: null,
+    packagingMs: 2_040,
+    partial: [
+      "Video cut short: the screen recording did not finish, so there are no frames. What it caught is in recording-partial.mp4.",
+    ],
   },
 ];
 /** Annotate commands the pages sent, newest last, as `command id`. */
@@ -402,6 +406,9 @@ export const HistoryAnnotationActions: Story = {
     await expect(
       c.getByRole("region", { name: "Annotation" }),
     ).toHaveTextContent("Nothing was said in this session.");
+    await expect(
+      c.getByRole("region", { name: "Annotation" }),
+    ).toHaveTextContent("Partial session. Video cut short");
   },
 };
 export const HistoryAnnotationsEmpty: Story = {
