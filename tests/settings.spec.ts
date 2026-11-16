@@ -2396,6 +2396,93 @@ const rowBoxes = (rows: Locator) =>
     }),
   );
 
+for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
+  for (const mode of ["light", "dark"] as const) {
+    test(`${theme} ${mode} History markers are inset and separate from focus`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: mode, reducedMotion: "reduce" });
+      await openSettings(page, {
+        history: takes,
+        annotations: sessions,
+        stored: { themeLight: theme, themeDark: theme, appearanceMode: mode },
+      });
+      await page.getByRole("button", { name: "History", exact: true }).click();
+      for (const view of ["Dictations", "Annotations"]) {
+        await page.getByRole("radio", { name: view, exact: true }).check();
+        for (const width of [1100, 640]) {
+          await page.setViewportSize({ width, height: 760 });
+          const titles = view === "Dictations" ? /^Take / : /^Session /;
+          const controls = page.getByRole("button", { name: titles });
+          if (width === 640) await controls.first().click();
+          const selected =
+            width === 640
+              ? page.locator(".ui-history-accordion-current > button")
+              : page.locator(".ui-history-row-current");
+          await expect(selected).toHaveCount(1);
+          const shape = await selected.evaluate((row) => {
+            const marker = getComputedStyle(row, "::before");
+            const label = row.querySelector(".astryx-text")!;
+            return {
+              top: marker.top,
+              bottom: marker.bottom,
+              left: marker.left,
+              width: marker.width,
+              rounded: parseFloat(marker.borderRadius) > 0,
+              textGap:
+                label.getBoundingClientRect().left -
+                row.getBoundingClientRect().left -
+                parseFloat(marker.left) -
+                parseFloat(marker.width),
+            };
+          });
+          expect(shape).toMatchObject({
+            top: "8px",
+            bottom: "8px",
+            left: "4px",
+            width: "2px",
+            rounded: true,
+          });
+          expect(shape.textGap).toBeGreaterThanOrEqual(8);
+          const before = await controls.evaluateAll((rows) =>
+            rows.map((row) => row.getBoundingClientRect().toJSON()),
+          );
+          await page.keyboard.press("Tab");
+          await controls.nth(1).focus();
+          await expect(controls.nth(1)).toBeFocused();
+          expect(
+            await selected.evaluate(
+              (row) => getComputedStyle(row, "::before").width,
+            ),
+          ).toBe("2px");
+          const focused =
+            width === 640
+              ? controls.nth(1)
+              : controls.nth(1).locator("xpath=ancestor::li[1]");
+          expect((await edgeMarker(focused)).width).not.toBe("2px");
+          const ring = await focused.evaluate((row) => {
+            const button = row.matches("button")
+              ? row
+              : row.querySelector("button")!;
+            return [row, button].some((node) => {
+              const css = getComputedStyle(node);
+              return (
+                css.outlineStyle !== "none" && parseFloat(css.outlineWidth) > 0
+              );
+            });
+          });
+          expect(ring).toBe(true);
+          expect(
+            await controls.evaluateAll((rows) =>
+              rows.map((row) => row.getBoundingClientRect().toJSON()),
+            ),
+          ).toEqual(before);
+        }
+      }
+    });
+  }
+}
+
 test("the entry the detail belongs to is marked in both History layouts", async ({
   page,
 }) => {
