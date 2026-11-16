@@ -1,12 +1,14 @@
 # The dictate design system
 
-The reference is Voicenotes' calm list and recording UI: whitespace, neutral
-surfaces, small system type and pill actions. We use our own layout, copy and
-icons. Colours, spacing, type, radii and durations live in `src/tokens.css`;
-`src/ui/tokens.ts` exposes CSS references for TypeScript callers, without a second
-copy of their values. Semantic colours switch with the system appearance.
-Storybook's System / Light / Dark toolbar overrides appearance for inspection.
-The recording capsule deliberately retains a dark surface in both themes.
+The chosen direction is warm and quiet: Paper’s off-white and charcoal surfaces,
+ink actions, and Instrument Sans. Ember is the default; its orange only means
+recording, live input or an enabled switch. Paper uses ink for those same roles.
+General › Appearance saves Theme (Ember / Paper) and Mode (System / Light / Dark)
+in the Rust settings file. Both webviews consume the same settings event. App
+resolves System with matchMedia and applies data-theme plus data-mode on the root;
+CSS has no separate system-mode override. Storybook exposes both dimensions.
+Paper’s dark capsule is pale ink; Ember’s stays warm charcoal, matching the chosen
+comparison panels.
 
 Import components from `src/ui`. `App.css` loads the shared stylesheet and tokens.
 The library has no Tauri imports. Settings still own native commands, query data,
@@ -48,15 +50,20 @@ transitions and the busy spinner's rotation; focus rings stay visible.
 
 - `pnpm storybook` opens the component workshop (Storybook 10.6.7, React + Vite).
 - `pnpm build-storybook` writes the static workshop to `target/storybook`.
-- `pnpm test:stories` runs every story in light and dark Chromium contexts, with
+- `pnpm test:stories` runs every story in all four theme/mode Chromium contexts, with
   axe failures treated as test failures. Play functions exercise toggle keyboard
   activation, filter selection, radio arrows, search/clear/focus and shortcut
   validation/capture/cancellation.
 - `pnpm test:ui` exercises the built app through its existing browser IPC fixture.
-- `pnpm capture:ui` builds the workshop, captures Foundations, five components,
-  General light/dark and all recording states into `target/design-system`, and
-  checks the page mocks/capsule at 390px. It intercepts static files in Playwright;
-  it starts no server and closes Chromium when finished.
+- `pnpm capture:ui` builds the workshop and captures every story in all four
+  combinations into `target/design-system`, plus control hover, pressed and track
+  focus states. It checks page mocks/capsules at 320px, uses the bundled font,
+  intercepts static files in Playwright, starts no server and closes Chromium.
+- `node scripts/compare-themes.mjs <comparison-source.html>` captures matching
+  Paper/Ember reference panels with the local font and builds four comparison
+  sheets from the workshop captures. The source is supplied separately; screenshots
+  and intermediate HTML stay in target/.
+
 
 General stories render the actual settings window with Tauri's official mock IPC
 edge. Loading/error variants exercise query states. History, Models and overlay
@@ -83,28 +90,30 @@ the same size for its alignment box; the switch track stays 22px high. The
 control heights are 28 / 32 / 40px, type 12 / 13 / 14px, horizontal padding
 10 / 12 / 16px, icons 14 / 16 / 18px and gaps 6 / 8 / 10px. Settings controls
 use the default `md`. The “Controls side by side” story measures the rendered
-height and font size as well as showing the comparison.
+height, font size, horizontal padding and gaps as well as showing the comparison.
 
-The system SF Pro stack keeps this Mac utility native and needs no downloaded
-font. Labels and md controls use 13px; helper text and deliberate section
-overlines use 12px; page titles use 22px. We keep sentence case and normal
-tracking. Timers, dates, rating percentages and contrast figures use tabular
-numbers. Groups have 32px separation and 16px row insets.
+Instrument Sans is bundled as a local variable WOFF2 face for weights 400/500/600,
+with -apple-system and system-ui fallbacks. Its OFL licence and pinned download
+source are beside the font. No runtime font request leaves the app. Labels and md
+controls use 13px; helper text and section headings use 12px; page titles use 22px.
+The wider helper measure keeps the hold-to-talk instruction on one line at the
+native settings width. Timers and contrast figures use tabular numbers.
 
-The neutral ramp has a constant 255° hue in OKLCH, with very low chroma: a cool
-slate temperature that feels precise without turning the interface blue. Pale
-surface steps are close together; the dark end has wider lightness separation.
-Near-black carries primary actions in light mode, with the inverse in dark mode.
-Status uses green / orange / red / blue text on soft tinted surfaces, plus an
-icon or explicit label. Only the four rendered status roles have ramps. All
-semantic colours reference primitives. Culori verified the primitives within
-sRGB; chroma was reduced at constant lightness and hue where necessary.
+One brown ramp holds a constant 75° OKLCH hue. Close light steps preserve paper
+surfaces; distinct dark steps keep controls visible. Semantic roles reference
+primitives; hover, pressed and navigation selection have separate steps. The
+39 primitives were checked with Culori for sRGB gamut; crimson’s light text step
+needed chroma reduction at fixed lightness/hue. Danger is crimson at 355°, 45°
+away from ember’s 40°. It remains a visual risk to inspect side by side: errors
+also carry labels/icons. Warning is yellow, success green, info blue, all on soft
+tints. Actions and focus rings stay ink.
 
 `node scripts/check-contrast.mjs` paints resolved CSS colours into a Chromium
-sRGB canvas, measures WCAG luminance ratios and regenerates
-`src/ui/contrast.generated.json`. Foundations shows both appearances and the
-threshold for every measured pair, including status-action hover surfaces.
-A failed pair makes the command fail. Re-run it after editing colour tokens.
+sRGB canvas, measures WCAG luminance ratios and regenerates the contrast and
+palette JSON used by Foundations. It fails on any insufficient pair. Foundations
+shows all four combinations, including tinted status surfaces and live/danger
+examples. Re-run it after changing tokens. Model downloads share the rating
+meter’s borderless styling while retaining native progress semantics.
 
 Components import `ui.css`, which loads tokens and shared base styles.
 Storybook's global preview loads only this stylesheet. Page stories separately

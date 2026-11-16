@@ -1,31 +1,10 @@
+import palettes from "./palettes.generated.json";
 import contrast from "./contrast.generated.json";
 import { Toast } from "./Content";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { tokens } from "./tokens";
 
 function Foundations() {
-  const colours = [
-    "neutral0",
-    "neutral50",
-    "neutral100",
-    "neutral200",
-    "neutral300",
-    "neutral400",
-    "neutral500",
-    "neutral600",
-    "neutral700",
-    "neutral800",
-    "neutral900",
-    "neutral950",
-    "fg",
-    "bg",
-    "surface",
-    "border",
-    "accent",
-    "success",
-    "warning",
-    "danger",
-  ] satisfies (keyof typeof tokens)[];
   const type = [
     "fontXs",
     "fontSm",
@@ -55,22 +34,97 @@ function Foundations() {
     <main style={{ padding: tokens.space8 }}>
       <h1>Foundations</h1>
       <p className="ui-preview">
-        Cool slate neutrals at 255° · monochrome actions · status colour only
-        when it carries meaning.
+        Paper and Ember · warm brown neutrals at 75° · ink actions. Ember means
+        recording, live or on.
       </p>
       <section className="foundation-section">
-        <h2>Colour</h2>
-        <div className="foundation-grid">
-          {colours.map((name) => (
-            <div key={name}>
-              <div
-                className="foundation-swatch"
-                style={{ background: tokens[name] }}
-              />
-              <code>{name}</code>
-            </div>
+        <h2>Palettes · Ember and Paper</h2>
+        <div className="palette-grid">
+          {palettes.map(({ theme, mode, colors }) => (
+            <section
+              key={`${theme}-${mode}`}
+              style={{
+                background: colors.canvas,
+                color: colors.text,
+                padding: tokens.space4,
+                borderRadius: tokens.radiusPanel,
+              }}
+            >
+              <h3>
+                {theme} · {mode}
+              </h3>
+              <div className="foundation-grid">
+                {(
+                  [
+                    "canvas",
+                    "sidebar",
+                    "surface",
+                    "control",
+                    "control-hover",
+                    "control-pressed",
+                    "selected",
+                    "primary",
+                    "live",
+                    "toggle-off",
+                  ] as const
+                ).map((name) => (
+                  <div key={name}>
+                    <div
+                      className="foundation-swatch"
+                      style={{ background: colors[name] }}
+                    />
+                    <code>{name}</code>
+                  </div>
+                ))}
+              </div>
+              <div className="story-stack">
+                {(
+                  [
+                    ["success-text", "success", "Success · Text copied"],
+                    [
+                      "warning",
+                      "warning-surface",
+                      "Warning · Choose another microphone",
+                    ],
+                    ["danger", "danger-surface", "Danger · Download failed"],
+                    ["info", "info-surface", "Info · Audio stays on this Mac"],
+                  ] as const
+                ).map(([fg, bg, label]) => (
+                  <p
+                    key={fg}
+                    style={{
+                      color: colors[fg],
+                      background: colors[bg],
+                      padding: tokens.space3,
+                      borderRadius: tokens.radiusControl,
+                    }}
+                  >
+                    {label}
+                  </p>
+                ))}
+              </div>
+              <p style={{ marginTop: tokens.space4 }}>
+                Live{" "}
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 12,
+                    height: 12,
+                    borderRadius: 99,
+                    background: colors.live,
+                  }}
+                />{" "}
+                · Danger{" "}
+                <span style={{ color: colors.danger }}>Download failed</span>
+              </p>
+            </section>
           ))}
         </div>
+        <p className="ui-preview">
+          Danger uses crimson at 355°, 45° away from ember at 40°. Labels and
+          icons distinguish errors from recording; compare them side by side
+          above.
+        </p>
       </section>
       <section className="foundation-section">
         <h2>Status surfaces</h2>
@@ -94,31 +148,38 @@ function Foundations() {
             <thead>
               <tr>
                 <th>Text / surface</th>
-                <th>Light</th>
-                <th>Dark</th>
+                {palettes.map(({ theme, mode }) => (
+                  <th key={`${theme}-${mode}`}>
+                    {theme} · {mode}
+                  </th>
+                ))}
                 <th>Minimum</th>
               </tr>
             </thead>
             <tbody>
               {contrast
-                .filter((pair) => pair.theme === "light")
+                .filter(
+                  (pair) => pair.theme === "ember" && pair.mode === "light",
+                )
                 .map((pair) => (
                   <tr key={`${pair.foreground}-${pair.background}`}>
                     <th scope="row">
                       {pair.foreground} / {pair.background}
                     </th>
-                    <td>{pair.ratio.toFixed(2)}:1</td>
-                    <td>
-                      {contrast
-                        .find(
-                          (dark) =>
-                            dark.theme === "dark" &&
-                            dark.foreground === pair.foreground &&
-                            dark.background === pair.background,
-                        )
-                        ?.ratio.toFixed(2)}
-                      :1
-                    </td>
+                    {palettes.map(({ theme, mode }) => (
+                      <td key={`${theme}-${mode}`}>
+                        {contrast
+                          .find(
+                            (p) =>
+                              p.theme === theme &&
+                              p.mode === mode &&
+                              p.foreground === pair.foreground &&
+                              p.background === pair.background,
+                          )
+                          ?.ratio.toFixed(2)}
+                        :1
+                      </td>
+                    ))}
                     <td>{pair.minimum}:1</td>
                   </tr>
                 ))}
@@ -127,7 +188,7 @@ function Foundations() {
         </div>
       </section>
       <section className="foundation-section">
-        <h2>Typography · system SF Pro</h2>
+        <h2>Typography · Instrument Sans</h2>
         <p className="ui-preview">
           22px title · 18px content heading · 13px row label and md control ·
           12px helper and section overline. Regular 400, medium 500, semibold
@@ -192,5 +253,4 @@ const meta = {
 } satisfies Meta<typeof Foundations>;
 export default meta;
 type Story = StoryObj<typeof meta>;
-export const Light: Story = { globals: { theme: "light" } };
-export const Dark: Story = { globals: { theme: "dark" } };
+export const Palettes: Story = {};

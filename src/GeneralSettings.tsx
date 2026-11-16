@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Keyboard, Mic, Power } from "lucide-react";
+import { Keyboard, Mic, Power, SunMoon } from "lucide-react";
 import { z } from "zod";
 import {
+  settingsSchema,
   readDevices,
   readSettings,
   writeSettings,
@@ -198,6 +199,54 @@ export default function General() {
             aria-describedby="login-help"
             onChange={(e) => void save({ launchAtLogin: e.target.checked })}
           />
+        </Row>
+      </SettingsGroup>
+      <SettingsGroup
+        title="Appearance"
+        icon={<SunMoon size={14} aria-hidden="true" />}
+      >
+        <Row
+          id="theme"
+          label="Theme"
+          help="A little warmth, with or without colour."
+        >
+          <Select
+            id="theme"
+            aria-describedby="theme-help"
+            value={settings.theme}
+            disabled={busy}
+            onChange={(e) =>
+              void save({
+                theme: settingsSchema.shape.theme.parse(e.target.value),
+              })
+            }
+          >
+            <option value="ember">Ember</option>
+            <option value="paper">Paper</option>
+          </Select>
+        </Row>
+        <Row
+          id="appearance-mode"
+          label="Mode"
+          help="Follow your Mac, or choose a look."
+        >
+          <Select
+            id="appearance-mode"
+            aria-describedby="appearance-mode-help"
+            value={settings.appearanceMode}
+            disabled={busy}
+            onChange={(e) =>
+              void save({
+                appearanceMode: settingsSchema.shape.appearanceMode.parse(
+                  e.target.value,
+                ),
+              })
+            }
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </Select>
         </Row>
       </SettingsGroup>
       {error && (

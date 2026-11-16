@@ -25,7 +25,9 @@ async function openSettings(
       ? "application/javascript"
       : file.endsWith(".css")
         ? "text/css"
-        : "text/html";
+        : file.endsWith(".woff2")
+          ? "font/woff2"
+          : "text/html";
     await route.fulfill({ body: await readFile(file), contentType: type });
   });
   await page.addInitScript(
@@ -56,6 +58,8 @@ async function openSettings(
         shortcutMode: "hold",
         microphone: null,
         launchAtLogin: false,
+        theme: "ember",
+        appearanceMode: "system",
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
         value: { unregisterListener: () => {} },
@@ -89,6 +93,7 @@ async function openSettings(
               if (args.settings?.shortcut === "Super+KeyQ")
                 throw "Shortcut unavailable";
               Object.assign(settings, args.settings);
+              emit("settings-changed", settings);
               return settings;
             }
             if (command === "input_devices")
@@ -181,6 +186,17 @@ for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
     await openSettings(page);
     await expect(page.getByRole("switch")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    await expect(page.locator("#mode-help")).toHaveCSS("line-height", "18px");
+    expect((await page.locator("#mode-help").boundingBox())?.height).toBe(18);
+    const footerAlignment = await page.locator("footer").evaluate((el) => {
+      const version = el.querySelector("span");
+      const button = el.querySelector("button");
+      return version && button
+        ? version.getBoundingClientRect().x === button.getBoundingClientRect().x
+        : false;
+    });
+    expect(footerAlignment).toBe(true);
     await page.screenshot({
       path: `target/settings-${colorScheme}-browser.png`,
     });
@@ -243,6 +259,8 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           shortcutMode: "hold",
           microphone: null,
           launchAtLogin: false,
+          theme: "ember",
+          appearanceMode: "system",
         },
       },
       "*",
@@ -342,3 +360,69 @@ for (const colorScheme of ["light", "dark"] as const) {
     }
   });
 }
+
+for (const theme of ["ember", "paper"] as const) {
+  test(`${theme} appearance saves live and System follows macOS`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await openSettings(page);
+    await page.getByLabel("Theme", { exact: true }).selectOption(theme);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await page.getByLabel("Mode", { exact: true }).selectOption("dark");
+    await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+    await page.emulateMedia({ colorScheme: "light" });
+    await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+    await page.getByLabel("Mode", { exact: true }).selectOption("system");
+    await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+    await page.getByRole("button", { name: "About", exact: true }).click();
+    await page.getByRole("button", { name: "General", exact: true }).click();
+    await expect(page.getByLabel("Theme", { exact: true })).toHaveValue(theme);
+    await expect(page.getByLabel("Mode", { exact: true })).toHaveValue(
+      "system",
+    );
+  });
+}
+
+test("overlay applies appearance events live, including System changes", async ({
+  page,
+}) => {
+  await openSettings(page, { overlay: true });
+  await expect(page.locator("kbd")).toHaveCount(3);
+  for (const theme of ["ember", "paper"])
+    for (const appearanceMode of ["light", "dark", "system"]) {
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.evaluate(
+        ({ theme, appearanceMode }) =>
+          window.postMessage(
+            {
+              type: "dictate-test",
+              event: "settings-changed",
+              payload: {
+                version: 1,
+                shortcut: "Alt+Shift+Space",
+                shortcutMode: "hold",
+                microphone: null,
+                launchAtLogin: false,
+                theme,
+                appearanceMode,
+              },
+            },
+            "*",
+          ),
+        { theme, appearanceMode },
+      );
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-mode",
+        appearanceMode === "dark" ? "dark" : "light",
+      );
+      await page.emulateMedia({ colorScheme: "dark" });
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-mode",
+        appearanceMode === "light" ? "light" : "dark",
+      );
+    }
+});

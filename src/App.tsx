@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from "@tanstack/react-query";
 import SettingsWindow from "./SettingsWindow";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings, settingsSchema } from "./settings";
@@ -13,8 +17,7 @@ const client = new QueryClient({
 
 function Overlay() {
   const status = useDictationStatus();
-  const [shortcut, setShortcut] = useState("");
-  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     if (status.phase !== "recording") return;
@@ -25,38 +28,8 @@ function Overlay() {
     );
     return () => window.clearInterval(timer);
   }, [status.phase]);
-  useEffect(() => {
-    let disposed = false;
-    const listener = listen("settings-changed", ({ payload }) => {
-      const result = settingsSchema.safeParse(payload);
-      if (!disposed) {
-        if (result.success) {
-          setShortcut(result.data.shortcut);
-          setSettingsError(null);
-        } else
-          setSettingsError(
-            "Could not read the updated shortcut. Open Settings for details.",
-          );
-      }
-    });
-    void listener
-      .then(async () => {
-        try {
-          const settings = await readSettings();
-          if (!disposed) setShortcut(settings.shortcut);
-        } catch (error) {
-          if (!disposed) setSettingsError(String(error));
-        }
-      })
-      .catch((error) => {
-        if (!disposed) setSettingsError(String(error));
-      });
-    return () => {
-      disposed = true;
-      void listener.then((stop) => stop()).catch(() => {});
-    };
-  }, []);
-  const error = status.error ?? settingsError;
+  const error =
+    status.error ?? (settings.error ? String(settings.error) : null);
   return (
     <main className="overlay">
       <RecordingCapsule
@@ -75,18 +48,69 @@ function Overlay() {
         notice={
           status.phase === "idle" ? undefined : (status.notice ?? undefined)
         }
-        shortcut={<KeyboardShortcut value={shortcut} />}
+        shortcut={<KeyboardShortcut value={settings.data?.shortcut ?? ""} />}
       />
     </main>
   );
 }
 
+function Appearance() {
+  const query = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+  useEffect(() => {
+    let disposed = false;
+    const subscription = listen("settings-changed", ({ payload }) => {
+      const result = settingsSchema.safeParse(payload);
+      if (result.success && !disposed)
+        client.setQueryData(["settings"], result.data);
+      else if (!result.success) console.error(result.error);
+    });
+    void subscription
+      .then(() => {
+        if (!disposed)
+          void client.invalidateQueries({ queryKey: ["settings"] });
+      })
+      .catch(console.error);
+    return () => {
+      disposed = true;
+      void subscription.then((stop) => stop()).catch(console.error);
+    };
+  }, []);
+  useEffect(() => {
+    const system = matchMedia("(prefers-color-scheme: dark)");
+    const root = document.documentElement;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      root.classList.add("appearance-changing");
+      document.documentElement.dataset.theme = query.data?.theme ?? "ember";
+      const mode = query.data?.appearanceMode ?? "system";
+      document.documentElement.dataset.mode =
+        mode === "system" ? (system.matches ? "dark" : "light") : mode;
+      root.getBoundingClientRect();
+      frame = requestAnimationFrame(() =>
+        root.classList.remove("appearance-changing"),
+      );
+    };
+    update();
+    system.addEventListener("change", update);
+    return () => {
+      system.removeEventListener("change", update);
+      cancelAnimationFrame(frame);
+      root.classList.remove("appearance-changing");
+    };
+  }, [query.data?.theme, query.data?.appearanceMode]);
+  return null;
+}
+
 export default function App() {
-  return new URLSearchParams(location.search).get("window") === "settings" ? (
+  return (
     <QueryClientProvider client={client}>
-      <SettingsWindow />
+      <Appearance />
+      {new URLSearchParams(location.search).get("window") === "settings" ? (
+        <SettingsWindow />
+      ) : (
+        <Overlay />
+      )}
     </QueryClientProvider>
-  ) : (
-    <Overlay />
   );
 }

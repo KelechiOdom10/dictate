@@ -36,118 +36,134 @@ try {
       await route.fulfill({ status: 404, body: "Not found" });
     }
   });
-  const captures = [
-    ["foundations--dark", "foundations-dark", "h1"],
-    [
-      "components-controls--controls-side-by-side",
-      "controls-side-by-side",
-      "h1",
-    ],
-    ["foundations--light", "foundations", "h1"],
-    ["components-button--all-states", "buttons", "button"],
-    ["components-controls--filters", "filter-chips", "button"],
-    ["components-controls--toggle-control", "toggles", "input"],
-    ["components-shortcutrecorder--capture", "shortcut-recorder", "button"],
-    ["components-content--models", "model-cards", ".ui-card"],
-    [
-      "components-recordingcapsule--all-states",
-      "recording-states",
-      ".ui-capsule",
-    ],
-    ["pages--general", "general-light", "#login"],
-    ["pages--general-dark", "general-dark", "#login"],
-    ["pages--history", "history", ".ui-detail"],
-    ["pages--models", "models", ".ui-card"],
-  ];
-  for (const [id, filename, selector] of captures) {
-    await page.setViewportSize({
-      width: id.includes("controls-side-by-side") ? 1440 : 1000,
-      height: 820,
-    });
-    await page.goto(
-      `http://localhost:6007/iframe.html?id=${id}&viewMode=story`,
-    );
-    await page
-      .locator(`#storybook-root ${selector}`)
-      .first()
-      .waitFor({ state: "visible" });
-    await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({
-      path: path.join(output, `${filename}.png`),
-      fullPage: true,
-    });
-    console.log(`Captured ${filename}`);
-  }
   const index = JSON.parse(
     await readFile("target/storybook/index.json", "utf8"),
   );
   const catalog = [];
-  for (const theme of ["light", "dark"]) {
-    for (const entry of Object.values(index.entries).filter(
-      (entry) => entry.type === "story",
-    )) {
-      await page.setViewportSize({
-        width: entry.id.includes("controls-side-by-side") ? 1440 : 1000,
-        height: 820,
-      });
-      await page.goto(
-        `http://localhost:6007/iframe.html?id=${entry.id}&viewMode=story&globals=theme:${theme}`,
-      );
-      await page
-        .locator("#storybook-root > *")
-        .first()
-        .waitFor({ state: "visible" });
-      if (
-        entry.id.startsWith("pages--general") &&
-        !entry.id.includes("loading") &&
-        !entry.id.includes("error")
-      )
-        await page.locator("#login").waitFor();
-      await page.evaluate((theme) => {
-        document.documentElement.dataset.theme = theme;
-        return document.fonts.ready;
-      }, theme);
-      const filename = `${entry.id}-${theme}.png`;
-      await page.screenshot({
-        path: path.join(output, filename),
-        fullPage: true,
-      });
-      catalog.push({ id: entry.id, theme, filename });
+  for (const theme of ["ember", "paper"])
+    for (const mode of ["light", "dark"]) {
+      for (const entry of Object.values(index.entries).filter(
+        (entry) => entry.type === "story",
+      )) {
+        await page.setViewportSize({
+          width: entry.id.includes("controls-side-by-side")
+            ? 1440
+            : entry.id === "pages--general"
+              ? 820
+              : 1000,
+          height: entry.id === "pages--general" ? 1060 : 820,
+        });
+        await page.goto(
+          `http://localhost:6007/iframe.html?id=${entry.id}&viewMode=story&globals=theme:${theme};mode:${mode}`,
+        );
+        await page
+          .locator("#storybook-root > *")
+          .first()
+          .waitFor({ state: "visible" });
+        if (
+          entry.id.startsWith("pages--general") &&
+          !entry.id.includes("loading") &&
+          !entry.id.includes("error")
+        )
+          await page.locator("#login").waitFor();
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+          for (const weight of [400, 500, 600]) {
+            await document.fonts.load(`${weight} 13px "Instrument Sans"`);
+            if (!document.fonts.check(`${weight} 13px "Instrument Sans"`))
+              throw new Error(`Font weight ${weight} unavailable`);
+          }
+          if (
+            ![...document.fonts].some(
+              (face) =>
+                face.family === "Instrument Sans" && face.status === "loaded",
+            )
+          )
+            throw new Error("Bundled font did not load");
+        });
+        const filename = `${entry.id}-${theme}-${mode}.png`;
+        await page.screenshot({
+          path: path.join(output, filename),
+          fullPage: true,
+        });
+        catalog.push({ id: entry.id, theme, mode, filename });
+        if (entry.id === "components-recordingcapsule--recording") {
+          await page.locator(".ui-capsule").screenshot({
+            path: path.join(output, `capsule-${theme}-${mode}.png`),
+          });
+        }
+        if (entry.id === "components-controls--controls-side-by-side") {
+          const button = page.locator(".ui-button-secondary").first();
+          const before = await button.evaluate(
+            (el) => getComputedStyle(el).backgroundColor,
+          );
+          await button.hover();
+          await page.waitForTimeout(150);
+          if (
+            before ===
+            (await button.evaluate(
+              (el) => getComputedStyle(el).backgroundColor,
+            ))
+          )
+            throw new Error("Secondary button has no hover change");
+          await page.locator(".control-comparison").screenshot({
+            path: path.join(output, `controls-hover-${theme}-${mode}.png`),
+          });
+          await button.focus();
+          await page.keyboard.down(" ");
+          await page.locator(".control-comparison").screenshot({
+            path: path.join(output, `controls-pressed-${theme}-${mode}.png`),
+          });
+          await page.keyboard.up(" ");
+          const toggle = page.locator(".ui-toggle").first();
+          await toggle.focus();
+          await page.keyboard.press("Tab");
+          await page.keyboard.press("Shift+Tab");
+          const ring = await toggle.evaluate(
+            (el) => getComputedStyle(el, "::before").outlineWidth,
+          );
+          if (ring !== "2px")
+            throw new Error(`Missing track focus ring: ${ring}`);
+          await page.locator(".control-comparison").screenshot({
+            path: path.join(output, `controls-focus-${theme}-${mode}.png`),
+          });
+        }
+      }
     }
-  }
   await import("node:fs/promises").then((fs) =>
     fs.writeFile(
       path.join(output, "catalog.json"),
       JSON.stringify(catalog, null, 2),
     ),
   );
-  console.log(`Captured all ${catalog.length} story/theme combinations`);
+  console.log(`Captured all ${catalog.length} story/theme/mode combinations`);
   await page.setViewportSize({ width: 320, height: 844 });
-  for (const id of [
-    "pages--general",
-    "pages--general-dark",
-    "pages--history",
-    "pages--models",
-    "components-recordingcapsule--all-states",
-  ]) {
-    await page.goto(
-      `http://localhost:6007/iframe.html?id=${id}&viewMode=story`,
-    );
-    await page
-      .locator("#storybook-root > *")
-      .first()
-      .waitFor({ state: "visible" });
-    if (
-      await page.evaluate(
-        () => document.documentElement.scrollWidth > innerWidth,
-      )
-    )
-      throw new Error(`${id} overflows at 320px`);
-    await page.screenshot({
-      path: path.join(output, `${id}-narrow.png`),
-      fullPage: true,
-    });
-  }
+  for (const theme of ["ember", "paper"])
+    for (const mode of ["light", "dark"])
+      for (const id of [
+        "pages--general",
+        "pages--history",
+        "pages--models",
+        "components-recordingcapsule--all-states",
+      ]) {
+        await page.goto(
+          `http://localhost:6007/iframe.html?id=${id}&viewMode=story&globals=theme:${theme};mode:${mode}`,
+        );
+        await page
+          .locator("#storybook-root > *")
+          .first()
+          .waitFor({ state: "visible" });
+        if (
+          await page.evaluate(
+            () => document.documentElement.scrollWidth > innerWidth,
+          )
+        )
+          throw new Error(`${id} overflows at 320px`);
+        await page.screenshot({
+          path: path.join(output, `${id}-${theme}-${mode}-narrow.png`),
+          fullPage: true,
+        });
+      }
   if (errors.length) throw new Error(errors.join("\n"));
 } finally {
   await browser.close();

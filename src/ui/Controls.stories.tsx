@@ -171,7 +171,7 @@ export const ControlsSideBySide: Story = {
       <div className="control-comparison">
         <h1>Controls side by side</h1>
         <p className="ui-preview">
-          One scale · SF Pro · height / text / icon / gap
+          One scale · Instrument Sans · height / text / icon / gap
         </p>
         {(["sm", "md", "lg"] as const).map((size) => (
           <section key={size}>
@@ -216,7 +216,13 @@ export const ControlsSideBySide: Story = {
                 onChange={setQuery}
               />
               <Chip size={size}>Starred</Chip>
-              <Toggle size={size} aria-label={`${size} launch at login`} />
+              <Toggle size={size} aria-label={`${size} launch at login off`} />
+              <Toggle
+                size={size}
+                checked
+                readOnly
+                aria-label={`${size} launch at login on`}
+              />
             </div>
           </section>
         ))}
@@ -224,10 +230,10 @@ export const ControlsSideBySide: Story = {
     );
   },
   play: async ({ canvasElement }) => {
-    for (const [size, height, font] of [
-      ["sm", 28, 12],
-      ["md", 32, 13],
-      ["lg", 40, 14],
+    for (const [size, height, font, padding, gap] of [
+      ["sm", 28, 12, 10, 6],
+      ["md", 32, 13, 12, 8],
+      ["lg", 40, 14, 16, 10],
     ] as const) {
       const section = canvasElement
         .querySelector(`.ui-button.ui-size-${size}`)
@@ -239,6 +245,18 @@ export const ControlsSideBySide: Story = {
         await expect(control.getBoundingClientRect().height).toBe(height);
         if (!control.classList.contains("ui-toggle"))
           await expect(getComputedStyle(control).fontSize).toBe(`${font}px`);
+      }
+      for (const control of section.querySelectorAll(
+        ".ui-button:not(.ui-icon-button), select, .ui-search",
+      )) {
+        await expect(getComputedStyle(control).paddingInlineStart).toBe(
+          `${padding}px`,
+        );
+      }
+      for (const control of section.querySelectorAll(
+        ".ui-button:not(.ui-icon-button), .ui-search, .ui-segments",
+      )) {
+        await expect(getComputedStyle(control).gap).toBe(`${gap}px`);
       }
     }
   },

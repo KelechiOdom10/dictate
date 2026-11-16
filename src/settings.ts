@@ -3,15 +3,17 @@ import { z } from "zod";
 import type { Settings } from "./settings.generated";
 export type { Settings } from "./settings.generated";
 
-export const settingsSchema: z.ZodType<Settings> = z
+export const settingsSchema = z
   .object({
     version: z.number().int().nonnegative(),
     shortcut: z.string(),
     shortcutMode: z.enum(["hold", "toggle"]),
     microphone: z.string().nullable(),
     launchAtLogin: z.boolean(),
+    theme: z.enum(["ember", "paper"]),
+    appearanceMode: z.enum(["system", "light", "dark"]),
   })
-  .strict();
+  .strict() satisfies z.ZodType<Settings>;
 
 export const readSettings = async () =>
   settingsSchema.parse(await invoke("get_settings"));
