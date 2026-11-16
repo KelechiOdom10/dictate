@@ -16,6 +16,8 @@
 
 mod audio;
 mod insert;
+#[cfg(target_os = "macos")]
+pub mod screen;
 mod transcribe;
 
 mod focus;
