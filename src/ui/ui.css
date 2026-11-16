@@ -499,6 +499,9 @@ html[data-glass="true"] .astryx-side-nav {
 .ui-history-accordion-current button[aria-expanded="true"] {
   position: relative;
 }
+.ui-history-row-current {
+  background-color: transparent;
+}
 .ui-history-row-current::before,
 .ui-history-accordion-current button[aria-expanded="true"]::before {
   content: "";

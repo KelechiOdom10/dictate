@@ -2601,6 +2601,32 @@ for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
               ? page.locator(".ui-history-accordion-current > button")
               : page.locator(".ui-history-row-current");
           await expect(selected).toHaveCount(1);
+          const idle =
+            width === 640
+              ? controls.nth(1)
+              : controls.nth(1).locator("xpath=ancestor::li[1]");
+          await page.mouse.move(0, 0);
+          expect(
+            await selected.evaluate(
+              (row) => getComputedStyle(row).backgroundColor,
+            ),
+          ).toBe(
+            await idle.evaluate((row) => getComputedStyle(row).backgroundColor),
+          );
+          const restingHover = await selected.evaluate(
+            (row) => getComputedStyle(row).backgroundImage,
+          );
+          if (width === 1100) {
+            await selected.hover();
+            await expect
+              .poll(() =>
+                selected.evaluate(
+                  (row) => getComputedStyle(row).backgroundImage,
+                ),
+              )
+              .not.toBe(restingHover);
+          }
+          await page.mouse.move(0, 0);
           const shape = await selected.evaluate((row) => {
             const marker = getComputedStyle(row, "::before");
             const label = row.querySelector(".astryx-text")!;
