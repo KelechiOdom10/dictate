@@ -17,6 +17,7 @@
 
 mod audio;
 mod insert;
+pub mod package;
 #[cfg(target_os = "macos")]
 pub mod screen;
 pub mod transcribe;
