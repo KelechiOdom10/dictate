@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings } from "./settings";
+import { SettingsTheme } from "./ui/SettingsTheme";
 
 const subtitles: Record<string, string> = {
   General: "Make dictate feel like second nature.",
@@ -81,74 +82,79 @@ export default function SettingsWindow({
   }, [navigationReady, settings.isFetched]);
   const version = useQuery({ queryKey: ["version"], queryFn: getVersion });
   return (
-    <div className="settings-shell">
-      <aside>
-        <div className="brand">
-          <AudioLines size={22} strokeWidth={2} />
-          <span>dictate</span>
-        </div>
-        <SidebarNav
-          label="Settings"
-          items={pages.map(({ name, icon: Icon }) => ({
-            value: name,
-            label: name,
-            icon: <Icon size={17} strokeWidth={1.5} aria-hidden="true" />,
-          }))}
-          value={page}
-          onChange={(next) => {
-            if (
-              document.startViewTransition &&
-              !matchMedia("(prefers-reduced-motion: reduce)").matches
-            ) {
-              document.startViewTransition(() =>
-                flushSync(() => setPage(next)),
-              );
-            } else setPage(next);
-          }}
-        />
-        <footer>
-          <span>Version {version.data ?? "…"}</span>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled
-            title="Updates are coming in a later release"
-          >
-            Check for updates
-          </Button>
-        </footer>
-      </aside>
-      <main key={page} className="settings-content">
-        <header>
-          <h1>{page}</h1>
-          <p>{subtitles[page]}</p>
-        </header>
-        {status.error && (
-          <Toast
-            tone="danger"
-            onDismiss={() => {
-              void invoke("dismiss_error").catch(console.error);
+    <SettingsTheme
+      palette={settings.data?.theme}
+      mode={settings.data?.appearanceMode}
+    >
+      <div className="settings-shell">
+        <aside>
+          <div className="brand">
+            <AudioLines size={22} strokeWidth={2} />
+            <span>dictate</span>
+          </div>
+          <SidebarNav
+            label="Settings"
+            items={pages.map(({ name, icon: Icon }) => ({
+              value: name,
+              label: name,
+              icon: <Icon size={17} strokeWidth={1.5} aria-hidden="true" />,
+            }))}
+            value={page}
+            onChange={(next) => {
+              if (
+                document.startViewTransition &&
+                !matchMedia("(prefers-reduced-motion: reduce)").matches
+              ) {
+                document.startViewTransition(() =>
+                  flushSync(() => setPage(next)),
+                );
+              } else setPage(next);
             }}
-          >
-            {status.error.title}. {status.error.fix}
-          </Toast>
-        )}
-        {page === "General" ? (
-          <General onOpenModels={() => setPage("Models")} />
-        ) : page === "Models" ? (
-          <ModelsPage />
-        ) : page === "Annotate" ? (
-          <AnnotatePage />
-        ) : page === "History" ? (
-          <HistoryPage />
-        ) : page === "Output" ? (
-          <OutputPage />
-        ) : page === "Advanced" ? (
-          <AdvancedPage />
-        ) : (
-          <AboutPage />
-        )}
-      </main>
-    </div>
+          />
+          <footer>
+            <span>Version {version.data ?? "…"}</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled
+              title="Updates are coming in a later release"
+            >
+              Check for updates
+            </Button>
+          </footer>
+        </aside>
+        <main key={page} className="settings-content">
+          <header>
+            <h1>{page}</h1>
+            <p>{subtitles[page]}</p>
+          </header>
+          {status.error && (
+            <Toast
+              tone="danger"
+              onDismiss={() => {
+                void invoke("dismiss_error").catch(console.error);
+              }}
+            >
+              {status.error.title}. {status.error.fix}
+            </Toast>
+          )}
+          {page === "General" ? (
+            <General onOpenModels={() => setPage("Models")} />
+          ) : page === "Models" ? (
+            <ModelsPage />
+          ) : page === "Annotate" ? (
+            <AnnotatePage />
+          ) : page === "History" ? (
+            <HistoryPage />
+          ) : page === "Output" ? (
+            <OutputPage />
+          ) : page === "Advanced" ? (
+            <AdvancedPage />
+          ) : (
+            <AboutPage />
+          )}
+        </main>
+      </div>
+    </SettingsTheme>
   );
 }

@@ -199,8 +199,12 @@ async function openSettings(
             if (command === "settings_ready") {
               Object.defineProperty(window, "__readyAppearance", {
                 value: {
-                  theme: document.documentElement.dataset.theme,
+                  palette: document.documentElement.dataset.palette,
                   mode: document.documentElement.dataset.mode,
+                  libraryTheme: document.documentElement.dataset.astryxTheme,
+                  colorScheme: getComputedStyle(
+                    document.querySelector(".settings-shell")!,
+                  ).colorScheme,
                 },
                 configurable: true,
               });
@@ -570,7 +574,7 @@ for (const theme of ["ember", "paper"] as const) {
     await page.emulateMedia({ colorScheme: "light" });
     await openSettings(page);
     await page.getByLabel("Theme", { exact: true }).selectOption(theme);
-    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expect(page.locator("html")).toHaveAttribute("data-palette", theme);
     await page.getByLabel("Mode", { exact: true }).selectOption("dark");
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
     await page.emulateMedia({ colorScheme: "light" });
@@ -629,7 +633,7 @@ test("overlay applies appearance events live, including System changes", async (
           ),
         { theme, appearanceMode },
       );
-      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await expect(page.locator("html")).toHaveAttribute("data-palette", theme);
       await expect(page.locator("html")).toHaveAttribute(
         "data-mode",
         appearanceMode === "dark" ? "dark" : "light",
@@ -738,7 +742,7 @@ for (const label of ["ink", "annotate-bar"] as const) {
       window: label,
       stored: { theme: "paper", appearanceMode: "dark" },
     });
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
+    await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
     const send = (payload: unknown) =>
       page.evaluate(
@@ -761,13 +765,13 @@ for (const label of ["ink", "annotate-bar"] as const) {
       theme: "ember",
       appearanceMode: "light",
     });
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "ember");
+    await expect(page.locator("html")).toHaveAttribute("data-palette", "ember");
     await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
     // An invalid event must not call a command the panel isn't granted; the
     // valid one after it proves the invalid one has been handled.
     await send({ theme: "invalid" });
     await send({ ...(current as object), theme: "paper" });
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "paper");
+    await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
     expect(
       await page.evaluate(
         () =>
@@ -819,7 +823,7 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
           ),
         { theme, appearanceMode },
       );
-      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await expect(page.locator("html")).toHaveAttribute("data-palette", theme);
       await expect(page.locator("html")).toHaveAttribute(
         "data-mode",
         appearanceMode,
@@ -947,11 +951,101 @@ for (const mode of ["light", "dark"] as const) {
         .evaluate((input) => input.parentElement!.offsetTop),
     );
     await page.evaluate(() => document.fonts.ready);
+    expect(
+      await page
+        .locator(".ui-segments")
+        .evaluate(
+          (el) =>
+            getComputedStyle(el, "::before").backgroundColor !==
+            getComputedStyle(el).backgroundColor,
+        ),
+    ).toBe(true);
     await page.screenshot({
       path: `target/visibility-fix/history-default-${mode}.png`,
     });
   });
 }
+
+for (const palette of ["ember", "paper"])
+  for (const mode of ["light", "dark"] as const) {
+    test(`Astryx settings colors stay readable in ${palette} ${mode}`, async ({
+      page,
+    }) => {
+      await openSettings(page, {
+        stored: { theme: palette, appearanceMode: mode },
+      });
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-astryx-theme",
+        palette === "paper" ? "dictate-paper" : "dictate",
+      );
+      const pairs = await page.locator(".settings-shell").evaluate((el) => {
+        const probe = document.createElement("canvas");
+        el.append(probe);
+        const context = probe.getContext("2d", { willReadFrequently: true })!;
+        const luminance = (color: string) => {
+          probe.style.color = color;
+          context.fillStyle = getComputedStyle(probe).color;
+          context.fillRect(0, 0, 1, 1);
+          return Array.from(context.getImageData(0, 0, 1, 1).data)
+            .slice(0, 3)
+            .map((value) => {
+              const channel = value / 255;
+              return channel <= 0.04045
+                ? channel / 12.92
+                : ((channel + 0.055) / 1.055) ** 2.4;
+            })
+            .reduce(
+              (sum, channel, i) => sum + channel * [0.2126, 0.7152, 0.0722][i],
+              0,
+            );
+        };
+        const pairs = [];
+        for (const foreground of ["text", "muted", "on-primary"])
+          for (const background of foreground === "on-primary"
+            ? ["primary", "primary-hover", "primary-pressed"]
+            : [
+                "canvas",
+                "surface",
+                "control",
+                "control-hover",
+                "control-pressed",
+                "selected",
+                "segment-thumb",
+              ]) {
+            const a = luminance(`var(--${foreground})`),
+              b = luminance(`var(--${background})`);
+            pairs.push({
+              foreground,
+              background,
+              ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
+            });
+          }
+        const track = el.querySelector(".astryx-switch")!;
+        const thumb = el.querySelector(".astryx-switch-thumb")!;
+        const trackLight = luminance(getComputedStyle(track).backgroundColor);
+        for (const [name, color] of [
+          ["switch surface", "var(--surface)"],
+          ["switch thumb", getComputedStyle(thumb).backgroundColor],
+        ]) {
+          const otherLight = luminance(color);
+          pairs.push({
+            foreground: name,
+            background: "off track",
+            ratio:
+              (Math.max(trackLight, otherLight) + 0.05) /
+              (Math.min(trackLight, otherLight) + 0.05),
+          });
+        }
+        probe.remove();
+        return pairs;
+      });
+      for (const pair of pairs)
+        expect(
+          pair.ratio,
+          `${pair.foreground} on ${pair.background}`,
+        ).toBeGreaterThanOrEqual(pair.background === "off track" ? 3 : 4.5);
+    });
+  }
 
 test("History preserves an explicitly saved Annotate shortcut", async ({
   page,
@@ -1017,8 +1111,10 @@ for (const failLoad of [false, true]) {
         ),
       )
       .toEqual({
-        theme: failLoad ? "ember" : "paper",
+        palette: failLoad ? "ember" : "paper",
         mode: failLoad ? "light" : "dark",
+        libraryTheme: failLoad ? "dictate" : "dictate-paper",
+        colorScheme: failLoad ? "light dark" : "dark",
       });
     await expect(
       page.getByRole("heading", { name: "Annotate", level: 1, exact: true }),

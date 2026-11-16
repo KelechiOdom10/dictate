@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AudioWaveform, Keyboard, Mic, Power, SunMoon } from "lucide-react";
 import { z } from "zod";
+import { Switch } from "@astryxdesign/core/Switch";
 import {
   settingsSchema,
   readDevices,
@@ -11,13 +12,7 @@ import {
   writeSettings,
   type Settings,
 } from "./settings";
-import {
-  Button,
-  Select,
-  Toggle,
-  SettingsRow as Row,
-  SettingsGroup,
-} from "./ui";
+import { Button, Select, SettingsRow as Row, SettingsGroup } from "./ui";
 import ShortcutRecorder from "./ShortcutRecorder";
 import { modelLabel, readModels, speechModelSchema } from "./models";
 import MicrophoneTest from "./MicrophoneTest";
@@ -276,19 +271,16 @@ export default function General({
         title="Startup"
         icon={<Power size={14} aria-hidden="true" />}
       >
-        <Row
-          id="login"
+        <Switch
+          className="ui-setting-switch"
           label="Launch at login"
-          help="Keep dictate ready in your menu bar."
-        >
-          <Toggle
-            id="login"
-            checked={settings.launchAtLogin}
-            disabled={busy || recording}
-            aria-describedby="login-help"
-            onChange={(e) => void save({ launchAtLogin: e.target.checked })}
-          />
-        </Row>
+          description="Keep dictate ready in your menu bar."
+          labelPosition="start"
+          labelSpacing="spread"
+          value={settings.launchAtLogin}
+          isDisabled={busy || recording}
+          onChange={(checked) => void save({ launchAtLogin: checked })}
+        />
       </SettingsGroup>
       <SettingsGroup
         title="Appearance"

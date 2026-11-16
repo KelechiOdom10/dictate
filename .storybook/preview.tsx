@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { Preview } from "@storybook/react-vite";
 import "../src/ui/ui.css";
+import { SettingsTheme } from "../src/ui/SettingsTheme";
 const preview: Preview = {
   globalTypes: {
     theme: {
@@ -32,10 +33,27 @@ const preview: Preview = {
   decorators: [
     (Story, context) => {
       useEffect(() => {
-        document.documentElement.dataset.theme = context.globals.theme;
+        document.documentElement.dataset.palette = context.globals.theme;
         document.documentElement.dataset.mode = context.globals.mode;
         document.body.style.background = "var(--canvas)";
       }, [context.globals.theme, context.globals.mode]);
+      if (
+        [
+          "Components/Button",
+          "Components/Controls",
+          "Components/Settings",
+          "Components/ShortcutRecorder",
+          "Components/Content",
+        ].includes(context.title)
+      )
+        return (
+          <SettingsTheme
+            palette={context.globals.theme}
+            mode={context.globals.mode}
+          >
+            <Story />
+          </SettingsTheme>
+        );
       return <Story />;
     },
   ],

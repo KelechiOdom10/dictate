@@ -280,11 +280,13 @@ export const General: Story = {
   beforeEach: mockSettings,
   render: () => <GeneralPage />,
   play: async ({ canvasElement }) => {
-    await expect(
-      await within(canvasElement).findByRole("switch", {
-        name: "Launch at login",
-      }),
-    ).toBeVisible();
+    const control = await within(canvasElement).findByRole("switch", {
+      name: "Launch at login",
+    });
+    await expect(control.closest(".astryx-switch-field")).toBeVisible();
+    await expect(control).toBeEnabled();
+    await expect(control).not.toHaveAttribute("aria-disabled", "true");
+    await expect(control).not.toBeChecked();
   },
 };
 

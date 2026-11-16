@@ -15,7 +15,7 @@ html {
 #root {
   height: 100%;
 }
-button {
+button:not(.astryx-button) {
   font: inherit;
   color: var(--text);
   background: var(--control);
@@ -37,7 +37,7 @@ select {
 input {
   font: inherit;
 }
-button:hover:not(:disabled) {
+button:not(.astryx-button):hover:not(:disabled) {
   background: var(--control-hover);
 }
 button:disabled {

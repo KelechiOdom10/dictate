@@ -1,4 +1,7 @@
 import { useId, type ReactNode } from "react";
+import { HStack } from "@astryxdesign/core/HStack";
+import { VStack } from "@astryxdesign/core/VStack";
+import { Heading } from "@astryxdesign/core/Heading";
 
 export function SettingsRow({
   id,
@@ -12,13 +15,15 @@ export function SettingsRow({
   children: ReactNode;
 }) {
   return (
-    <div className="ui-setting-row">
-      <div className="ui-row-copy">
+    <HStack className="ui-setting-row" gap={4} vAlign="center" hAlign="between">
+      <VStack className="ui-row-copy" gap={0}>
         <label htmlFor={id}>{label}</label>
         <p id={`${id}-help`}>{help}</p>
-      </div>
-      <div className="ui-row-control">{children}</div>
-    </div>
+      </VStack>
+      <HStack className="ui-row-control" hAlign="end">
+        {children}
+      </HStack>
+    </HStack>
   );
 }
 export function SettingsGroup({
@@ -33,11 +38,13 @@ export function SettingsGroup({
   const id = useId();
   return (
     <section className="ui-settings-group" aria-labelledby={id}>
-      <h2 id={id}>
+      <Heading level={2} id={id}>
         {icon}
         {title}
-      </h2>
-      <div className="ui-group">{children}</div>
+      </Heading>
+      <VStack gap={0} className="ui-group">
+        {children}
+      </VStack>
     </section>
   );
 }

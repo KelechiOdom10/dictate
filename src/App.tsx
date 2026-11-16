@@ -215,7 +215,7 @@ function Appearance({
     const update = () => {
       cancelAnimationFrame(frame);
       root.classList.add("appearance-changing");
-      document.documentElement.dataset.theme = query.data?.theme ?? "ember";
+      document.documentElement.dataset.palette = query.data?.theme ?? "ember";
       const mode = query.data?.appearanceMode ?? "system";
       document.documentElement.dataset.mode =
         mode === "system" ? (system.matches ? "dark" : "light") : mode;
