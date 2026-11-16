@@ -13,6 +13,13 @@ use std::sync::Mutex;
 pub struct Status {
     pub phase: String,
     pub error: Option<String>,
+    pub notice: Option<String>,
+}
+
+impl Status {
+    pub fn should_hide(&self) -> bool {
+        self.phase == "idle" && self.error.is_none()
+    }
 }
 
 pub fn status(app: &AppHandle) -> Status {
@@ -20,6 +27,13 @@ pub fn status(app: &AppHandle) -> Status {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
+}
+
+pub fn set_notice(app: &AppHandle, notice: Option<String>) {
+    app.state::<Mutex<Status>>()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .notice = notice;
 }
 
 pub fn set_error(app: &AppHandle, error: &str) {
@@ -124,6 +138,7 @@ pub fn setup(app: &App, settings: &Settings) -> tauri::Result<()> {
     app.manage(Mutex::new(Status {
         phase: "idle".into(),
         error: None,
+        notice: None,
     }));
     let open = MenuItem::with_id(app, "settings", "Open Settings…", true, None::<&str>)?;
     let shortcut = MenuItem::with_id(

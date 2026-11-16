@@ -72,6 +72,9 @@ function Overlay() {
                 ? { kind: "transcribing" }
                 : { kind: "ready", message: "Ready" }
         }
+        notice={
+          status.phase === "idle" ? undefined : (status.notice ?? undefined)
+        }
         shortcut={<KeyboardShortcut value={shortcut} />}
       />
     </main>

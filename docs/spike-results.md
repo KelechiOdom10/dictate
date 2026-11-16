@@ -169,3 +169,33 @@ reason; speak a sentence and confirm it pastes. Listen to the logged WAV and
 delete it afterward. Repeat with quiet speech and normal room noise. Physical
 hotkey, real-mic gate behavior, first/last phonemes, and focused-app insertion
 were not verified in this run; the seven-check gate remains open.
+
+
+## Startup recovery: microphone lookup — 15 November 2026
+
+Measured on this Mac with 30 sequential calls to the same CPAL device-listing
+path formerly called on key-down. `cargo test --manifest-path
+src-tauri/Cargo.toml measure_input_device_listing -- --ignored --nocapture`:
+first call 105.576 ms, median 46.802 ms, p95 50.972 ms, maximum 105.576 ms.
+These are device-discovery timings, not end-to-end capture latency.
+
+Named-device selection now reuses cached CPAL handles. The cache is populated
+by listing devices in Settings or on the first named selection. A cached handle
+must still return a valid input configuration; failed validation or a missing
+name refreshes the list. This also checks for a reconnected microphone rather
+than remembering its absence. System-default selection needs no list. The
+separate availability scan before opening the stream has been removed.
+
+`cargo test --manifest-path src-tauri/Cargo.toml measure_cached_device_selection
+-- --ignored --nocapture` measured 30 selections: median 24.428 ms, p95
+26.603 ms, maximum 27.558 ms. This includes configuration validation; stream
+creation is outside this measurement. A missing saved name still requires a
+fresh enumeration to detect reconnection, then falls back to the current system
+default. Physical unplug/replug during capture remains unverified.
+
+The explicit `disconnected_preference` smoke test used a nonexistent saved name,
+opened the MacBook Pro Microphone at 96 kHz mono F32, returned fallback=true,
+retained samples for a 150 ms take and read a finite level during a separate
+150 ms monitor session. No capture was written to disk. This proves default
+fallback at the audio boundary; it does not prove native overlay focus, physical
+hotkey conflicts, tray rendering, or end-to-end paste after recovery.

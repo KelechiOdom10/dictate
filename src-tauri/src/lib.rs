@@ -41,6 +41,38 @@ struct Runtime {
     shortcut_registered: bool,
 }
 
+impl Runtime {
+    fn shortcut_changes(
+        &self,
+        chord: tauri_plugin_global_shortcut::Shortcut,
+    ) -> Result<bool, String> {
+        Ok(chord != self.settings.chord()?)
+    }
+
+    fn capture_shortcut(
+        &mut self,
+        enabled: bool,
+        mut registration: impl FnMut(bool) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if self.capturing_shortcut == enabled {
+            return Ok(());
+        }
+        if self.phase != Phase::Idle {
+            return Err("Finish dictating before recording a shortcut".into());
+        }
+        if enabled && self.shortcut_registered {
+            registration(false)?;
+            self.shortcut_registered = false;
+        } else if !enabled && !self.shortcut_registered {
+            self.capturing_shortcut = false;
+            registration(true)?;
+            self.shortcut_registered = true;
+        }
+        self.capturing_shortcut = enabled;
+        Ok(())
+    }
+}
+
 #[tauri::command]
 fn pipeline_status(app: AppHandle) -> surface::Status {
     surface::status(&app)
@@ -136,7 +168,7 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
         .join("settings.json");
     let was_enabled = app.autolaunch().is_enabled().map_err(|e| e.to_string())?;
     let old_chord = runtime.settings.chord()?;
-    let changed = chord != old_chord || !runtime.shortcut_registered;
+    let changed = runtime.shortcut_changes(chord)?;
     if changed {
         app.global_shortcut()
             .register(chord)
@@ -182,8 +214,11 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
         }
         return Err(errors.join("; "));
     }
-    runtime.capturing_shortcut = false;
-    runtime.shortcut_registered = true;
+    if changed {
+        runtime.capturing_shortcut = false;
+        runtime.shortcut_registered = true;
+        surface::clear_error(&app);
+    }
     runtime.settings = settings.clone();
     surface::update_shortcut(&app, &settings.shortcut);
     if let Err(error) = app.emit("settings-changed", &settings) {
@@ -199,26 +234,20 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
 fn capture_shortcut(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<Mutex<Runtime>>();
     let mut runtime = state.lock().map_err(|e| e.to_string())?;
-    if runtime.capturing_shortcut == enabled {
-        return Ok(());
-    }
-    if runtime.phase != Phase::Idle {
-        return Err("Finish dictating before recording a shortcut".into());
-    }
     let chord = runtime.settings.chord()?;
-    if enabled && runtime.shortcut_registered {
-        app.global_shortcut()
-            .unregister(chord)
-            .map_err(|e| e.to_string())?;
-        runtime.shortcut_registered = false;
-    } else if !enabled && !runtime.shortcut_registered {
-        app.global_shortcut()
-            .register(chord)
-            .map_err(|e| e.to_string())?;
-        runtime.shortcut_registered = true;
+    let was_registered = runtime.shortcut_registered;
+    let result = runtime.capture_shortcut(enabled, |register| {
+        if register {
+            app.global_shortcut().register(chord)
+        } else {
+            app.global_shortcut().unregister(chord)
+        }
+        .map_err(|e| e.to_string())
+    });
+    if !was_registered && runtime.shortcut_registered {
+        surface::clear_error(&app);
     }
-    runtime.capturing_shortcut = enabled;
-    Ok(())
+    result
 }
 
 #[tauri::command]
@@ -241,8 +270,7 @@ fn input_devices() -> Result<Vec<String>, String> {
 fn microphone_test(app: AppHandle, enabled: bool) -> Result<(), String> {
     if enabled {
         let settings = get_settings(app.clone())?;
-        let device = available_microphone(&app, settings.microphone)?;
-        audio::monitor_start(device)
+        audio::monitor_start(settings.microphone)
     } else {
         audio::monitor_stop()
     }
@@ -253,20 +281,8 @@ fn microphone_level() -> Result<f32, String> {
     audio::microphone_level()
 }
 
-fn available_microphone(
-    app: &AppHandle,
-    selected: Option<String>,
-) -> Result<Option<String>, String> {
-    if let Some(name) = &selected
-        && !audio::input_devices()?.contains(name)
-    {
-        report_error(
-            app,
-            &format!("Microphone unavailable: {name}. Using the default microphone."),
-        );
-        return Ok(None);
-    }
-    Ok(selected)
+fn microphone_notice(fallback: bool) -> Option<String> {
+    fallback.then(|| "Using the default microphone".into())
 }
 
 fn report_error(app: &AppHandle, error: &str) {
@@ -300,8 +316,9 @@ fn hotkey(
     }
     if next == Phase::Recording {
         surface::clear_error(app);
-        let result = available_microphone(app, runtime.settings.microphone.clone())
-            .and_then(audio::start_device);
+        let result = audio::start_device(runtime.settings.microphone.clone()).map(|fallback| {
+            surface::set_notice(app, microphone_notice(fallback));
+        });
         if let Err(error) = result {
             report_error(app, &error);
             return;
@@ -338,7 +355,7 @@ fn hotkey(
                         runtime.phase = Phase::Idle;
                     }
                     surface::set_phase(&app, "idle");
-                    if surface::status(&app).error.is_none()
+                    if surface::status(&app).should_hide()
                         && let Some(window) = app.get_webview_window("main")
                         && let Err(error) = window.hide()
                     {
@@ -454,6 +471,97 @@ pub fn run() {
 #[cfg(test)]
 mod take_tests {
     use super::*;
+
+    #[test]
+    fn missing_microphone_is_a_notice_and_does_not_block_a_take() {
+        assert_eq!(
+            microphone_notice(true).as_deref(),
+            Some("Using the default microphone")
+        );
+        assert_eq!(microphone_notice(false), None);
+        let status = surface::Status {
+            phase: "idle".into(),
+            error: None,
+            notice: microphone_notice(true),
+        };
+        assert!(status.should_hide());
+    }
+
+    #[test]
+    #[ignore = "Measures local input device listing; run explicitly with --ignored --nocapture"]
+    fn measure_input_device_listing() {
+        let mut timings = Vec::new();
+        for _ in 0..30 {
+            let start = Instant::now();
+            let devices = audio::input_devices().unwrap();
+            timings.push(start.elapsed().as_secs_f64() * 1000.0);
+            assert!(!devices.is_empty());
+        }
+        println!("device_listing_cold_ms={:.3}", timings[0]);
+        timings.sort_by(f64::total_cmp);
+        println!(
+            "device_listing_n=30 median_ms={:.3} p95_ms={:.3} max_ms={:.3}",
+            timings[15], timings[28], timings[29]
+        );
+    }
+
+    fn unavailable_shortcut() -> Runtime {
+        Runtime {
+            settings: Settings::default(),
+            phase: Phase::Idle,
+            capturing_shortcut: false,
+            shortcut_registered: false,
+        }
+    }
+
+    #[test]
+    fn unrelated_settings_do_not_retry_an_unavailable_shortcut() {
+        let mut runtime = unavailable_shortcut();
+        for settings in [
+            Settings {
+                microphone: Some("USB microphone".into()),
+                ..Settings::default()
+            },
+            Settings {
+                shortcut_mode: ShortcutMode::Toggle,
+                ..Settings::default()
+            },
+            Settings {
+                launch_at_login: true,
+                ..Settings::default()
+            },
+        ] {
+            assert!(!runtime.shortcut_changes(settings.chord().unwrap()).unwrap());
+            runtime.settings = settings;
+            assert!(!runtime.shortcut_registered);
+        }
+        assert!(
+            runtime
+                .shortcut_changes("Control+KeyD".parse().unwrap())
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn failed_cancel_registration_always_exits_capture_and_can_be_retried() {
+        let mut runtime = unavailable_shortcut();
+        runtime
+            .capture_shortcut(true, |_| panic!("No registered shortcut to remove"))
+            .unwrap();
+        assert!(
+            runtime
+                .capture_shortcut(false, |_| Err("Taken".into()))
+                .is_err()
+        );
+        assert!(!runtime.capturing_shortcut);
+        assert!(!runtime.shortcut_registered);
+        runtime
+            .capture_shortcut(true, |_| panic!("No registered shortcut to remove"))
+            .unwrap();
+        runtime.capture_shortcut(false, |_| Ok(())).unwrap();
+        assert!(!runtime.capturing_shortcut);
+        assert!(runtime.shortcut_registered);
+    }
 
     #[test]
     fn toggle_ignores_release_and_processing_rejects_new_takes() {

@@ -288,3 +288,57 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
     "Using the default microphone",
   );
 });
+
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`microphone fallback preserves recording, timer and transcribing in ${colorScheme}`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme });
+    await page.setViewportSize({ width: 460, height: 132 });
+    await openSettings(page, { overlay: true });
+    await expect(page.getByRole("status")).toContainText("Ready");
+    for (const phase of ["recording", "transcribing", "idle"]) {
+      await page.evaluate(
+        (phase) =>
+          window.postMessage(
+            {
+              type: "dictate-test",
+              event: "dictation-state",
+              payload: {
+                phase,
+                error: null,
+                notice: "Using the default microphone",
+              },
+            },
+            "*",
+          ),
+        phase,
+      );
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      if (phase === "idle") {
+        await expect(
+          page.getByText("Using the default microphone"),
+        ).toHaveCount(0);
+      } else {
+        await expect(page.getByRole("status")).toContainText(
+          phase === "recording" ? "Recording" : "Transcribing…",
+        );
+        await expect(
+          page.getByText("Using the default microphone"),
+        ).toBeVisible();
+        if (phase === "recording") {
+          await expect(page.locator(".ui-timer")).toContainText("00:01");
+          await page.screenshot({
+            path: `target/overlay-notice-${colorScheme}.png`,
+          });
+          await page.setViewportSize({ width: 390, height: 132 });
+          expect(
+            await page.evaluate(
+              () => document.documentElement.scrollWidth <= innerWidth,
+            ),
+          ).toBe(true);
+        }
+      }
+    }
+  });
+}

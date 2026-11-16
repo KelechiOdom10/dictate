@@ -61,9 +61,8 @@ export const StartupRecovery: Story = {
 };
 export const MissingMicrophone: Story = {
   args: {
-    state: {
-      kind: "error",
-      message: "Microphone unavailable. Using the default microphone.",
-    },
+    state: { kind: "recording", seconds: 12 },
+    notice: "Using the default microphone",
+    shortcut: <KeyboardShortcut value="Alt+Shift+Space" />,
   },
 };

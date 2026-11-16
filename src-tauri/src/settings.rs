@@ -102,7 +102,19 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
     let parent = path.parent().ok_or("Settings directory unavailable")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut file, settings).map_err(|e| e.to_string())?;
+    let mut value = match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes)
+            .map_err(|e| format!("Read existing settings: {e}"))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(error) => return Err(format!("Read existing settings: {error}")),
+    };
+    let serde_json::Value::Object(known) =
+        serde_json::to_value(settings).map_err(|e| e.to_string())?
+    else {
+        return Err("Settings must be an object".into());
+    };
+    value.extend(known);
+    serde_json::to_writer_pretty(&mut file, &value).map_err(|e| e.to_string())?;
     file.as_file().sync_all().map_err(|e| e.to_string())?;
     file.persist(path)
         .map_err(|e| format!("Save settings: {e}"))?;
@@ -162,6 +174,15 @@ mod tests {
         let settings = load(&path).unwrap();
         assert_eq!(settings.version, 2);
         assert_eq!(settings.shortcut, "Alt+Shift+Space");
+        let updated = Settings {
+            launch_at_login: true,
+            ..settings
+        };
+        save(&path, &updated).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value["newSetting"], true);
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["launchAtLogin"], true);
     }
 
     #[test]

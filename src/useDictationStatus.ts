@@ -6,12 +6,14 @@ import { z } from "zod";
 const statusSchema = z.object({
   phase: z.enum(["idle", "recording", "transcribing"]),
   error: z.string().nullable(),
+  notice: z.string().nullable().default(null),
 });
 
 export function useDictationStatus() {
   const [status, setStatus] = useState<z.infer<typeof statusSchema>>({
     phase: "idle",
     error: null,
+    notice: null,
   });
   useEffect(() => {
     let disposed = false;
@@ -21,7 +23,8 @@ export function useDictationStatus() {
         const result = statusSchema.parse(await invoke("pipeline_status"));
         if (!disposed) setStatus(result);
       } catch (error) {
-        if (!disposed) setStatus({ phase: "idle", error: String(error) });
+        if (!disposed)
+          setStatus({ phase: "idle", error: String(error), notice: null });
       }
     };
     void (async () => {
@@ -33,7 +36,8 @@ export function useDictationStatus() {
         }
         await refresh();
       } catch (error) {
-        if (!disposed) setStatus({ phase: "idle", error: String(error) });
+        if (!disposed)
+          setStatus({ phase: "idle", error: String(error), notice: null });
       }
     })();
     return () => {
