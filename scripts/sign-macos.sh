@@ -17,15 +17,27 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="${1:-$ROOT/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/dictate.app}"
 ENTITLEMENTS="$ROOT/src-tauri/Entitlements.plist"
 IDENTIFIER="com.kelechiodom.dictate"
 
-if [[ ! -d "$APP" ]]; then
-  echo "error: no app bundle at $APP" >&2
+# shellcheck source=target-dir.sh
+source "$ROOT/scripts/target-dir.sh"
+
+# An explicit path wins; otherwise ask cargo, because CARGO_TARGET_DIR moves the
+# bundle and a hardcoded src-tauri/target silently signs nothing.
+if [[ $# -gt 0 ]]; then
+  APP="$1"
+else
+  APP="$(dictate_app_path)" || {
+    echo "error: cargo could not report a target directory" >&2
+    exit 1
+  }
+fi
+
+require_app "$APP" || {
   echo "       build it first: pnpm release:mac" >&2
   exit 1
-fi
+}
 
 if [[ -z "${DICTATE_SIGNING_IDENTITY:-}" ]]; then
   cat >&2 <<'MISSING'
