@@ -14,7 +14,13 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build --output-dir target/storybook",
     "test:stories": "vitest run",
-    "capture:ui": "pnpm build-storybook && node scripts/capture-stories.mjs"
+    "capture:ui": "pnpm build-storybook && node scripts/capture-stories.mjs",
+    "icons": "node scripts/build-icons.mjs",
+    "icons:renders": "node scripts/build-icons.mjs --renders target/icon-renders",
+    "release:mac": "bash scripts/make-release.sh",
+    "sign:mac": "bash scripts/sign-macos.sh",
+    "dmg": "bash scripts/make-dmg.sh",
+    "check:icon-colours": "node scripts/check-icon-colours.mjs"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.16",
