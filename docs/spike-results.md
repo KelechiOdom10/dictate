@@ -644,3 +644,37 @@ default `cargo test`.
 DICTATE_PARAKEET_MODEL=/path/to/parakeet-unified-en-0.6b-Q8_0.gguf \
   cargo test --manifest-path src-tauri/Cargo.toml --lib measure_parakeet_streamed_finish -- --ignored --nocapture --test-threads=1
 ```
+
+### QA round 3: stop-path latency (15 Nov 2026)
+
+The capture's 13,936 ms take used the built-in microphone at 96 kHz. The local
+log at 19:41:23 reports release-to-text 1,230 ms, inference 107 ms and total
+1,554 ms. Thus 1,123 ms preceded inference; delivery added 324 ms, including
+305 ms waiting before clipboard restoration. Toggle handling has no deliberate
+wait. The completion-pill display delay happens after total is recorded.
+
+An offline buffer of exactly 1,337,856 mono samples (13.936 s at 96 kHz), converted
+through the real capture resampler, measured 1,083 ms in the existing debug
+profile. Optimizing the FFT dependencies alone measured 1,002 ms. Optimizing
+those dependencies and dictate's generic Rust code measured 16 ms, preserving
+exactly 222,976 output samples at 16 kHz. These are individual local conversion
+measurements, not an end-to-end latency or p95 claim. Debug builds now optimize
+that code; release builds were already optimized. Conversion also walks the
+input in blocks instead of repeatedly shifting the entire remaining buffer.
+
+Reproduce without microphone or desktop input:
+
+```sh
+source "$HOME/.cargo/env"
+CARGO_TARGET_DIR=/Users/kelechiodom/Projects/dictate/target \
+  cargo test --manifest-path src-tauri/Cargo.toml --lib thirteen_second_take -- --nocapture
+```
+
+The stop path now logs audio-stop, worker-queue and debug-WAV-save durations, so
+a hands-on take can distinguish device shutdown from conversion and file I/O.
+The original log does not separate these stages. A fresh native end-to-end take
+is still required to measure the full improvement.
+
+Independent Capy review on this Mac reran the same offline test on 15 Nov 2026:
+**10 ms**, with the same exact 222,976 output samples. This is one fresh
+conversion run, not native dictation latency, an end-to-end improvement or p95.

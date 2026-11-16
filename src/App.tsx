@@ -1,4 +1,10 @@
-import { useEffect, useState, useRef, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useRef,
+  type CSSProperties,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { listen } from "@tauri-apps/api/event";
@@ -32,9 +38,22 @@ const client = new QueryClient({
 function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
   const status = useDictationStatus();
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+  const [hiding, setHiding] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [level, setLevel] = useState(0);
   const capsule = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const subscriptions = [
+      listen("overlay-hiding", () => setHiding(true)),
+      listen("overlay-showing", () => setHiding(false)),
+    ];
+    return () => {
+      subscriptions.forEach(
+        (subscription) =>
+          void subscription.then((stop) => stop()).catch(console.error),
+      );
+    };
+  }, []);
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add("overlay-window");
@@ -100,12 +119,17 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
     <main className="overlay">
       <div
         ref={capsule}
-        className="overlay-capsule"
+        className={`overlay-capsule ${hiding ? "overlay-hiding" : ""}`}
         style={
           { "--overlay-max-width": `${OVERLAY_MAX_WIDTH}px` } as CSSProperties
         }
       >
         <RecordingCapsule
+          onFinish={() => void invoke("dictation_stop").catch(console.error)}
+          onCancel={() => void invoke("dictation_cancel").catch(console.error)}
+          onOpenSettings={() =>
+            void invoke("open_notice_settings").catch(console.error)
+          }
           state={
             error
               ? { kind: "error", title: error.title, fix: error.fix }
@@ -184,7 +208,7 @@ function Appearance({
       void subscription.then((stop) => stop()).catch(console.error);
     };
   }, [onError, canReportRefreshError]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const system = matchMedia("(prefers-color-scheme: dark)");
     const root = document.documentElement;
     let frame = 0;
@@ -207,7 +231,7 @@ function Appearance({
       cancelAnimationFrame(frame);
       root.classList.remove("appearance-changing");
     };
-  }, [query.data?.theme, query.data?.appearanceMode]);
+  }, [query.data?.theme, query.data?.appearanceMode, query.isFetched]);
   return null;
 }
 

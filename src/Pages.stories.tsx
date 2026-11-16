@@ -772,16 +772,16 @@ export const Output: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     const method = await c.findByRole("combobox", {
-      name: "After you dictate",
+      name: "After dictation",
     });
-    const restore = c.getByRole("switch", { name: "Restore clipboard" });
-    await expect(restore).toBeChecked();
+    await expect(method).toHaveValue("paste");
     await userEvent.selectOptions(method, "copyOnly");
-    await waitFor(() => expect(restore).toBeDisabled());
-    await expect(restore).not.toBeChecked();
+    await waitFor(() => expect(method).toHaveValue("copyOnly"));
     await expect(c.getByText(/Paste with ⌘V when you’re ready/)).toBeVisible();
     await userEvent.selectOptions(method, "paste");
-    await waitFor(() => expect(restore).toBeChecked());
+    await waitFor(() => expect(method).toHaveValue("paste"));
+    await userEvent.selectOptions(method, "pasteKeep");
+    await waitFor(() => expect(method).toHaveValue("pasteKeep"));
     const capitalise = c.getByRole("switch", {
       name: "Capitalise the first letter",
     });
@@ -800,8 +800,8 @@ export const OutputCopyOnly: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     await expect(
-      await c.findByRole("switch", { name: "Restore clipboard" }),
-    ).toBeDisabled();
+      await c.findByRole("combobox", { name: "After dictation" }),
+    ).toHaveValue("copyOnly");
     await expect(
       c.getByRole("switch", { name: "Add a trailing space" }),
     ).toBeChecked();

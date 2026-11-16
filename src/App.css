@@ -308,3 +308,44 @@ html.overlay-window,
   background: none;
   text-decoration-color: currentColor;
 }
+
+.overlay-capsule {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+}
+.overlay-capsule.overlay-hiding {
+  opacity: 0;
+  transform: translateY(3px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay-capsule {
+    transition: none;
+  }
+}
+
+.settings-content {
+  view-transition-name: settings-page;
+}
+::view-transition-old(settings-page) {
+  animation: page-out 150ms ease-out both;
+}
+::view-transition-new(settings-page) {
+  animation: page-in 200ms ease-out both;
+}
+@keyframes page-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+::view-transition {
+  pointer-events: none;
+}

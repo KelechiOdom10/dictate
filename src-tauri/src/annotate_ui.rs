@@ -26,8 +26,10 @@ use tauri::{App, AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_nspanel::{ManagerExt, WebviewWindowExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut};
 
+use crate::focus::pointer;
 use crate::ink::{self, Ink, Pen, PenInput, Release};
 use crate::package::{Display, Stroke};
+use crate::settings::OverlayPosition;
 
 pub const INK: &str = "ink";
 pub const BAR: &str = "annotate-bar";
@@ -197,15 +199,6 @@ pub fn escape() -> Shortcut {
     Shortcut::new(None, Code::Escape)
 }
 
-/// Global pointer position in display points, top-left origin.
-pub fn pointer() -> Option<(f64, f64)> {
-    use core_graphics::event::CGEvent;
-    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
-    let point = CGEvent::new(source).ok()?.location();
-    Some((point.x, point.y))
-}
-
 /// Creates both panels, hidden. Called once from `setup`, on the main thread,
 /// which is where the spike converted its window.
 pub fn setup(app: &App) -> tauri::Result<()> {
@@ -238,11 +231,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
             .add_style_mask(objc2_app_kit::NSWindowStyleMask::NonactivatingPanel)
             .map_err(|e| tauri::Error::Io(std::io::Error::other(format!("{e:?}"))))?;
         panel.set_level(level);
-        panel.set_collection_behavior(
-            objc2_app_kit::NSWindowCollectionBehavior::CanJoinAllSpaces
-                | objc2_app_kit::NSWindowCollectionBehavior::FullScreenAuxiliary
-                | objc2_app_kit::NSWindowCollectionBehavior::Stationary,
-        );
+        panel.set_collection_behavior(crate::overlay::collection_behavior());
         panel.set_hides_on_deactivate(false);
         panel.set_transparent(true);
         panel.set_has_shadow(false);
@@ -256,6 +245,10 @@ pub fn setup(app: &App) -> tauri::Result<()> {
 pub fn begin(app: &AppHandle, display: Display, clock: Instant, started_at_ms: i64) {
     with_copied(app, |copied| *copied = None);
     let frame = display.frame.clone();
+    let position = *app
+        .state::<Mutex<OverlayPosition>>()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     *app.state::<State>()
         .0
         .lock()
@@ -270,7 +263,10 @@ pub fn begin(app: &AppHandle, display: Display, clock: Instant, started_at_ms: i
             .bounds()
             .size
             .height;
-        for (label, rect) in [(INK, frame.clone()), (BAR, ink::bar_frame(&frame))] {
+        for (label, rect) in [
+            (INK, frame.clone()),
+            (BAR, ink::bar_frame(&frame, position)),
+        ] {
             let Ok(panel) = handle.get_webview_panel(label) else {
                 log::warn!("[annotate] {label} panel missing");
                 continue;

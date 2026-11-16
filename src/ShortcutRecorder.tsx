@@ -1,3 +1,5 @@
+import { useDictationStatus } from "./useDictationStatus";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { SettingsRow, ShortcutRecorder as Recorder } from "./ui";
 
@@ -23,16 +25,39 @@ export default function ShortcutRecorder({
   onSave,
   onError,
 }: Props) {
+  const status = useDictationStatus();
+  const startupConflict =
+    status.error?.title ===
+    (id === "annotate-shortcut"
+      ? "Annotate shortcut unavailable"
+      : "Shortcut unavailable");
+  const [conflict, setConflict] = useState("");
+  const request = useRef(0);
+  useEffect(() => {
+    if (!recording) request.current += 1;
+  }, [recording]);
+  useEffect(
+    () => () => {
+      request.current += 1;
+    },
+    [],
+  );
   async function capture() {
+    const generation = ++request.current;
+    setConflict("");
     onError("");
+    onRecordingChange(true);
     try {
       await invoke("capture_shortcut", { enabled: true });
-      onRecordingChange(true);
     } catch (e) {
-      onError(String(e));
+      if (request.current === generation) {
+        onRecordingChange(false);
+        onError(String(e));
+      }
     }
   }
   async function cancel() {
+    request.current += 1;
     onRecordingChange(false);
     try {
       await invoke("capture_shortcut", { enabled: false });
@@ -42,14 +67,25 @@ export default function ShortcutRecorder({
   }
   async function commit(shortcut: string) {
     onRecordingChange(false);
-    await onSave(shortcut);
-    await cancel();
+    try {
+      await onSave(shortcut);
+    } catch (error) {
+      if (/shortcut unavailable|shortcut.*register/i.test(String(error)))
+        setConflict("Used by another app — pick another");
+      else onError(String(error));
+    } finally {
+      await cancel();
+    }
   }
   return (
     <SettingsRow
       id={id}
       label={label}
-      help={recording ? "Press a key combination. Escape cancels." : idleHelp}
+      help={
+        conflict ||
+        (startupConflict ? "Used by another app — pick another" : "") ||
+        (recording ? "Press a key combination. Escape cancels." : idleHelp)
+      }
     >
       <Recorder
         id={id}

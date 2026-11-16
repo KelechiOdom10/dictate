@@ -1,5 +1,6 @@
 import {
   useId,
+  useLayoutEffect,
   useRef,
   type InputHTMLAttributes,
   type SelectHTMLAttributes,
@@ -95,8 +96,26 @@ export function SegmentedControl({
   onChange: (value: string) => void;
 }) {
   const name = useId();
+  const group = useRef<HTMLFieldSetElement>(null);
+  useLayoutEffect(() => {
+    const node = group.current;
+    if (!node) return;
+    const update = () => {
+      const selected =
+        node.querySelector<HTMLInputElement>("input:checked")?.parentElement;
+      if (!selected) return;
+      node.style.setProperty("--thumb-x", `${selected.offsetLeft}px`);
+      node.style.setProperty("--thumb-y", `${selected.offsetTop}px`);
+      node.style.setProperty("--thumb-width", `${selected.offsetWidth}px`);
+      node.style.setProperty("--thumb-height", `${selected.offsetHeight}px`);
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    update();
+    return () => observer.disconnect();
+  }, [value, options]);
   return (
-    <fieldset className={`ui-segments ui-size-${size}`}>
+    <fieldset ref={group} className={`ui-segments ui-size-${size}`}>
       <legend className="sr-only">{label}</legend>
       {options.map((option) => (
         <label key={option.value}>

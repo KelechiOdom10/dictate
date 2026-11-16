@@ -111,7 +111,9 @@ export default function AnnotatePage() {
           recording={recording}
           disabled={busy || !settings.annotateEnabled}
           onRecordingChange={setRecording}
-          onSave={(annotateShortcut) => save({ annotateShortcut })}
+          onSave={async (annotateShortcut) => {
+            await mutation.mutateAsync({ ...settings, annotateShortcut });
+          }}
           onError={setError}
         />
       </SettingsGroup>

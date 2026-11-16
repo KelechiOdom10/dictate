@@ -128,11 +128,7 @@ p {
   color: var(--text);
 }
 .ui-segments input:checked + span {
-  background: var(--segment-thumb);
   color: var(--text);
-  box-shadow:
-    0 0 0 1px var(--segment-edge),
-    0 1px 2px var(--segment-shadow);
 }
 .ui-segments input:focus-visible + span {
   outline: 2px solid var(--accent);
@@ -1223,4 +1219,76 @@ h3 {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.ui-segments {
+  position: relative;
+}
+.ui-segments::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--thumb-width, 0px);
+  height: var(--thumb-height, 0px);
+  transform: translate(var(--thumb-x, 3px), var(--thumb-y, 3px));
+  border-radius: var(--radius-pill);
+  background: var(--segment-thumb);
+  box-shadow:
+    0 0 0 1px var(--segment-edge),
+    0 1px 2px var(--segment-shadow);
+  transition:
+    transform 200ms ease-out,
+    width 200ms ease-out;
+}
+.capsule-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--control);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 150ms ease-out;
+}
+.capsule-action:active {
+  transform: scale(0.96);
+}
+.capsule-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ui-shortcut kbd {
+  margin-left: 8px;
+}
+@keyframes content-enter {
+  from {
+    opacity: 0.4;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.settings-content,
+.ui-list-item,
+.ui-toast,
+.ui-capsule {
+  animation: content-enter 200ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-segments::before,
+  .capsule-action {
+    transition: none;
+  }
+  .settings-content,
+  .ui-list-item,
+  .ui-toast,
+  .ui-capsule {
+    animation: none;
+  }
 }

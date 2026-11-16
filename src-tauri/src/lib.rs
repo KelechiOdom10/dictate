@@ -43,7 +43,7 @@ mod surface;
 use history::{HistoryList, NewTake, TakeStatus};
 use models::{ModelEntry, SpeechModel};
 use problem::Problem;
-use settings::{HistoryRetention, MicMode, PasteMethod, Settings, ShortcutMode};
+use settings::{HistoryRetention, MicMode, Settings, ShortcutMode};
 use std::{
     path::{Path, PathBuf},
     sync::Mutex,
@@ -843,10 +843,8 @@ fn capture_shortcut(app: AppHandle, enabled: bool) -> Result<(), String> {
 #[tauri::command]
 fn dismiss_error(app: AppHandle) -> Result<(), String> {
     surface::clear_error(&app);
-    if surface::status(&app).phase == "idle"
-        && let Some(window) = app.get_webview_window("main")
-    {
-        window.hide().map_err(|e| e.to_string())?;
+    if surface::status(&app).phase == "idle" {
+        overlay::hide(&app)?;
     }
     Ok(())
 }
@@ -918,19 +916,134 @@ fn annotate_stop(app: AppHandle) {
 }
 
 #[tauri::command]
+fn dictation_stop(app: AppHandle) {
+    let state = app.state::<Mutex<Runtime>>();
+    let Ok(runtime) = state.lock() else { return };
+    if runtime.phase == Phase::Recording {
+        dictation_change(&app, runtime, Phase::Transcribing);
+    }
+}
+
+#[tauri::command]
+fn dictation_cancel(app: AppHandle) {
+    let state = app.state::<Mutex<Runtime>>();
+    let Ok(mut runtime) = state.lock() else {
+        return;
+    };
+    if runtime.phase != Phase::Recording {
+        return;
+    }
+    let _ = audio::stop();
+    let live = runtime.live.take();
+    runtime.take_start = None;
+    runtime.phase = Phase::Idle;
+    surface::set_phase(&app, "idle");
+    let _ = overlay::hide(&app);
+    drop(runtime);
+    tauri::async_runtime::spawn_blocking(move || drop(live));
+}
+
+#[derive(Default)]
+struct SettingsVisibility {
+    ready: bool,
+    requested: bool,
+    page: Option<&'static str>,
+}
+
+fn show_settings(app: &AppHandle) {
+    let state = app.state::<Mutex<SettingsVisibility>>();
+    let mut visibility = state.lock().unwrap_or_else(|error| error.into_inner());
+    visibility.requested = true;
+    log::info!("[settings] show requested, ready={}", visibility.ready);
+    if visibility.ready
+        && let Some(window) = app.get_webview_window("settings")
+    {
+        if let Some(page) = visibility.page.take() {
+            let _ = window.emit("settings-page", page);
+        }
+        if let Err(error) = window.show() {
+            log::warn!("[settings] show failed: {error}");
+            return;
+        }
+        log::info!("[settings] window shown");
+        if let Err(error) = window.set_focus() {
+            log::warn!("[settings] focus failed: {error}");
+        }
+    }
+}
+
+#[tauri::command]
+fn settings_ready(app: AppHandle) {
+    let requested = {
+        let state = app.state::<Mutex<SettingsVisibility>>();
+        let mut visibility = state.lock().unwrap_or_else(|error| error.into_inner());
+        if visibility.ready {
+            return;
+        }
+        visibility.ready = true;
+        log::info!(
+            "[settings] webview ready, requested={}",
+            visibility.requested
+        );
+        visibility.requested
+    };
+    if requested {
+        show_settings(&app);
+    }
+}
+
+#[tauri::command]
+fn open_notice_settings(app: AppHandle) {
+    let page = if surface::status(&app)
+        .error
+        .is_some_and(|error| error.title.contains("Annotate"))
+    {
+        "Annotate"
+    } else {
+        "General"
+    };
+    {
+        let state = app.state::<Mutex<SettingsVisibility>>();
+        let mut visibility = state.lock().unwrap_or_else(|error| error.into_inner());
+        visibility.page = Some(page);
+    }
+    show_settings(&app);
+    let _ = overlay::hide(&app);
+}
+
+#[tauri::command]
 fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     overlay::resize(&app, width, height)
 }
+
+static ERROR_NOTICE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Show a problem in the overlay, tray and Settings. Never call this while
 /// holding the `Runtime` lock: showing the overlay asks the focused app for
 /// its window over Accessibility.
 fn report_error(app: &AppHandle, error: &Problem) {
+    use std::sync::atomic::Ordering;
+    let notice_id = ERROR_NOTICE.fetch_add(1, Ordering::SeqCst) + 1;
     log::warn!("[dictate] {error}");
     surface::set_error(app, error);
     if let Err(error) = overlay::show(app) {
         log::warn!("[dictate] show error: {error}");
     }
+    let notice_app = app.clone();
+    let expected = error.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_secs(6));
+        let status = surface::status(&notice_app);
+        if ERROR_NOTICE.load(Ordering::SeqCst) == notice_id
+            && status.phase == "idle"
+            && status
+                .error
+                .as_ref()
+                .is_some_and(|error| error.title == expected.title)
+        {
+            let _ = overlay::hide(&notice_app);
+        }
+    });
     if let Err(error) = app.emit("dictation-error", error) {
         log::warn!("[dictate] emit error: {error}");
     }
@@ -942,7 +1055,7 @@ fn hotkey(
     event: ShortcutState,
 ) {
     let state = app.state::<Mutex<Runtime>>();
-    let Ok(mut runtime) = state.lock() else {
+    let Ok(runtime) = state.lock() else {
         return;
     };
     if runtime.capturing_shortcut {
@@ -963,6 +1076,10 @@ fn hotkey(
         }
     }
     let next = shortcut_transition(runtime.settings.shortcut_mode, runtime.phase, event);
+    dictation_change(app, runtime, next);
+}
+
+fn dictation_change(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>, next: Phase) {
     if next == runtime.phase {
         return;
     }
@@ -1044,8 +1161,11 @@ fn hotkey(
         let model = start.model.clone();
         let settings = runtime.settings.clone();
         let live = runtime.live.take();
+        let stopping = Instant::now();
         match audio::stop() {
             Ok(samples) => {
+                let stop_ms = stopping.elapsed().as_millis();
+                log::info!("[dictate] audio_stop_ms={stop_ms}");
                 if settings.sound_feedback {
                     sound::play(sound::Cue::Stop);
                 }
@@ -1054,7 +1174,14 @@ fn hotkey(
                 let take_id = runtime.take_id;
                 let app = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
+                    let queued_ms = released.elapsed().as_millis();
+                    let preparing = Instant::now();
                     save_debug_recording(&app, &samples, settings.debug_recordings);
+                    log::info!(
+                        "[dictate] stop_to_worker_ms={} debug_save_ms={}",
+                        queued_ms.saturating_sub(stop_ms),
+                        preparing.elapsed().as_millis()
+                    );
                     let delivery = insert::Delivery::from_settings(&settings);
                     let transcript = dictation_text(&samples, &model, live).map(|t| Transcript {
                         text: output_text(&t.text, &settings),
@@ -1071,20 +1198,19 @@ fn hotkey(
                     }
                     let result = transcript.as_ref().map_err(Clone::clone).and_then(|t| {
                         if !t.text.is_empty() {
-                            insert::paste(&app, &t.text, delivery)?;
+                            return insert::paste(&app, &t.text, delivery).map(Some);
                         }
-                        Ok(!t.text.is_empty())
+                        Ok(None)
                     });
                     let total_ms = released.elapsed().as_millis() as i64;
                     let (text, inference_ms, skip_reason) = match transcript {
                         Ok(t) => (t.text.trim_end().to_string(), t.inference_ms, t.skip_reason),
                         Err(_) => (String::new(), None, None),
                     };
-                    let copy_only = delivery.method == PasteMethod::CopyOnly;
                     let (status, detail) = match &result {
-                        Ok(true) if copy_only => (TakeStatus::Copied, None),
-                        Ok(true) => (TakeStatus::Pasted, None),
-                        Ok(false) => (TakeStatus::Skipped, skip_reason),
+                        Ok(Some(insert::Outcome::Copied)) => (TakeStatus::Copied, None),
+                        Ok(Some(insert::Outcome::Pasted)) => (TakeStatus::Pasted, None),
+                        Ok(None) => (TakeStatus::Skipped, skip_reason),
                         Err(error) => (TakeStatus::Failed, Some(error.to_string())),
                     };
                     record_take(
@@ -1103,9 +1229,9 @@ fn hotkey(
                         retention,
                     );
                     let outcome = match result {
-                        Ok(true) if copy_only => "copied",
-                        Ok(true) => "done",
-                        Ok(false) => "skipped",
+                        Ok(Some(insert::Outcome::Copied)) => "copied",
+                        Ok(Some(insert::Outcome::Pasted)) => "done",
+                        Ok(None) => "skipped",
                         Err(error) => {
                             report_error(&app, &error);
                             "idle"
@@ -1134,8 +1260,7 @@ fn hotkey(
                     surface::set_phase(&app, "idle");
                     drop(runtime);
                     if surface::status(&app).should_hide()
-                        && let Some(window) = app.get_webview_window("main")
-                        && let Err(error) = window.hide()
+                        && let Err(error) = overlay::hide(&app)
                     {
                         report_error(
                             &app,
@@ -1237,8 +1362,7 @@ fn flash_notice(app: &AppHandle, notice: &'static str) {
             surface::set_notice(&app, previous);
             surface::refresh(&app);
             if surface::status(&app).should_hide()
-                && let Some(window) = app.get_webview_window("main")
-                && let Err(error) = window.hide()
+                && let Err(error) = overlay::hide(&app)
             {
                 log::warn!("[annotate] hide notice: {error}");
             }
@@ -1409,8 +1533,7 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                     return report_error(&app, warning);
                 }
                 if surface::status(&app).should_hide()
-                    && let Some(window) = app.get_webview_window("main")
-                    && let Err(error) = window.hide()
+                    && let Err(error) = overlay::hide(&app)
                 {
                     log::warn!("[annotate] hide: {error}");
                 }
@@ -1657,8 +1780,16 @@ fn development_build() -> bool {
 }
 
 #[tauri::command]
-fn screen_permission() -> bool {
-    screen::has_permission()
+fn screen_permission(app: AppHandle) -> bool {
+    let allowed = screen::has_permission();
+    if allowed
+        && surface::status(&app)
+            .error
+            .is_some_and(|error| error.title.contains("Screen Recording"))
+    {
+        let _ = dismiss_error(app);
+    }
+    allowed
 }
 
 /// Asks once (which lists dictate under Screen Recording), then opens that
@@ -1699,6 +1830,7 @@ fn shortcut_transition(mode: ShortcutMode, phase: Phase, event: ShortcutState) -
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(Mutex::new(SettingsVisibility::default()))
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -1739,6 +1871,10 @@ pub fn run() {
             microphone_test,
             microphone_level,
             resize_overlay,
+            dictation_stop,
+            dictation_cancel,
+            settings_ready,
+            open_notice_settings,
             annotate_bar_state,
             annotate_pen,
             annotate_pen_down,
@@ -1879,18 +2015,14 @@ pub fn run() {
             }
             surface::setup(app, &settings)?;
             annotate_ui::setup(app)?;
-            if let Some(window) = app.get_webview_window("main") {
-                window.set_ignore_cursor_events(true)?;
-                window.set_focusable(false)?;
+            if let Err(error) = overlay::setup(app) {
+                log::warn!("[overlay] capsule panel: {error}");
             }
             if let Some(error) = &startup_error {
                 report_error(app.handle(), error);
             }
-            if (startup_error.is_some() || !std::env::args().any(|arg| arg == "--autostart"))
-                && let Some(window) = app.get_webview_window("settings")
-            {
-                window.show()?;
-                window.set_focus()?;
+            if startup_error.is_some() || !std::env::args().any(|arg| arg == "--autostart") {
+                show_settings(app.handle());
             }
             Ok(())
         })
@@ -1899,6 +2031,9 @@ pub fn run() {
                 && let tauri::WindowEvent::CloseRequested { api, .. } = event
             {
                 api.prevent_close();
+                if surface::status(window.app_handle()).phase == "idle" {
+                    let _ = overlay::hide(window.app_handle());
+                }
                 if let Err(error) = capture_shortcut(window.app_handle().clone(), false) {
                     log::warn!("[settings] {error}");
                 }
@@ -1910,8 +2045,14 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_settings(app);
+            }
+        });
 }
 
 #[cfg(test)]

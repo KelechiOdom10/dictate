@@ -134,6 +134,34 @@ export const Segments: Story = {
     await expect(c.getByRole("radio", { name: "Starred" })).toBeChecked();
   },
 };
+export const WrappedSegments: Story = {
+  render: () => {
+    const [value, setValue] = useState("all");
+    return (
+      <div style={{ width: 180 }}>
+        <SegmentedControl
+          label="Wrapped view"
+          options={options}
+          value={value}
+          onChange={setValue}
+        />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(c.getByRole("radio", { name: "Meeting" }));
+    const selected = c.getByRole("radio", { name: "Meeting" }).parentElement!;
+    const group = selected.parentElement!;
+    await expect(selected.offsetTop).toBeGreaterThan(3);
+    await expect(group.style.getPropertyValue("--thumb-y")).toBe(
+      `${selected.offsetTop}px`,
+    );
+    await expect(group.style.getPropertyValue("--thumb-x")).toBe(
+      `${selected.offsetLeft}px`,
+    );
+  },
+};
 export const Search: Story = {
   name: "SearchField / empty, filled, disabled",
   render: () => {

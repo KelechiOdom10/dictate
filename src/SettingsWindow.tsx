@@ -1,5 +1,7 @@
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { flushSync } from "react-dom";
+import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useQuery } from "@tanstack/react-query";
 import General from "./GeneralSettings";
@@ -21,6 +23,7 @@ import {
   PenLine,
 } from "lucide-react";
 import { useDictationStatus } from "./useDictationStatus";
+import { readSettings } from "./settings";
 
 const subtitles: Record<string, string> = {
   General: "Make dictate feel like second nature.",
@@ -51,6 +54,31 @@ export default function SettingsWindow({
 }) {
   const status = useDictationStatus();
   const [page, setPage] = useState(initialPage);
+  const [navigationReady, setNavigationReady] = useState(false);
+  const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+  useEffect(() => {
+    let disposed = false;
+    const subscription = listen("settings-page", ({ payload }) => {
+      if (
+        typeof payload === "string" &&
+        pages.some(({ name }) => name === payload)
+      )
+        setPage(payload);
+    });
+    void subscription
+      .then(() => {
+        if (!disposed) setNavigationReady(true);
+      })
+      .catch(console.error);
+    return () => {
+      disposed = true;
+      void subscription.then((stop) => stop()).catch(console.error);
+    };
+  }, []);
+  useEffect(() => {
+    if (!navigationReady || !settings.isFetched) return;
+    void invoke("settings_ready").catch(console.error);
+  }, [navigationReady, settings.isFetched]);
   const version = useQuery({ queryKey: ["version"], queryFn: getVersion });
   return (
     <div className="settings-shell">
@@ -67,7 +95,16 @@ export default function SettingsWindow({
             icon: <Icon size={17} strokeWidth={1.5} aria-hidden="true" />,
           }))}
           value={page}
-          onChange={setPage}
+          onChange={(next) => {
+            if (
+              document.startViewTransition &&
+              !matchMedia("(prefers-reduced-motion: reduce)").matches
+            ) {
+              document.startViewTransition(() =>
+                flushSync(() => setPage(next)),
+              );
+            } else setPage(next);
+          }}
         />
         <footer>
           <span>Version {version.data ?? "…"}</span>
@@ -81,7 +118,7 @@ export default function SettingsWindow({
           </Button>
         </footer>
       </aside>
-      <main className="settings-content">
+      <main key={page} className="settings-content">
         <header>
           <h1>{page}</h1>
           <p>{subtitles[page]}</p>
