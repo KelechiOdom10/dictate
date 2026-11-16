@@ -38,6 +38,7 @@
     "allow-open-screen-recording-settings",
     "allow-report-settings-refresh-error",
     "allow-list-history",
+    "allow-delete-annotation",
     "allow-delete-history",
     "allow-list-models",
     "allow-download-model",

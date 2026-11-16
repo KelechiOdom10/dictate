@@ -1,24 +1,26 @@
-import { useId, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { Card } from "@astryxdesign/core/Card";
+import { Heading } from "@astryxdesign/core/Heading";
+import { HStack } from "@astryxdesign/core/HStack";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { Text } from "@astryxdesign/core/Text";
+import { VStack } from "@astryxdesign/core/VStack";
 
 export function SettingsRow({
-  id,
   label,
   help,
   children,
 }: {
-  id: string;
   label: string;
-  help: ReactNode;
+  help?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className="ui-setting-row">
-      <div className="ui-row-copy">
-        <label htmlFor={id}>{label}</label>
-        <p id={`${id}-help`}>{help}</p>
-      </div>
-      <div className="ui-row-control">{children}</div>
-    </div>
+    <ListItem
+      label={label}
+      description={help ? <Text type="supporting">{help}</Text> : undefined}
+      endContent={children}
+    />
   );
 }
 export function SettingsGroup({
@@ -30,49 +32,24 @@ export function SettingsGroup({
   icon?: ReactNode;
   children: ReactNode;
 }) {
-  const id = useId();
   return (
-    <section className="ui-settings-group" aria-labelledby={id}>
-      <h2 id={id}>
+    <VStack gap={2}>
+      <HStack gap={2} vAlign="center">
         {icon}
-        {title}
-      </h2>
-      <div className="ui-group">{children}</div>
-    </section>
-  );
-}
-export function SidebarNav({
-  label,
-  items,
-  value,
-  onChange,
-}: {
-  label: string;
-  items: { value: string; label: string; icon?: ReactNode }[];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <nav className="ui-sidebar-nav" aria-label={label}>
-      {items.map((item) => (
-        <button
-          type="button"
-          key={item.value}
-          aria-current={value === item.value ? "page" : undefined}
-          className={value === item.value ? "selected" : ""}
-          onClick={() => onChange(item.value)}
-        >
-          {item.icon}
-          {item.label}
-        </button>
-      ))}
-    </nav>
+        <Heading level={2}>{title}</Heading>
+      </HStack>
+      <Card padding={0}>
+        <List hasDividers edge="bleed">
+          {children}
+        </List>
+      </Card>
+    </VStack>
   );
 }
 export function PathText({ children }: { children: string }) {
   return (
-    <code className="ui-path" title={children}>
+    <Text type="code" maxLines={1}>
       {children}
-    </code>
+    </Text>
   );
 }

@@ -1,0 +1,31 @@
+{
+  "name": "ember",
+  "like": "neutral",
+  "mode": "both",
+  "settings": [
+    {
+      "thing": "font",
+      "value": "Geist, -apple-system, system-ui, sans-serif",
+      "source": "dial"
+    },
+    {
+      "thing": "neutral",
+      "value": "#8a7f73",
+      "source": "dial"
+    },
+    {
+      "thing": "accent",
+      "value": "#5c544b",
+      "source": "dial"
+    },
+    {
+      "thing": "corners",
+      "value": "pill",
+      "source": "dial",
+      "on": "selector",
+      "only": true
+    }
+  ],
+  "lifted": [],
+  "palette": "293ba5ae787e0ba4f73f57b1bf686208ce2de7ea575858bdc53aeaa42ce90bb5"
+}

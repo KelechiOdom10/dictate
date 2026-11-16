@@ -429,6 +429,19 @@ pub fn session_folder(dir: &Path, id: &str) -> Option<PathBuf> {
     is_session_id(id).then(|| dir.join(id))
 }
 
+/// Removes one session folder. An id that is not a session name, or a folder
+/// that is not directly under `dir`, is refused rather than followed.
+pub fn delete(dir: &Path, id: &str) -> io::Result<bool> {
+    let Some(folder) = session_folder(dir, id) else {
+        return Ok(false);
+    };
+    if folder.parent() != Some(dir) || !folder.is_dir() {
+        return Ok(false);
+    }
+    std::fs::remove_dir_all(&folder)?;
+    Ok(true)
+}
+
 /// `2026-11-14_14-56-36`: what `session_id` makes, and nothing else.
 fn is_session_id(id: &str) -> bool {
     let shape = "dddd-dd-dd_dd-dd-dd";
@@ -936,5 +949,26 @@ mod tests {
         let words = &annotation.transcript.words;
         assert!(words.windows(2).all(|pair| pair[0].t0 <= pair[1].t0));
         assert!(words.iter().all(|word| word.t0 >= 40 && word.t1 <= 10_040));
+    }
+
+    /// Deleting removes one session folder, and refuses anything that is not
+    /// a session name directly inside the annotations folder.
+    #[test]
+    fn delete_removes_one_session_folder_and_refuses_everything_else() {
+        let root = std::env::temp_dir().join("dictate-annotate-delete");
+        let _ = std::fs::remove_dir_all(&root);
+        let keep = root.join("2026-11-14_14-56-36");
+        let gone = root.join("2026-11-15_09-00-00");
+        std::fs::create_dir_all(&keep).unwrap();
+        std::fs::create_dir_all(&gone).unwrap();
+        std::fs::write(gone.join("session.json"), "{}").unwrap();
+        assert!(super::delete(&root, "2026-11-15_09-00-00").unwrap());
+        assert!(!gone.exists(), "the session folder is gone");
+        assert!(keep.is_dir(), "the other session stays");
+        assert!(!super::delete(&root, "..").unwrap());
+        assert!(!super::delete(&root, "2026-11-15_09-00-00").unwrap());
+        assert!(!super::delete(&root, "../../etc").unwrap());
+        assert!(root.is_dir(), "the root itself is never removed");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

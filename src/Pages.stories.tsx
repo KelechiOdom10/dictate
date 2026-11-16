@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { useState } from "react";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import type { AnnotationEntry } from "./annotations";
 import type { HistoryEntry, TakeStatus } from "./history";
 import modelFixture from "./models.fixture.json";
@@ -24,6 +24,23 @@ const meta = {
 } satisfies Meta;
 export default meta;
 type Story = StoryObj<typeof meta>;
+async function choose(
+  canvasElement: HTMLElement,
+  label: string,
+  option: string | RegExp,
+) {
+  const select = within(canvasElement).getByRole("combobox", { name: label });
+  await waitFor(() => expect(select).toBeEnabled());
+  await userEvent.click(select);
+  fireEvent.click(
+    await within(document.body).findByRole("option", { name: option }),
+  );
+  await waitFor(() =>
+    expect(
+      within(canvasElement).getByRole("combobox", { name: label }),
+    ).toHaveTextContent(option),
+  );
+}
 const minute = 60_000;
 const sampleHistory = (now: number): HistoryEntry[] =>
   [
@@ -166,7 +183,7 @@ function mockApp(
     shortcutMode: "hold",
     microphone: null,
     launchAtLogin: false,
-    theme: globals.theme === "paper" ? "paper" : "ember",
+    theme: settingsSchema.shape.theme.parse(globals.theme),
     overlayPosition: "bottom",
     historyRetention: "week",
     appearanceMode: globals.mode === "dark" ? "dark" : "light",
@@ -225,6 +242,14 @@ function mockApp(
       if (command === "list_annotations") return annotate.entries ?? [];
       if (command === "development_build") return false;
       if (command === "screen_permission") return annotate.permission ?? true;
+      if (command === "delete_annotation") {
+        const { id } = args as { id: string };
+        annotateCalls.push(`delete_annotation ${id}`);
+        annotate.entries = (annotate.entries ?? []).filter(
+          (entry) => entry.id !== id,
+        );
+        return null;
+      }
       if (
         command === "copy_annotation" ||
         command === "reveal_annotation" ||
@@ -280,11 +305,13 @@ export const General: Story = {
   beforeEach: mockSettings,
   render: () => <GeneralPage />,
   play: async ({ canvasElement }) => {
-    await expect(
-      await within(canvasElement).findByRole("switch", {
-        name: "Launch at login",
-      }),
-    ).toBeVisible();
+    const control = await within(canvasElement).findByRole("switch", {
+      name: "Launch at login",
+    });
+    await expect(control.closest(".astryx-switch-field")).toBeVisible();
+    await expect(control).toBeEnabled();
+    await expect(control).not.toHaveAttribute("aria-disabled", "true");
+    await expect(control).not.toBeChecked();
   },
 };
 
@@ -315,10 +342,7 @@ export const GeneralActiveModelMissing: Story = {
     await expect(
       c.queryByRole("button", { name: "Download a model" }),
     ).not.toBeInTheDocument();
-    const select = c.getByRole("combobox", { name: "Speech model" });
-    await expect(select).toBeEnabled();
-    await userEvent.selectOptions(select, "small.en");
-    await waitFor(() => expect(select).toHaveValue("small.en"));
+    await choose(canvasElement, "Speech model", /^Small English/);
     await expect(c.queryByText(/isn’t installed/)).not.toBeInTheDocument();
   },
 };
@@ -333,10 +357,9 @@ export const GeneralFreshProfile: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     const select = await c.findByRole("combobox", { name: "Speech model" });
-    await waitFor(() => expect(select).toHaveValue("parakeet-unified-en"));
-    await expect(
-      c.getByRole("option", { name: "Parakeet English (Recommended)" }),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(select).toHaveTextContent("Parakeet English (Recommended)"),
+    );
   },
 };
 export const GeneralLoading: Story = {
@@ -383,16 +406,51 @@ export const History: Story = {
     const c = within(canvasElement);
     const slack = await c.findByRole("button", { name: /Ship the history/ });
     await userEvent.click(slack);
-    await expect(slack).toHaveAttribute("aria-current", "true");
+    await expect(slack.closest("[aria-current]")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
     await expect(
       c.getByRole("region", { name: "Dictation" }),
     ).toHaveTextContent("Then hand it to review.");
     await userEvent.keyboard("{ArrowDown}");
-    await expect(
-      c.getByRole("button", { name: /No speech detected/ }),
-    ).toHaveFocus();
-    await expect(c.getByRole("button", { name: "Copy text" })).toBeDisabled();
+    await waitFor(() =>
+      expect(
+        c.getByRole("button", { name: /No speech detected/ }),
+      ).toHaveFocus(),
+    );
+    await expect(c.getByRole("button", { name: "Copy text" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     await userEvent.click(c.getByRole("button", { name: /Bakery/i }));
+  },
+};
+const layoutOf = (...elements: HTMLElement[]) =>
+  elements.map((element) => {
+    const { top, left, height, width } = element.getBoundingClientRect();
+    return { top, left, height, width };
+  });
+export const HistoryCopy: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("button", { name: /Bakery/i }));
+    const copy = c.getByRole("button", { name: "Copy text" });
+    const detail = c.getByRole("region", { name: "Dictation" });
+    // The actions sit in the detail's own header, so the pane must not need a
+    // horizontal scroll to reach them.
+    await expect(detail.scrollWidth).toBeLessThanOrEqual(detail.clientWidth);
+    const parts = () => [
+      detail,
+      c.getByRole("button", { name: "Delete dictation" }),
+      c.getByRole("button", { name: /Bakery/i }),
+    ];
+    const before = layoutOf(...parts());
+    await userEvent.click(copy);
+    await expect(await c.findByText("Copied to clipboard")).toBeInTheDocument();
+    await expect(layoutOf(...parts())).toEqual(before);
   },
 };
 const annotationsHistory = ({
@@ -430,10 +488,23 @@ export const HistoryAnnotationActions: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     await userEvent.click(await c.findByRole("radio", { name: "Annotations" }));
-    await userEvent.click(await c.findByRole("button", { name: "Copy again" }));
+    const copyAgain = await c.findByRole("button", { name: "Copy again" });
+    const before = layoutOf(
+      c.getByRole("region", { name: "Annotation" }),
+      copyAgain,
+      c.getByRole("button", { name: "Reveal in Finder" }),
+    );
+    await userEvent.click(copyAgain);
     await expect(
-      await c.findByRole("button", { name: "Copied" }),
-    ).toBeVisible();
+      await c.findByText("Summary copied to clipboard"),
+    ).toBeInTheDocument();
+    await expect(
+      layoutOf(
+        c.getByRole("region", { name: "Annotation" }),
+        copyAgain,
+        c.getByRole("button", { name: "Reveal in Finder" }),
+      ),
+    ).toEqual(before);
     await userEvent.click(c.getByRole("button", { name: "Reveal in Finder" }));
     await expect(annotateCalls).toEqual([
       "copy_annotation 2026-11-15_10-42-08",
@@ -447,7 +518,31 @@ export const HistoryAnnotationActions: Story = {
     ).toHaveTextContent("Nothing was said in this session.");
     await expect(
       c.getByRole("region", { name: "Annotation" }),
-    ).toHaveTextContent("Partial session. Video cut short");
+    ).toHaveTextContent(/Partial session\.\s*Video cut short/);
+  },
+};
+export const HistoryAnnotationDelete: Story = {
+  beforeEach: annotationsHistory,
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("radio", { name: "Annotations" }));
+    const detail = await c.findByRole("region", { name: "Annotation" });
+    await userEvent.click(
+      within(detail).getByRole("button", { name: "Delete annotation" }),
+    );
+    const dialog = await within(document.body).findByRole("alertdialog");
+    await userEvent.click(
+      await within(dialog).findByRole("button", { name: "Delete annotation" }),
+    );
+    await waitFor(() =>
+      expect(annotateCalls).toContain("delete_annotation 2026-11-15_10-42-08"),
+    );
+    await waitFor(() =>
+      expect(
+        c.queryByRole("button", { name: /This toggle should be on the right/ }),
+      ).not.toBeInTheDocument(),
+    );
   },
 };
 export const HistoryAnnotationsEmpty: Story = {
@@ -474,14 +569,16 @@ export const HistoryDelete: Story = {
     await userEvent.click(c.getByRole("button", { name: "Delete dictation" }));
     await userEvent.click(
       within(
-        c.getByRole("group", { name: "Delete this dictation?" }),
+        c.getByRole("alertdialog", { name: "Delete this dictation?" }),
       ).getByRole("button", { name: "Delete dictation" }),
     );
     await waitFor(() =>
       expect(c.queryByRole("button", { name: /bakery/i })).toBeNull(),
     );
     await expect(
-      c.getByRole("button", { name: /Ship the history/ }),
+      c
+        .getByRole("button", { name: /Ship the history/ })
+        .closest("[aria-current]"),
     ).toHaveAttribute("aria-current", "true");
   },
 };
@@ -490,17 +587,20 @@ export const HistoryRetention: Story = {
   render: () => <GeneralPage page="History" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
-    const keep = await c.findByRole("combobox", { name: "Keep history for" });
-    await waitFor(() => expect(keep).toBeEnabled());
-    await userEvent.selectOptions(keep, "forever");
-    await expect(c.queryByRole("group", { name: /older than/ })).toBeNull();
-    await userEvent.selectOptions(keep, "day");
-    await expect(
-      c.getByRole("group", { name: "Delete dictations older than 1 day?" }),
-    ).toBeVisible();
+    await c.findByRole("combobox", { name: "Keep history for" });
+    await choose(canvasElement, "Keep history for", "Forever");
+    await expect(c.queryByRole("alertdialog")).toBeNull();
+    const keep = c.getByRole("combobox", { name: "Keep history for" });
+    await userEvent.click(keep);
+    fireEvent.click(
+      await within(document.body).findByRole("option", { name: "1 day" }),
+    );
+    const confirm = await c.findByRole("alertdialog", {
+      name: "Delete dictations older than 1 day?",
+    });
+    await waitFor(() => expect(confirm).toBeVisible());
     await userEvent.click(c.getByRole("button", { name: "Cancel" }));
-    await expect(keep).toHaveValue("forever");
-    await userEvent.selectOptions(keep, "day");
+    await expect(keep).toHaveTextContent("Forever");
   },
 };
 export const HistoryLoadMore: Story = {
@@ -750,7 +850,10 @@ export const AnnotateToggles: Story = {
     await waitFor(() => expect(show).toBeChecked());
     await userEvent.click(enabled);
     await waitFor(() => expect(enabled).not.toBeChecked());
-    await expect(c.getByRole("button", { name: /Shortcut/ })).toBeDisabled();
+    await expect(c.getByRole("button", { name: /^Shortcut,/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   },
 };
 export const AnnotateNotAllowed: Story = {
@@ -774,14 +877,15 @@ export const Output: Story = {
     const method = await c.findByRole("combobox", {
       name: "After dictation",
     });
-    await expect(method).toHaveValue("paste");
-    await userEvent.selectOptions(method, "copyOnly");
-    await waitFor(() => expect(method).toHaveValue("copyOnly"));
+    await expect(method).toHaveTextContent(/^Paste$/);
+    await choose(canvasElement, "After dictation", "Copy only");
     await expect(c.getByText(/Paste with ⌘V when you’re ready/)).toBeVisible();
-    await userEvent.selectOptions(method, "paste");
-    await waitFor(() => expect(method).toHaveValue("paste"));
-    await userEvent.selectOptions(method, "pasteKeep");
-    await waitFor(() => expect(method).toHaveValue("pasteKeep"));
+    await choose(canvasElement, "After dictation", /^Paste$/);
+    await choose(
+      canvasElement,
+      "After dictation",
+      "Paste and keep on clipboard",
+    );
     const capitalise = c.getByRole("switch", {
       name: "Capitalise the first letter",
     });
@@ -801,7 +905,7 @@ export const OutputCopyOnly: Story = {
     const c = within(canvasElement);
     await expect(
       await c.findByRole("combobox", { name: "After dictation" }),
-    ).toHaveValue("copyOnly");
+    ).toHaveTextContent("Copy only");
     await expect(
       c.getByRole("switch", { name: "Add a trailing space" }),
     ).toBeChecked();
@@ -819,11 +923,8 @@ export const Advanced: Story = {
     await userEvent.click(warm);
     await waitFor(() => expect(warm).toBeChecked());
     await expect(c.getByText(/first word isn’t clipped/)).toBeVisible();
-    const position = c.getByRole("combobox", { name: "Overlay position" });
-    await userEvent.selectOptions(position, "top");
-    await waitFor(() => expect(position).toHaveValue("top"));
-    await waitFor(() => expect(position).toBeEnabled());
-    await userEvent.selectOptions(position, "bottom");
+    await choose(canvasElement, "Overlay position", "Top");
+    await choose(canvasElement, "Overlay position", "Bottom");
   },
 };
 export const About: Story = {
@@ -845,6 +946,26 @@ export const About: Story = {
       c.getByRole("button", { name: "View on GitHub, source code" }),
     );
     await expect(opened).toEqual(["data", "logs", "source"]);
+  },
+};
+export const Appearance: Story = {
+  beforeEach: mockSettings,
+  render: () => <GeneralPage page="Appearance" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const themes = await c.findByRole("radiogroup", { name: "Theme" });
+    const scoped = within(themes);
+    expect(themes.querySelectorAll(".astryx-badge")).toHaveLength(0);
+    expect(scoped.queryByText("Ready")).toBeNull();
+    expect(scoped.queryByText("Inserted")).toBeNull();
+    expect(scoped.getAllByRole("radio")).toHaveLength(5);
+    for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
+      expect(
+        scoped.getByRole("radio", { name: new RegExp(name) }),
+      ).toBeInTheDocument();
+    expect(
+      themes.querySelectorAll(".astryx-status-dot").length,
+    ).toBeGreaterThan(5);
   },
 };
 export const Overlay: Story = {

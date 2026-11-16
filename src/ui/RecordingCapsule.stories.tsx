@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { RecordingCapsule, LevelMeter } from "./RecordingCapsule";
-import { KeyboardShortcut } from "./ShortcutRecorder";
+import {
+  RecordingCapsule,
+  LevelMeter,
+  OverlayShortcut,
+} from "./RecordingCapsule";
 import { expect, fn, userEvent, within } from "storybook/test";
 import problems from "../problems.fixture.json";
 const meta = {
@@ -87,7 +90,7 @@ export const RealErrors: Story = {
 export const Ready: Story = {
   args: {
     state: { kind: "ready", message: "Ready" },
-    shortcut: <KeyboardShortcut value="Alt+Shift+Space" />,
+    shortcut: <OverlayShortcut value="Alt+Shift+Space" />,
   },
 };
 export const AllStates: Story = {
@@ -138,7 +141,7 @@ export const MissingMicrophone: Story = {
   args: {
     state: { kind: "recording", seconds: 12 },
     notice: "Using the default microphone",
-    shortcut: <KeyboardShortcut value="Alt+Shift+Space" />,
+    shortcut: <OverlayShortcut value="Alt+Shift+Space" />,
   },
 };
 

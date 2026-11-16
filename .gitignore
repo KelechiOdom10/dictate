@@ -33,3 +33,12 @@ models/
 
 # Local validation artifacts
 /target/
+
+/themes/**/preview*
+/themes/**/sheet*
+/themes/**/*.history.json
+/themes/**/*.pictures.json
+/themes/**/*.css
+/themes/**/*.css.d.ts
+/themes/**/*.js
+/themes/**/*.d.ts

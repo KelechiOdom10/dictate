@@ -1,6 +1,6 @@
 import type { SpeechModel } from "./models.generated";
 export type ShortcutMode = "hold" | "toggle";
-export type Theme = "ember" | "paper";
+export type Theme = "ember" | "paper" | "capy" | "rosePine" | "neutral";
 export type AppearanceMode = "system" | "light" | "dark";
 export type OverlayPosition = "top" | "bottom";
 export type PasteMethod = "paste" | "copyOnly";

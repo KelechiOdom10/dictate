@@ -5,7 +5,7 @@ export const appFoldersSchema = z
   .object({ data: z.string(), logs: z.string() })
   .strict();
 export type AppFolders = z.infer<typeof appFoldersSchema>;
-export type Location = "data" | "logs" | "source";
+export type Location = "data" | "logs" | "source" | "releases";
 
 export const readAppFolders = async () =>
   appFoldersSchema.parse(await invoke("app_folders"));

@@ -26,8 +26,8 @@ use tauri::{App, AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_nspanel::{ManagerExt, WebviewWindowExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut};
 
-use crate::focus::pointer;
-use crate::ink::{self, Ink, Pen, PenInput, Release};
+use crate::focus::{pointer, shift_and_button};
+use crate::ink::{self, Ink, Pen, PenInput, Release, ShiftButton};
 use crate::package::{Display, Stroke};
 use crate::settings::OverlayPosition;
 
@@ -94,6 +94,17 @@ struct Copied {
 #[derive(Default)]
 struct CopiedState(Mutex<Option<Copied>>);
 
+/// When the shortcut started the session that is still starting: the bar is
+/// already up, waiting for the microphone and the capture.
+#[derive(Default)]
+struct StartingState(Mutex<Option<Instant>>);
+
+fn with_starting<T>(app: &AppHandle, f: impl FnOnce(&mut Option<Instant>) -> T) -> T {
+    let state = app.state::<StartingState>();
+    let mut starting = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut starting)
+}
+
 fn with_copied<T>(app: &AppHandle, f: impl FnOnce(&mut Option<Copied>) -> T) -> T {
     let state = app.state::<CopiedState>();
     let mut copied = state.0.lock().unwrap_or_else(|e| e.into_inner());
@@ -114,6 +125,8 @@ pub struct BarState {
     /// Unix ms of the start tap, for the bar's own timer.
     pub started_at_ms: i64,
     pub pen: bool,
+    /// The shortcut was pressed and the capture is still starting.
+    pub starting: bool,
     /// The session finished and its summary is on the clipboard.
     pub copied: bool,
     /// The finished session has a contact sheet to copy.
@@ -125,6 +138,7 @@ pub fn bar_state(app: &AppHandle) -> BarState {
         recording: false,
         started_at_ms: 0,
         pen: false,
+        starting: false,
         copied: false,
         has_image: false,
     };
@@ -133,6 +147,12 @@ pub fn bar_state(app: &AppHandle) -> BarState {
         started_at_ms: live.started_at_ms,
         pen: !live.ink.pen().click_through(),
         ..idle.clone()
+    })
+    .or_else(|| {
+        with_starting(app, |starting| starting.is_some()).then(|| BarState {
+            starting: true,
+            ..idle.clone()
+        })
     })
     .or_else(|| {
         with_copied(app, |copied| {
@@ -208,6 +228,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     let handle = app.handle().clone();
     std::thread::spawn(move || apply_pens(handle, queued));
     app.manage(CopiedState::default());
+    app.manage(StartingState::default());
     let handle = app.handle();
     for (label, query, level) in [(INK, "ink", 1000), (BAR, "annotate-bar", 1001)] {
         let window = WebviewWindowBuilder::new(
@@ -240,15 +261,78 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The shortcut started a session: show the bar on `display` at once, before
+/// the microphone and the capture start, so the press has an answer. The
+/// panel was built at launch, so this only moves it and orders it front.
+pub fn show_starting(app: &AppHandle, display: &Display, pressed: Instant) {
+    with_copied(app, |copied| *copied = None);
+    with_starting(app, |starting| *starting = Some(pressed));
+    emit_bar(app);
+    let frame = ink::bar_frame(&display.frame, overlay_position(app));
+    let handle = app.clone();
+    let shown = app.run_on_main_thread(move || {
+        show_panel(&handle, BAR, &frame);
+        log::info!(
+            "[annotate] timing shortcut_to_bar_shown_ms={}",
+            pressed.elapsed().as_millis()
+        );
+    });
+    if let Err(error) = shown {
+        log::warn!("[annotate] show bar: {error}");
+    }
+}
+
+/// The session never started: take the waiting bar down again.
+pub fn cancel_starting(app: &AppHandle) {
+    if with_starting(app, Option::take).is_none() {
+        return;
+    }
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        if let Ok(panel) = handle.get_webview_panel(BAR) {
+            panel.hide();
+        }
+    }) {
+        log::warn!("[annotate] hide bar: {error}");
+    }
+    emit_bar(app);
+}
+
+fn overlay_position(app: &AppHandle) -> OverlayPosition {
+    *app.state::<Mutex<OverlayPosition>>()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Moves panel `label` to `rect` (global top-left points) and orders it
+/// front without activating dictate. Main thread only.
+fn show_panel(app: &AppHandle, label: &str, rect: &crate::package::Rect) {
+    let Ok(panel) = app.get_webview_panel(label) else {
+        log::warn!("[annotate] {label} panel missing");
+        return;
+    };
+    let primary = core_graphics::display::CGDisplay::main()
+        .bounds()
+        .size
+        .height;
+    let rect = ink::cocoa_frame(rect, primary);
+    panel.as_panel().setFrame_display(
+        objc2_foundation::NSRect::new(
+            objc2_foundation::NSPoint::new(rect.x, rect.y),
+            objc2_foundation::NSSize::new(rect.w, rect.h),
+        ),
+        true,
+    );
+    panel.order_front_regardless();
+}
+
 /// A session started: cover `display` with the ink panel, put the bar on it,
 /// and start the pointer poll.
 pub fn begin(app: &AppHandle, display: Display, clock: Instant, started_at_ms: i64) {
     with_copied(app, |copied| *copied = None);
+    let pressed = with_starting(app, Option::take);
     let frame = display.frame.clone();
-    let position = *app
-        .state::<Mutex<OverlayPosition>>()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let position = overlay_position(app);
     *app.state::<State>()
         .0
         .lock()
@@ -259,34 +343,20 @@ pub fn begin(app: &AppHandle, display: Display, clock: Instant, started_at_ms: i
     });
     let handle = app.clone();
     let shown = app.run_on_main_thread(move || {
-        let primary = core_graphics::display::CGDisplay::main()
-            .bounds()
-            .size
-            .height;
-        for (label, rect) in [
-            (INK, frame.clone()),
-            (BAR, ink::bar_frame(&frame, position)),
-        ] {
-            let Ok(panel) = handle.get_webview_panel(label) else {
-                log::warn!("[annotate] {label} panel missing");
-                continue;
-            };
-            let rect = ink::cocoa_frame(&rect, primary);
-            panel.as_panel().setFrame_display(
-                objc2_foundation::NSRect::new(
-                    objc2_foundation::NSPoint::new(rect.x, rect.y),
-                    objc2_foundation::NSSize::new(rect.w, rect.h),
-                ),
-                true,
-            );
-            panel.order_front_regardless();
-        }
+        show_panel(&handle, INK, &frame);
+        show_panel(&handle, BAR, &ink::bar_frame(&frame, position));
     });
     if let Err(error) = shown {
         log::warn!("[annotate] show panels: {error}");
     }
     emit(app, INK, "ink-clear", ());
     emit_bar(app);
+    if let Some(pressed) = pressed {
+        log::info!(
+            "[annotate] timing shortcut_to_bar_populated_ms={}",
+            pressed.elapsed().as_millis()
+        );
+    }
     let app = app.clone();
     std::thread::spawn(move || poll(app, started_at_ms));
 }
@@ -453,15 +523,22 @@ fn backstop(app: AppHandle, since_ms: u64) {
     }
 }
 
-/// Samples the pointer at about 120 Hz while a stroke is open, until this
-/// session ends.
+/// Samples the pointer at about 120 Hz while a stroke is open, and watches
+/// Shift and the mouse button for Shift to draw, until this session ends.
 fn poll(app: AppHandle, session: i64) {
+    let mut shift = false;
     loop {
         std::thread::sleep(ink::POLL_INTERVAL);
-        let drawing = with_live(&app, |live| {
-            (live.started_at_ms == session).then(|| live.ink.drawing())
+        let (held, button) = shift_and_button().unwrap_or_default();
+        if held != shift {
+            shift = held;
+            pen(&app, |_| PenInput::Shift { down: held });
+        }
+        let active = with_live(&app, |live| {
+            (live.started_at_ms == session)
+                .then(|| live.ink.drawing() || live.ink.pen() == Pen::Shift)
         });
-        match drawing {
+        match active {
             Some(Some(true)) => {}
             Some(Some(false)) => continue,
             _ => return,
@@ -469,11 +546,17 @@ fn poll(app: AppHandle, session: i64) {
         let Some((x, y)) = pointer() else {
             continue;
         };
-        let points = with_live(&app, |live| {
+        let (edge, points) = with_live(&app, |live| {
             let now = live.now();
-            live.ink.sample(now, x, y)
+            let edge = live.ink.shift_button(now, button, x, y);
+            (edge, live.ink.sample(now, x, y))
         })
-        .unwrap_or_default();
+        .unwrap_or((ShiftButton::None, Vec::new()));
+        match edge {
+            ShiftButton::Opened(point) => emit(&app, INK, "ink-point", point),
+            ShiftButton::Closed(id) => emit(&app, INK, "ink-end", id),
+            ShiftButton::None => {}
+        }
         for point in points {
             emit(&app, INK, "ink-point", point);
         }

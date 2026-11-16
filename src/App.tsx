@@ -17,7 +17,7 @@ import SettingsWindow from "./SettingsWindow";
 import { AnnotateBarWindow, InkWindow } from "./AnnotateWindows";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings, settingsSchema } from "./settings";
-import { RecordingCapsule, KeyboardShortcut } from "./ui";
+import { RecordingCapsule, OverlayShortcut } from "./ui";
 import { problem, type Problem } from "./problem";
 import "./App.css";
 
@@ -30,6 +30,9 @@ const NOTICE_PHASES = new Set([
   "annotating",
   "packaging",
 ]);
+// Rust settles these to idle before it starts the fade, so the pill keeps
+// them on screen until it is hidden instead of flashing the idle content.
+const TERMINAL_PHASES = new Set(["done", "copied", "skipped"]);
 
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -39,13 +42,27 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
   const status = useDictationStatus();
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   const [hiding, setHiding] = useState(false);
+  const [previous, setPrevious] = useState(status.phase);
+  const [held, setHeld] = useState<string | null>(null);
+  if (status.phase !== previous) {
+    setPrevious(status.phase);
+    setHeld(
+      status.phase === "idle" && TERMINAL_PHASES.has(previous)
+        ? previous
+        : null,
+    );
+  }
+  const phase = held ?? status.phase;
   const [seconds, setSeconds] = useState(0);
   const [level, setLevel] = useState(0);
   const capsule = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const subscriptions = [
       listen("overlay-hiding", () => setHiding(true)),
-      listen("overlay-showing", () => setHiding(false)),
+      listen("overlay-showing", () => {
+        setHiding(false);
+        setHeld(null);
+      }),
     ];
     return () => {
       subscriptions.forEach(
@@ -133,34 +150,34 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
           state={
             error
               ? { kind: "error", title: error.title, fix: error.fix }
-              : status.phase === "recording"
+              : phase === "recording"
                 ? {
                     kind: "recording",
                     seconds,
                     level: Math.min(1, Math.sqrt(level) * 2),
                   }
-                : status.phase === "annotating"
+                : phase === "annotating"
                   ? { kind: "annotating", seconds }
-                  : status.phase === "packaging"
+                  : phase === "packaging"
                     ? { kind: "packaging" }
-                    : status.phase === "transcribing"
+                    : phase === "transcribing"
                       ? { kind: "transcribing" }
-                      : status.phase === "done"
+                      : phase === "done"
                         ? { kind: "done" }
-                        : status.phase === "copied"
+                        : phase === "copied"
                           ? { kind: "copied" }
-                          : status.phase === "skipped"
+                          : phase === "skipped"
                             ? { kind: "skipped" }
                             : { kind: "ready", message: "Ready" }
           }
           notice={
-            error || !NOTICE_PHASES.has(status.phase)
+            error || !NOTICE_PHASES.has(phase)
               ? undefined
               : (status.notice ?? undefined)
           }
           shortcut={
-            status.phase === "idle" && !error ? (
-              <KeyboardShortcut value={settings.data?.shortcut ?? ""} />
+            phase === "idle" && !error ? (
+              <OverlayShortcut value={settings.data?.shortcut ?? ""} />
             ) : undefined
           }
         />
@@ -215,7 +232,7 @@ function Appearance({
     const update = () => {
       cancelAnimationFrame(frame);
       root.classList.add("appearance-changing");
-      document.documentElement.dataset.theme = query.data?.theme ?? "ember";
+      document.documentElement.dataset.palette = query.data?.theme ?? "ember";
       const mode = query.data?.appearanceMode ?? "system";
       document.documentElement.dataset.mode =
         mode === "system" ? (system.matches ? "dark" : "light") : mode;

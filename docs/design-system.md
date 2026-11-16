@@ -1,11 +1,13 @@
 # The dictate design system
 
-The chosen direction is warm and quiet: Paper’s off-white and charcoal surfaces,
-ink actions, and Geist. Ember is the default; its orange only means
-recording, live input or an enabled switch. Paper uses ink for those same roles.
+The settings window uses Astryx 0.7.16 components over a customized Neutral
+theme: warm off-white light surfaces, dark surfaces taken from the owner's Capy Catppuccin theme,
+Geist, and ink primary actions in both palettes.
+The recording overlay remains a separate, compact native-window presentation;
+Paper uses a warm red recording dot while its switches and level bars stay ink.
 General › Appearance saves Theme (Ember / Paper) and Mode (System / Light / Dark)
 in the Rust settings file. Both webviews consume the same settings event. App
-resolves System with matchMedia and applies data-theme plus data-mode on the root;
+resolves System with matchMedia and applies data-palette plus data-mode on the root;
 CSS has no separate system-mode override. Storybook exposes both dimensions.
 Paper’s dark capsule is pale ink; Ember’s stays warm charcoal, matching the chosen
 comparison panels.
@@ -39,12 +41,61 @@ See [recording-overlay.md](recording-overlay.md) for its native boundary and man
 | EmptyState                 | Title/body and optional action children cover empty results and first use.                                                                                                                            |
 | Toast                      | Success/warning/danger has a visible text cue as well as colour; errors announce assertively. Caller owns lifetime and optional dismissal.                                                            |
 
-CSS variables fit the existing app and keep theme values available to CSS and
-TypeScript. Tailwind would add another styling system. A headless component
-library would add a dependency without improving these native selects, checkboxes
-and radios. Custom composites can adopt a proven primitive when their behaviour
-requires one. This follows “subtract before you add.” Reduced motion disables
+SettingsTheme scopes Astryx's public Theme provider to settings. Astryx owns
+`data-theme` for its light/dark mode, while `data-palette` preserves the separate
+Ember/Paper preference; stored settings are unchanged. Settings rows/groups use
+Astryx HStack, VStack and Heading; the existing Button facade delegates to Astryx
+inside this theme and keeps native disabled attributes. Startup uses Astryx
+Switch, including its hidden accessible input and visible track. Existing native
+selects and radio groups retain their platform keyboard behavior and ids.
+The overlay has no Theme provider and keeps its existing buttons and sizing.
+Reduced motion disables
 transitions and the busy spinner's rotation; focus rings stay visible.
+
+## Shape rule
+
+One rule per role, enforced by `tests/settings.spec.ts` ("settings controls share one pill shape"):
+
+| Role | Radius | Members |
+| --- | --- | --- |
+| Inline control (28–40px tall) | pill (`--radius-pill`) | Button and IconButton (Astryx Button themed to pill), Select, SearchField, SegmentedControl and its thumb, Chip/FilterChips, ShortcutRecorder, Switch track, Test microphone |
+| Row or navigation item | 8px (`--radius-control`) | SidebarNav items, SelectList/History rows |
+| Container | 14px (`--radius-panel`) | Settings groups, cards, detail panel, toasts |
+| Keycap | 6px | KeyboardShortcut keys |
+| Text link | none | "Manage models" and other inline links |
+
+Colour follows the same restraint as the original system: primary actions are ink (near-black in light, near-white in dark); colour is reserved for status. Ember orange is never a fill in settings.
+
+## Astryx setup and generated conventions
+
+The four owner-requested packages are pinned in package.json and the lockfile.
+Registry metadata and the official `meta/astryx` README agree on the repository,
+versions, React 19 peers and the prebuilt-CSS consumption path. StyleX 0.19.2
+satisfies Core's peer; Vite 8/React 19 consume the distributed JS/CSS without a
+StyleX, Babel or PostCSS compiler plugin. We author no `stylex.create()` calls.
+
+`npx @astryxdesign/cli init --agent codex` appended its managed block to AGENTS.md
+without replacing the existing project instructions. Its conventions say to keep
+an existing page, read component props before use, prefer component props and
+theme tokens, extend a theme instead of forking library source, and run
+`astryx doctor --built dist`. New pages would start from a template; this change
+preserves the existing settings frame and native lifecycle.
+
+The experimental theme editor seeded `themes/dictate/dictate.settings.json` and
+its palette. Exact app colors live in `dictate.theme.ts`, extending those generated
+settings; `themes/paper.theme.ts` changes only action/focus colors. Run
+`pnpm build:themes` after changing either source. The committed precompiled
+`src/themes/` modules/styles and CLI-managed `src/astryx-themes.ts` are generated,
+not hand-edited. Preview HTML/PNGs and editor history are ignored local artifacts.
+The existing bundled Geist font in tokens.css supplies both themes; doctor's
+font-stylesheet warning is a scanner limitation, not a runtime font fetch.
+
+`pnpm test:stories` exercises both palettes and modes with axe. Browser tests
+assert the palette, resolved mode, library theme and color scheme are applied
+before `settings_ready`, including suspended animation frames and load failure.
+Astryx's Switch uses an opacity-zero input, so its page story checks the visible
+composite field plus the enabled, unchecked accessible control; dedicated stories
+also exercise click, Space and disabled activation.
 
 ## Storybook and proof
 
@@ -105,10 +156,13 @@ One brown ramp holds a constant 75° OKLCH hue. Close light steps preserve paper
 surfaces; distinct dark steps keep controls visible. Semantic roles reference
 primitives; hover, pressed and navigation selection have separate steps. The
 39 primitives were checked with Culori for sRGB gamut; crimson’s light text step
-needed chroma reduction at fixed lightness/hue. Danger is crimson at 355°, 45°
-away from ember’s 40°. It remains a visual risk to inspect side by side: errors
+needed chroma reduction at fixed lightness/hue. Danger is warm red at 22°,
+separated from Ember’s 40° by hue and lightness. Paper’s recording dot uses a
+brighter red from the same ramp, preserving PR #28's intended behavior against
+the current UI. It remains a visual risk to inspect side by side: errors
 also carry labels/icons. Warning is yellow, success green, info blue, all on soft
-tints. Actions and focus rings stay ink.
+tints. Overlay controls retain ink focus rings; settings use the palette's
+Astryx focus token (Ember or ink).
 
 `node scripts/check-contrast.mjs` paints resolved CSS colours into a Chromium
 sRGB canvas, measures WCAG luminance ratios and regenerates the contrast and

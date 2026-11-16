@@ -1,7 +1,9 @@
 import { Bug, Mic, PanelBottom, Volume2 } from "lucide-react";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Switch } from "@astryxdesign/core/Switch";
 import { settingsSchema } from "./settings";
 import { SaveStatus, SettingsPending } from "./SettingsStatus";
-import { Select, SettingsGroup, SettingsRow as Row, Toggle } from "./ui";
+import { SettingsGroup, SettingsRow as Row } from "./ui";
 import { useSettings } from "./useSettings";
 
 export default function AdvancedPage() {
@@ -15,26 +17,25 @@ export default function AdvancedPage() {
         icon={<PanelBottom size={14} aria-hidden="true" />}
       >
         <Row
-          id="overlay-position"
           label="Overlay position"
           help="Where the recording overlay appears on your screen."
         >
-          <Select
-            id="overlay-position"
-            aria-describedby="overlay-position-help"
+          <Selector
+            label="Overlay position"
+            isLabelHidden
             value={settings.overlayPosition}
-            disabled={busy}
-            onChange={(e) =>
+            isDisabled={busy}
+            options={[
+              { value: "top", label: "Top" },
+              { value: "bottom", label: "Bottom" },
+            ]}
+            onChange={(value) =>
               void save({
-                overlayPosition: settingsSchema.shape.overlayPosition.parse(
-                  e.target.value,
-                ),
+                overlayPosition:
+                  settingsSchema.shape.overlayPosition.parse(value),
               })
             }
-          >
-            <option value="top">Top</option>
-            <option value="bottom">Bottom</option>
-          </Select>
+          />
         </Row>
       </SettingsGroup>
       <SettingsGroup
@@ -42,7 +43,6 @@ export default function AdvancedPage() {
         icon={<Mic size={14} aria-hidden="true" />}
       >
         <Row
-          id="mic-warm"
           label="Keep the microphone ready"
           help={
             settings.micMode === "warm"
@@ -50,13 +50,13 @@ export default function AdvancedPage() {
               : "The microphone opens only while you dictate, so the first moment can be clipped."
           }
         >
-          <Toggle
-            id="mic-warm"
-            aria-describedby="mic-warm-help"
-            checked={settings.micMode === "warm"}
-            disabled={busy}
-            onChange={(e) =>
-              void save({ micMode: e.target.checked ? "warm" : "onDemand" })
+          <Switch
+            label="Keep the microphone ready"
+            isLabelHidden
+            value={settings.micMode === "warm"}
+            isDisabled={busy}
+            onChange={(checked) =>
+              void save({ micMode: checked ? "warm" : "onDemand" })
             }
           />
         </Row>
@@ -66,16 +66,15 @@ export default function AdvancedPage() {
         icon={<Volume2 size={14} aria-hidden="true" />}
       >
         <Row
-          id="sound-feedback"
           label="Sound feedback"
           help="A soft sound when recording starts and stops."
         >
-          <Toggle
-            id="sound-feedback"
-            aria-describedby="sound-feedback-help"
-            checked={settings.soundFeedback}
-            disabled={busy}
-            onChange={(e) => void save({ soundFeedback: e.target.checked })}
+          <Switch
+            label="Sound feedback"
+            isLabelHidden
+            value={settings.soundFeedback}
+            isDisabled={busy}
+            onChange={(checked) => void save({ soundFeedback: checked })}
           />
         </Row>
       </SettingsGroup>
@@ -84,16 +83,15 @@ export default function AdvancedPage() {
         icon={<Bug size={14} aria-hidden="true" />}
       >
         <Row
-          id="debug-recordings"
           label="Save debug recordings"
           help="Keeps your last 20 recordings as audio files in the app data folder."
         >
-          <Toggle
-            id="debug-recordings"
-            aria-describedby="debug-recordings-help"
-            checked={settings.debugRecordings}
-            disabled={busy}
-            onChange={(e) => void save({ debugRecordings: e.target.checked })}
+          <Switch
+            label="Save debug recordings"
+            isLabelHidden
+            value={settings.debugRecordings}
+            isDisabled={busy}
+            onChange={(checked) => void save({ debugRecordings: checked })}
           />
         </Row>
       </SettingsGroup>

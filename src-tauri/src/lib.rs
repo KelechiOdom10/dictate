@@ -429,18 +429,24 @@ enum Location {
     Data,
     Logs,
     Source,
+    Releases,
 }
 
 const SOURCE_URL: &str = "https://github.com/KelechiOdom10/dictate";
+const RELEASES_URL: &str = "https://github.com/KelechiOdom10/dictate/releases";
 
 #[tauri::command]
 fn open_location(app: AppHandle, location: Location) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let folder = match location {
-        Location::Source => {
+        Location::Source | Location::Releases => {
+            let url = match location {
+                Location::Releases => RELEASES_URL,
+                _ => SOURCE_URL,
+            };
             return app
                 .opener()
-                .open_url(SOURCE_URL, None::<&str>)
+                .open_url(url, None::<&str>)
                 .map_err(|e| e.to_string());
         }
         Location::Data => app.path().app_data_dir(),
@@ -1017,6 +1023,7 @@ fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String>
 }
 
 static ERROR_NOTICE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static ANNOTATE_STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Show a problem in the overlay, tray and Settings. Never call this while
 /// holding the `Runtime` lock: showing the overlay asks the focused app for
@@ -1407,6 +1414,11 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
     let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
     match next {
         annotate::Phase::Starting => {
+            let pressed = Instant::now();
+            log::info!(
+                "[annotate] timing shortcut_fired session={}",
+                ANNOTATE_STARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+            );
             if !model.is_file() {
                 drop(runtime);
                 report_error(app, &transcribe::missing_model(&model));
@@ -1421,6 +1433,8 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 report_error(app, &annotate::screen_permission_needed());
                 return;
             }
+            let display = annotate::recorded_display();
+            annotate_ui::show_starting(app, &display, pressed);
             let clock = Instant::now();
             let unix_ms = history::now_ms();
             surface::clear_error(app);
@@ -1431,6 +1445,7 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 Ok(fallback) => fallback,
                 Err(error) => {
                     drop(runtime);
+                    annotate_ui::cancel_starting(app);
                     report_error(app, &error);
                     return;
                 }
@@ -1440,7 +1455,7 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 clock,
                 unix_ms,
                 audio_offset_ms,
-                display: annotate::recorded_display(),
+                display,
                 frontmost_app: focus::frontmost_app_id(),
                 options: screen::CaptureOptions {
                     include_own_windows: runtime.settings.annotate_show_in_recordings,
@@ -1571,6 +1586,7 @@ fn finish_annotate_start(
             log::warn!("[annotate] release microphone: {stop}");
         }
         drop(runtime);
+        annotate_ui::cancel_starting(app);
         log::warn!("[annotate] screen start failed after screen_start_ms={screen_start_ms}");
         report_error(
             app,
@@ -1761,6 +1777,21 @@ fn copy_annotation(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// History's "Delete": the whole session folder, with the same confirm the
+/// dictations have.
+#[tauri::command]
+fn delete_annotation(app: AppHandle, id: String) -> Result<(), String> {
+    let deleted = annotate::delete(&annotations_dir(&app)?, &id)
+        .map_err(|e| format!("Delete annotation: {e}"))?;
+    if !deleted {
+        return Err(format!("No annotation {id}"));
+    }
+    if let Err(error) = app.emit("annotations-changed", ()) {
+        log::warn!("[annotate] emit annotations-changed: {error}");
+    }
+    Ok(())
+}
+
 /// The floating bar's "Copy image": the contact sheet of the session that
 /// just finished.
 #[tauri::command]
@@ -1885,6 +1916,7 @@ pub fn run() {
             list_annotations,
             reveal_annotation,
             copy_annotation,
+            delete_annotation,
             screen_permission,
             development_build,
             open_screen_recording_settings,

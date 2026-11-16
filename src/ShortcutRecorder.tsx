@@ -17,7 +17,7 @@ type Props = {
 export default function ShortcutRecorder({
   id = "shortcut",
   label = "Shortcut",
-  idleHelp = "Use this shortcut from any app.",
+  idleHelp = "",
   value,
   recording,
   disabled,
@@ -79,17 +79,18 @@ export default function ShortcutRecorder({
   }
   return (
     <SettingsRow
-      id={id}
       label={label}
       help={
         conflict ||
         (startupConflict ? "Used by another app — pick another" : "") ||
-        (recording ? "Press a key combination. Escape cancels." : idleHelp)
+        // Nothing is added to the row while a capture runs: the button itself
+        // shows it is waiting, and its label carries the Escape instruction.
+        idleHelp ||
+        undefined
       }
     >
       <Recorder
-        id={id}
-        aria-describedby={`${id}-help`}
+        label={label}
         value={value}
         recording={recording}
         disabled={disabled}

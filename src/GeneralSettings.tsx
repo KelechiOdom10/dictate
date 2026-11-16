@@ -2,25 +2,24 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AudioWaveform, Keyboard, Mic, Power, SunMoon } from "lucide-react";
+import { AudioWaveform, Keyboard, Mic, Power } from "lucide-react";
 import { z } from "zod";
+import { Button } from "@astryxdesign/core/Button";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Switch } from "@astryxdesign/core/Switch";
 import {
-  settingsSchema,
   readDevices,
   readSettings,
   writeSettings,
   type Settings,
 } from "./settings";
-import {
-  Button,
-  Select,
-  Toggle,
-  SettingsRow as Row,
-  SettingsGroup,
-} from "./ui";
+import { SettingsRow as Row, SettingsGroup } from "./ui";
+import { LoadError, Loading, SaveStatus } from "./SettingsStatus";
 import ShortcutRecorder from "./ShortcutRecorder";
 import { modelLabel, readModels, speechModelSchema } from "./models";
 import MicrophoneTest from "./MicrophoneTest";
+
+const SYSTEM_DEFAULT = "system-default";
 
 export default function General({
   onOpenModels,
@@ -85,18 +84,10 @@ export default function General({
     }
   }
 
-  if (query.isPending)
-    return (
-      <div className="loading" role="status">
-        Loading your preferences…
-      </div>
-    );
+  if (query.isPending) return <Loading>Loading your preferences…</Loading>;
   if (query.isError)
     return (
-      <div className="notice" role="alert">
-        <p>{String(query.error)}</p>
-        <Button onClick={() => void query.refetch()}>Try again</Button>
-      </div>
+      <LoadError error={query.error} onRetry={() => void query.refetch()} />
     );
   const settings = query.data;
   const busy = mutation.isPending;
@@ -127,7 +118,6 @@ export default function General({
           onError={setError}
         />
         <Row
-          id="mode"
           label="Shortcut mode"
           help={
             settings.shortcutMode === "hold"
@@ -135,20 +125,21 @@ export default function General({
               : "Tap to record. Tap again to insert your words."
           }
         >
-          <Select
-            id="mode"
-            aria-describedby="mode-help"
+          <Selector
+            label="Shortcut mode"
+            isLabelHidden
             value={settings.shortcutMode}
-            disabled={busy || recording}
-            onChange={(e) =>
+            isDisabled={busy || recording}
+            options={[
+              { value: "hold", label: "Hold to talk" },
+              { value: "toggle", label: "Toggle" },
+            ]}
+            onChange={(value) =>
               void save({
-                shortcutMode: z.enum(["hold", "toggle"]).parse(e.target.value),
+                shortcutMode: z.enum(["hold", "toggle"]).parse(value),
               })
             }
-          >
-            <option value="hold">Hold to talk</option>
-            <option value="toggle">Toggle</option>
-          </Select>
+          />
         </Row>
       </SettingsGroup>
       <SettingsGroup
@@ -156,105 +147,98 @@ export default function General({
         icon={<AudioWaveform size={14} aria-hidden="true" />}
       >
         <Row
-          id="speech-model"
           label="Speech model"
           help={
-            noneInstalled ? (
-              <span className="row-warning">
-                No speech model yet. Download one to start dictating.
-              </span>
-            ) : (
-              <>
-                {activeMissing ? (
-                  <span className="row-warning">
-                    {activeName} isn’t installed. Choose another model.
-                  </span>
-                ) : (
-                  "Used for every dictation."
-                )}{" "}
-                <button
-                  type="button"
-                  className="row-link"
-                  onClick={onOpenModels}
-                >
-                  Manage models
-                </button>
-              </>
-            )
+            noneInstalled
+              ? "No speech model yet. Download one to start dictating."
+              : activeMissing
+                ? `${activeName} isn’t installed. Choose another model.`
+                : undefined
           }
         >
           {noneInstalled ? (
             <Button
-              id="speech-model"
-              aria-label="Download a model"
-              aria-describedby="speech-model-help"
+              label="Download a model"
               variant="primary"
               onClick={onOpenModels}
-            >
-              Download a model
-            </Button>
+            />
           ) : (
-            <Select
-              id="speech-model"
-              aria-describedby="speech-model-help"
+            <Selector
+              label="Speech model"
+              isLabelHidden
               value={settings.speechModel}
-              disabled={
+              isDisabled={
                 busy || recording || (!activeMissing && installed.length < 2)
               }
-              onChange={(e) =>
-                void save({
-                  speechModel: speechModelSchema.parse(e.target.value),
-                })
+              options={[
+                ...(activeMissing
+                  ? [
+                      {
+                        value: settings.speechModel,
+                        label: `${activeName} (not installed)`,
+                        disabled: true,
+                      },
+                    ]
+                  : []),
+                ...installed.map((model) => ({
+                  value: model.id,
+                  label: modelLabel(model),
+                })),
+              ]}
+              onChange={(value) =>
+                void save({ speechModel: speechModelSchema.parse(value) })
               }
-            >
-              {activeMissing && (
-                <option value={settings.speechModel} disabled>
-                  {activeName} (not installed)
-                </option>
-              )}
-              {installed.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {modelLabel(model)}
-                </option>
-              ))}
-            </Select>
+            />
           )}
         </Row>
+        {!noneInstalled && (
+          <Row label="Models">
+            <Button
+              size="sm"
+              variant="secondary"
+              label="Manage models"
+              onClick={onOpenModels}
+            />
+          </Row>
+        )}
       </SettingsGroup>
       <SettingsGroup
         title="Audio input"
         icon={<Mic size={14} aria-hidden="true" />}
       >
-        <Row
-          id="microphone"
-          label="Microphone"
-          help="Choose where dictate listens."
-        >
-          <Select
-            id="microphone"
-            aria-describedby="microphone-help"
-            value={settings.microphone ?? ""}
-            disabled={
+        <Row label="Microphone">
+          <Selector
+            label="Microphone"
+            isLabelHidden
+            value={settings.microphone ?? SYSTEM_DEFAULT}
+            isDisabled={
               busy ||
               testing ||
               recording ||
               devices.isPending ||
               devices.isError
             }
-            onChange={(e) => void save({ microphone: e.target.value || null })}
+            options={[
+              { value: SYSTEM_DEFAULT, label: "System default" },
+              ...(settings.microphone &&
+              !devices.data?.includes(settings.microphone)
+                ? [
+                    {
+                      value: settings.microphone,
+                      label: `${settings.microphone} (unavailable)`,
+                    },
+                  ]
+                : []),
+              ...[...new Set(devices.data ?? [])].map((name) => ({
+                value: name,
+                label: name,
+              })),
+            ]}
+            onChange={(value) =>
+              void save({ microphone: value === SYSTEM_DEFAULT ? null : value })
+            }
             onFocus={() => void devices.refetch()}
-          >
-            <option value="">System default</option>
-            {settings.microphone &&
-              !devices.data?.includes(settings.microphone) && (
-                <option value={settings.microphone}>
-                  {settings.microphone} (unavailable)
-                </option>
-              )}
-            {[...new Set(devices.data ?? [])].map((name) => (
-              <option key={name}>{name}</option>
-            ))}
-          </Select>
+          />
         </Row>
         <MicrophoneTest
           testing={testing}
@@ -263,89 +247,28 @@ export default function General({
           onError={setError}
           onTestingChange={setTesting}
         />
-        {devices.isError && (
-          <p className="error" role="alert">
-            {String(devices.error)}{" "}
-            <Button onClick={() => void devices.refetch()}>
-              Refresh microphones
-            </Button>
-          </p>
-        )}
       </SettingsGroup>
+      {devices.isError && (
+        <LoadError
+          error={devices.error}
+          onRetry={() => void devices.refetch()}
+        />
+      )}
       <SettingsGroup
         title="Startup"
         icon={<Power size={14} aria-hidden="true" />}
       >
-        <Row
-          id="login"
-          label="Launch at login"
-          help="Keep dictate ready in your menu bar."
-        >
-          <Toggle
-            id="login"
-            checked={settings.launchAtLogin}
-            disabled={busy || recording}
-            aria-describedby="login-help"
-            onChange={(e) => void save({ launchAtLogin: e.target.checked })}
+        <Row label="Launch at login">
+          <Switch
+            label="Launch at login"
+            isLabelHidden
+            value={settings.launchAtLogin}
+            isDisabled={busy || recording}
+            onChange={(checked) => void save({ launchAtLogin: checked })}
           />
         </Row>
       </SettingsGroup>
-      <SettingsGroup
-        title="Appearance"
-        icon={<SunMoon size={14} aria-hidden="true" />}
-      >
-        <Row
-          id="theme"
-          label="Theme"
-          help="A little warmth, with or without colour."
-        >
-          <Select
-            id="theme"
-            aria-describedby="theme-help"
-            value={settings.theme}
-            disabled={busy}
-            onChange={(e) =>
-              void save({
-                theme: settingsSchema.shape.theme.parse(e.target.value),
-              })
-            }
-          >
-            <option value="ember">Ember</option>
-            <option value="paper">Paper</option>
-          </Select>
-        </Row>
-        <Row
-          id="appearance-mode"
-          label="Mode"
-          help="Follow your Mac, or choose a look."
-        >
-          <Select
-            id="appearance-mode"
-            aria-describedby="appearance-mode-help"
-            value={settings.appearanceMode}
-            disabled={busy}
-            onChange={(e) =>
-              void save({
-                appearanceMode: settingsSchema.shape.appearanceMode.parse(
-                  e.target.value,
-                ),
-              })
-            }
-          >
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </Select>
-        </Row>
-      </SettingsGroup>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      <p className="save-status" role="status">
-        {busy ? "Saving…" : "Changes save automatically."}
-      </p>
+      <SaveStatus busy={busy} error={error} />
     </>
   );
 }

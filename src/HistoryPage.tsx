@@ -1,4 +1,10 @@
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
@@ -7,7 +13,30 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Check, Copy, FolderOpen, Trash2 } from "lucide-react";
+import { Check, Copy, FolderOpen, Search, Trash2 } from "lucide-react";
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Grid } from "@astryxdesign/core/Grid";
+import { Heading } from "@astryxdesign/core/Heading";
+import { HStack } from "@astryxdesign/core/HStack";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { List, ListItem } from "@astryxdesign/core/List";
+import {
+  MetadataList,
+  MetadataListItem,
+} from "@astryxdesign/core/MetadataList";
+import {
+  SegmentedControl,
+  SegmentedControlItem,
+} from "@astryxdesign/core/SegmentedControl";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
+import { VStack } from "@astryxdesign/core/VStack";
 import {
   deleteHistory,
   entryTitle,
@@ -26,26 +55,14 @@ import {
   writeSettings,
   type Settings,
 } from "./settings";
-import {
-  Button,
-  Confirm,
-  DetailPanel,
-  EmptyState,
-  FilterChips,
-  IconButton,
-  KeyboardShortcut,
-  SearchField,
-  SegmentedControl,
-  Select,
-  SelectList,
-  SettingsGroup,
-  SettingsRow,
-} from "./ui";
+import { KeyboardShortcut, SettingsGroup, SettingsRow } from "./ui";
+import { ErrorNotice, LoadError, Loading } from "./SettingsStatus";
 import {
   annotationMeta,
   annotationTitle,
   clock,
   copyAnnotation,
+  deleteAnnotation,
   readAnnotations,
   revealAnnotation,
   type AnnotationEntry,
@@ -55,15 +72,15 @@ type Filter = "all" | TakeStatus;
 type Retention = Settings["historyRetention"];
 const filters: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "pasted", label: "Pasted" },
+  { value: "pasted", label: "Inserted" },
   { value: "copied", label: "Copied" },
-  { value: "skipped", label: "Skipped" },
+  { value: "skipped", label: "Nothing heard" },
   { value: "failed", label: "Failed" },
 ];
 const statusLabels: Record<TakeStatus, string> = {
-  pasted: "Pasted",
+  pasted: "Inserted",
   copied: "Copied",
-  skipped: "Skipped",
+  skipped: "Nothing heard",
   failed: "Failed",
 };
 const retentionLabels: Record<Retention, string> = {
@@ -89,11 +106,6 @@ function useNow() {
   return now;
 }
 
-const views = [
-  { value: "dictations", label: "Dictations" },
-  { value: "annotations", label: "Annotations" },
-];
-
 export default function HistoryPage({
   initialView = "dictations",
 }: {
@@ -101,15 +113,109 @@ export default function HistoryPage({
 }) {
   const [view, setView] = useState<string>(initialView);
   return (
-    <div className="history">
-      <SegmentedControl
-        label="Show"
-        options={views}
-        value={view}
-        onChange={setView}
-      />
+    <VStack gap={4}>
+      <SegmentedControl label="Show" value={view} onChange={setView}>
+        <SegmentedControlItem value="dictations" label="Dictations" />
+        <SegmentedControlItem value="annotations" label="Annotations" />
+      </SegmentedControl>
       {view === "annotations" ? <Annotations /> : <Dictations />}
-    </div>
+    </VStack>
+  );
+}
+
+type Row<Id> = { id: Id; title: string; meta?: string; date: string };
+function Rows<Id extends string | number>({
+  label,
+  rows,
+  value,
+  onChange,
+}: {
+  label: string;
+  rows: Row<Id>[];
+  value: Id;
+  onChange: (id: Id) => void;
+}) {
+  return (
+    <Card padding={0}>
+      <List
+        hasDividers
+        edge="bleed"
+        aria-label={label}
+        onKeyDown={(event) => {
+          const offsets: Record<string, number> = {
+            ArrowDown: 1,
+            ArrowUp: -1,
+            Home: -rows.length,
+            End: rows.length,
+          };
+          if (!(event.key in offsets)) return;
+          event.preventDefault();
+          const index =
+            rows.findIndex((row) => row.id === value) + offsets[event.key];
+          const next = rows[Math.min(Math.max(index, 0), rows.length - 1)];
+          if (!next) return;
+          onChange(next.id);
+          const list = event.currentTarget;
+          requestAnimationFrame(() =>
+            list
+              .querySelectorAll<HTMLElement>("button")
+              [rows.indexOf(next)]?.focus(),
+          );
+        }}
+      >
+        {rows.map((row) => (
+          <ListItem
+            key={row.id}
+            itemKey={row.id}
+            label={row.title}
+            description={row.meta}
+            endContent={<Text type="supporting">{row.date}</Text>}
+            isSelected={row.id === value}
+            onClick={() => onChange(row.id)}
+          />
+        ))}
+      </List>
+    </Card>
+  );
+}
+
+function Detail({
+  title,
+  subtitle,
+  actions,
+  metadata,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  actions?: ReactNode;
+  metadata: { label: string; value: string }[];
+  children: ReactNode;
+}) {
+  return (
+    <Card role="region" aria-label={title}>
+      <VStack gap={4}>
+        <HStack gap={2} hAlign="between" vAlign="start">
+          <VStack gap={1}>
+            <Heading level={2}>{title}</Heading>
+            <Text type="supporting">{subtitle}</Text>
+          </VStack>
+          {actions && (
+            <HStack gap={1} vAlign="center">
+              {actions}
+            </HStack>
+          )}
+        </HStack>
+        {children}
+        <MetadataList>
+          {metadata.map((row) => (
+            <MetadataListItem key={row.label} label={row.label}>
+              {row.value}
+            </MetadataListItem>
+          ))}
+        </MetadataList>
+      </VStack>
+    </Card>
   );
 }
 
@@ -178,55 +284,69 @@ function Dictations() {
     setSelectedId(next?.id ?? null);
   }
 
+  const nothingYet =
+    !query && history.isSuccess && history.data.entries.length === 0;
   const toolbar = (
-    <SearchField
-      label="Search history"
-      placeholder="Search history"
-      value={search}
-      onChange={setSearch}
-    />
+    <HStack gap={2} vAlign="center" wrap="wrap">
+      <TextInput
+        type="search"
+        label="Search history"
+        isLabelHidden
+        placeholder="Search history"
+        startIcon={Search}
+        hasClear
+        value={search}
+        onChange={setSearch}
+      />
+      {history.isSuccess && !nothingYet && (
+        <Selector
+          label="Status"
+          isLabelHidden
+          variant="secondary"
+          value={filter}
+          options={filters}
+          onChange={(value) =>
+            setFilter(filters.find((f) => f.value === value)?.value ?? "all")
+          }
+        />
+      )}
+    </HStack>
   );
   const keepFor = (
     <SettingsGroup title="Storage">
       <SettingsRow
-        id="history-retention"
         label="Keep history for"
         help="Older dictations are deleted from this Mac automatically."
       >
-        <Select
-          id="history-retention"
-          aria-describedby="history-retention-help"
+        <Selector
+          label="Keep history for"
+          isLabelHidden
           value={pendingRetention ?? current}
-          disabled={!settings.data || retention.isPending}
-          onChange={(e) => {
-            const value = settingsSchema.shape.historyRetention.parse(
-              e.target.value,
-            );
+          isDisabled={!settings.data || retention.isPending}
+          options={retentionOrder.map((value) => ({
+            value,
+            label: retentionChoices[value],
+          }))}
+          onChange={(next) => {
+            const value = settingsSchema.shape.historyRetention.parse(next);
             if (retentionOrder.indexOf(value) < retentionOrder.indexOf(current))
               setPendingRetention(value);
             else saveRetention(value);
           }}
-        >
-          {retentionOrder.map((value) => (
-            <option key={value} value={value}>
-              {retentionChoices[value]}
-            </option>
-          ))}
-        </Select>
+        />
       </SettingsRow>
-      {pendingRetention && (
-        <div className="history-retention-confirm">
-          <Confirm
-            question={`Delete dictations older than ${retentionLabels[pendingRetention]}?`}
-            confirmLabel="Delete older dictations"
-            onConfirm={() => saveRetention(pendingRetention)}
-            onCancel={() => setPendingRetention(null)}
-          >
-            They are removed now, and from then on after{" "}
-            {retentionLabels[pendingRetention]}.
-          </Confirm>
-        </div>
-      )}
+      <AlertDialog
+        isOpen={pendingRetention !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRetention(null);
+        }}
+        title={`Delete dictations older than ${retentionLabels[pendingRetention ?? current]}?`}
+        description={`They are removed now, and from then on after ${retentionLabels[pendingRetention ?? current]}.`}
+        actionLabel="Delete older dictations"
+        onAction={() => {
+          if (pendingRetention) saveRetention(pendingRetention);
+        }}
+      />
     </SettingsGroup>
   );
 
@@ -234,9 +354,7 @@ function Dictations() {
     return (
       <>
         {toolbar}
-        <div className="loading" role="status">
-          Loading your history…
-        </div>
+        <Loading>Loading your history…</Loading>
         {keepFor}
       </>
     );
@@ -244,83 +362,71 @@ function Dictations() {
     return (
       <>
         {toolbar}
-        <div className="notice" role="alert">
-          <p>{String(history.error)}</p>
-          <Button onClick={() => void history.refetch()}>Try again</Button>
-        </div>
+        <LoadError
+          error={history.error}
+          onRetry={() => void history.refetch()}
+        />
         {keepFor}
       </>
     );
 
-  const nothingYet = !query && history.data.entries.length === 0;
   const more = history.data.hasMore && (
-    <div className="history-more">
-      <p className="ui-date">
+    <HStack gap={2} vAlign="center" hAlign="between">
+      <Text type="supporting">
         Showing the latest {history.data.entries.length.toLocaleString()}.
-      </p>
+      </Text>
       <Button
         size="sm"
-        disabled={history.isFetching}
+        isDisabled={history.isFetching}
+        label={history.isFetching ? "Loading…" : "Load older dictations"}
         onClick={() => setLimit({ query, count: count + HISTORY_PAGE })}
-      >
-        {history.isFetching ? "Loading…" : "Load older dictations"}
-      </Button>
-    </div>
+      />
+    </HStack>
   );
   return (
     <>
       {toolbar}
-      {!nothingYet && (
-        <FilterChips
-          label="Show"
-          options={filters}
-          value={filter}
-          onChange={(value) =>
-            setFilter(filters.find((f) => f.value === value)?.value ?? "all")
+      <ErrorNotice error={error} />
+      {nothingYet ? (
+        <EmptyState
+          headingLevel={2}
+          title="Nothing here yet"
+          description="Each dictation appears here."
+          actions={
+            settings.data && (
+              <Text>
+                {settings.data.shortcutMode === "hold" ? "Hold " : "Press "}
+                <KeyboardShortcut value={settings.data.shortcut} /> and speak.
+              </Text>
+            )
           }
         />
-      )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      {nothingYet ? (
-        <EmptyState title="Nothing here yet">
-          {settings.data ? (
-            <>
-              {settings.data.shortcutMode === "hold" ? "Hold " : "Press "}
-              <KeyboardShortcut value={settings.data.shortcut} /> and speak.
-              Each dictation appears here.
-            </>
-          ) : (
-            "Each dictation appears here."
-          )}
-        </EmptyState>
       ) : !selected ? (
         <EmptyState
+          headingLevel={2}
           title={query ? `No matches for “${query}”` : "Nothing to show"}
-          action={
+          description={
+            query
+              ? "Try a different word, or the name of an app."
+              : `No ${statusLabels[filter as TakeStatus].toLowerCase()} dictations in your history.`
+          }
+          actions={
             query ? (
-              <Button onClick={() => setSearch("")}>Clear search</Button>
+              <Button label="Clear search" onClick={() => setSearch("")} />
             ) : (
               <>
-                <Button onClick={() => setFilter("all")}>Show all</Button>
+                <Button label="Show all" onClick={() => setFilter("all")} />
                 {more}
               </>
             )
           }
-        >
-          {query
-            ? "Try a different word, or the name of an app."
-            : `No ${statusLabels[filter as TakeStatus].toLowerCase()} dictations in your history.`}
-        </EmptyState>
+        />
       ) : (
-        <div className="history-split">
-          <div className="history-list">
-            <SelectList
+        <Grid columns={{ minWidth: 260, repeat: "fit" }} gap={4} align="start">
+          <VStack gap={2}>
+            <Rows
               label="Dictations"
-              items={entries.map((entry) => ({
+              rows={entries.map((entry) => ({
                 id: entry.id,
                 title: entryTitle(entry),
                 meta: [
@@ -335,8 +441,8 @@ function Dictations() {
               onChange={setSelectedId}
             />
             {more}
-          </div>
-          <Detail
+          </VStack>
+          <DictationDetail
             key={selected.id}
             entry={selected}
             now={now}
@@ -344,7 +450,7 @@ function Dictations() {
             onDelete={() => void removeSelected().catch(() => {})}
             onError={setError}
           />
-        </div>
+        </Grid>
       )}
       {keepFor}
     </>
@@ -356,7 +462,7 @@ const fullDate = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
-function Detail({
+function DictationDetail({
   entry,
   now,
   deleting,
@@ -371,7 +477,6 @@ function Detail({
 }) {
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const trash = useRef<HTMLButtonElement>(null);
   const reset = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(reset.current), []);
   async function copy() {
@@ -387,38 +492,39 @@ function Detail({
   }
   const status =
     entry.status === "pasted"
-      ? "Pasted"
+      ? "Inserted"
       : `${statusLabels[entry.status]}${entry.detail ? ` · ${entry.detail}` : ""}`;
   return (
-    <DetailPanel
+    <Detail
       title="Dictation"
       subtitle={`${relativeTime(entry.createdAtMs, now)} · ${fullDate.format(entry.createdAtMs)}`}
       actions={
         <>
           <IconButton
             variant="ghost"
-            label={copied ? "Copied" : "Copy text"}
-            disabled={!entry.text}
+            label="Copy text"
+            tooltip="Copy the text"
+            isDisabled={!entry.text}
+            icon={
+              copied ? (
+                <Check size={16} aria-hidden="true" />
+              ) : (
+                <Copy size={16} aria-hidden="true" />
+              )
+            }
             onClick={() => void copy()}
-          >
-            {copied ? (
-              <Check size={16} aria-hidden="true" />
-            ) : (
-              <Copy size={16} aria-hidden="true" />
-            )}
-          </IconButton>
+          />
           <IconButton
-            ref={trash}
             variant="ghost"
             label="Delete dictation"
-            disabled={deleting || confirming}
+            tooltip="Delete this dictation"
+            isDisabled={deleting || confirming}
+            icon={<Trash2 size={16} aria-hidden="true" />}
             onClick={() => setConfirming(true)}
-          >
-            <Trash2 size={16} aria-hidden="true" />
-          </IconButton>
-          <span className="sr-only" role="status">
+          />
+          <VisuallyHidden role="status" aria-live="polite">
             {copied ? "Copied to clipboard" : ""}
-          </span>
+          </VisuallyHidden>
         </>
       }
       metadata={[
@@ -436,29 +542,27 @@ function Detail({
         { label: "Release to finish", value: formatMs(entry.totalMs) },
       ]}
     >
-      {confirming && (
-        <Confirm
-          question="Delete this dictation?"
-          confirmLabel="Delete dictation"
-          onConfirm={onDelete}
-          onCancel={() => {
-            setConfirming(false);
-            requestAnimationFrame(() => trash.current?.focus());
-          }}
-        >
-          It can’t be recovered.
-        </Confirm>
-      )}
+      <AlertDialog
+        isOpen={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this dictation?"
+        description="It can’t be recovered."
+        actionLabel="Delete dictation"
+        onAction={() => {
+          setConfirming(false);
+          onDelete();
+        }}
+      />
       {entry.text ? (
-        <p>{entry.text}</p>
+        <Text as="p">{entry.text}</Text>
       ) : (
-        <p className="ui-preview">
+        <Text as="p" color="secondary">
           {entry.status === "failed"
             ? "Nothing was transcribed."
             : "No words were heard, so nothing was pasted."}
-        </p>
+        </Text>
       )}
-    </DetailPanel>
+    </Detail>
   );
 }
 
@@ -483,62 +587,61 @@ function Annotations() {
   }, [client]);
 
   if (annotations.isPending)
-    return (
-      <div className="loading" role="status">
-        Loading your annotations…
-      </div>
-    );
+    return <Loading>Loading your annotations…</Loading>;
   if (annotations.isError)
     return (
-      <div className="notice" role="alert">
-        <p>{String(annotations.error)}</p>
-        <Button onClick={() => void annotations.refetch()}>Try again</Button>
-      </div>
+      <LoadError
+        error={annotations.error}
+        onRetry={() => void annotations.refetch()}
+      />
     );
   const entries = annotations.data;
   const selected =
     entries.find((entry) => entry.id === selectedId) ?? entries[0];
   if (!selected)
     return (
-      <EmptyState title="No annotations yet">
-        {settings.data ? (
-          <>
-            Tap <KeyboardShortcut value={settings.data.annotateShortcut} /> to
-            record your screen, draw and talk. Each session appears here.
-          </>
-        ) : (
-          "Each Annotate session appears here."
-        )}
-      </EmptyState>
+      <EmptyState
+        headingLevel={2}
+        title="No annotations yet"
+        description="Each Annotate session appears here."
+        actions={
+          settings.data && (
+            <Text>
+              Tap <KeyboardShortcut value={settings.data.annotateShortcut} /> to
+              record your screen, draw and talk.
+            </Text>
+          )
+        }
+      />
     );
   return (
     <>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="history-split">
-        <div className="history-list">
-          <SelectList
-            label="Annotations"
-            items={entries.map((entry) => ({
-              id: entry.id,
-              title: annotationTitle(entry),
-              meta: annotationMeta(entry),
-              date: relativeTime(Date.parse(entry.startedAt), now),
-            }))}
-            value={selected.id}
-            onChange={setSelectedId}
-          />
-        </div>
+      <ErrorNotice error={error} />
+      <Grid columns={{ minWidth: 260, repeat: "fit" }} gap={4} align="start">
+        <Rows
+          label="Annotations"
+          rows={entries.map((entry) => ({
+            id: entry.id,
+            title: annotationTitle(entry),
+            meta: annotationMeta(entry),
+            date: relativeTime(Date.parse(entry.startedAt), now),
+          }))}
+          value={selected.id}
+          onChange={setSelectedId}
+        />
         <AnnotationDetail
           key={selected.id}
           entry={selected}
           now={now}
           onError={setError}
+          onDeleted={() => {
+            const index = entries.indexOf(selected);
+            const next = entries[index + 1] ?? entries[index - 1];
+            setSelectedId(next?.id ?? null);
+            void client.invalidateQueries({ queryKey: ["annotations"] });
+          }}
         />
-      </div>
+      </Grid>
     </>
   );
 }
@@ -547,15 +650,31 @@ function AnnotationDetail({
   entry,
   now,
   onError,
+  onDeleted,
 }: {
   entry: AnnotationEntry;
   now: number;
   onError: (error: string) => void;
+  onDeleted: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const reset = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(reset.current), []);
   const started = Date.parse(entry.startedAt);
+  async function remove() {
+    onError("");
+    setDeleting(true);
+    try {
+      await deleteAnnotation(entry.id);
+      onDeleted();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }
   async function copy() {
     onError("");
     try {
@@ -576,9 +695,44 @@ function AnnotationDetail({
     }
   }
   return (
-    <DetailPanel
+    <Detail
       title="Annotation"
       subtitle={`${relativeTime(started, now)} · ${fullDate.format(started)}`}
+      actions={
+        <>
+          <IconButton
+            variant="ghost"
+            label="Copy again"
+            tooltip="Copy the summary"
+            icon={
+              copied ? (
+                <Check size={16} aria-hidden="true" />
+              ) : (
+                <Copy size={16} aria-hidden="true" />
+              )
+            }
+            onClick={() => void copy()}
+          />
+          <IconButton
+            variant="ghost"
+            label="Reveal in Finder"
+            tooltip="Show the session folder"
+            icon={<FolderOpen size={16} aria-hidden="true" />}
+            onClick={() => void reveal()}
+          />
+          <IconButton
+            variant="ghost"
+            label="Delete annotation"
+            tooltip="Delete this session"
+            isDisabled={deleting || confirming}
+            icon={<Trash2 size={16} aria-hidden="true" />}
+            onClick={() => setConfirming(true)}
+          />
+          <VisuallyHidden role="status" aria-live="polite">
+            {copied ? "Summary copied to clipboard" : ""}
+          </VisuallyHidden>
+        </>
+      }
       metadata={[
         { label: "Application", value: entry.app ?? "Unknown" },
         { label: "Length", value: clock(entry.durationMs) },
@@ -600,32 +754,31 @@ function AnnotationDetail({
       ]}
     >
       {entry.partial.length > 0 && (
-        <p className="annotation-partial">
-          <strong>Partial session.</strong> {entry.partial.join(" ")}
-        </p>
+        <Banner
+          status="warning"
+          title="Partial session."
+          description={entry.partial.join(" ")}
+          collapsible={false}
+        />
       )}
       {entry.text ? (
-        <p>{entry.text}</p>
+        <Text as="p">{entry.text}</Text>
       ) : (
-        <p className="ui-preview">Nothing was said in this session.</p>
+        <Text as="p" color="secondary">
+          Nothing was said in this session.
+        </Text>
       )}
-      <div className="ui-actions annotation-actions">
-        <Button size="sm" onClick={() => void copy()}>
-          {copied ? (
-            <Check size={16} aria-hidden="true" />
-          ) : (
-            <Copy size={16} aria-hidden="true" />
-          )}
-          {copied ? "Copied" : "Copy again"}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => void reveal()}>
-          <FolderOpen size={16} aria-hidden="true" />
-          Reveal in Finder
-        </Button>
-        <span className="sr-only" role="status">
-          {copied ? "Summary copied to clipboard" : ""}
-        </span>
-      </div>
-    </DetailPanel>
+      <AlertDialog
+        isOpen={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this annotation?"
+        description="The recording, the frames and the summary are removed. It can’t be recovered."
+        actionLabel="Delete annotation"
+        onAction={() => {
+          setConfirming(false);
+          void remove();
+        }}
+      />
+    </Detail>
   );
 }

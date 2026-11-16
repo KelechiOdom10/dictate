@@ -11,7 +11,9 @@ export const settingsSchema = z
     shortcutMode: z.enum(["hold", "toggle"]),
     microphone: z.string().nullable(),
     launchAtLogin: z.boolean(),
-    theme: z.enum(["ember", "paper"]),
+    theme: z
+      .enum(["ember", "paper", "capy", "rosePine", "neutral"])
+      .catch("ember"),
     overlayPosition: z.enum(["top", "bottom"]),
     appearanceMode: z.enum(["system", "light", "dark"]),
     historyRetention: z.enum(["day", "week", "month", "forever"]),

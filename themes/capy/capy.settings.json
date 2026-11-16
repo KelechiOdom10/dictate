@@ -1,0 +1,31 @@
+{
+  "name": "capy",
+  "like": "neutral",
+  "mode": "both",
+  "settings": [
+    {
+      "thing": "font",
+      "value": "Geist, -apple-system, system-ui, sans-serif",
+      "source": "dial"
+    },
+    {
+      "thing": "neutral",
+      "value": "#7a80a6",
+      "source": "dial"
+    },
+    {
+      "thing": "accent",
+      "value": "#a99cf5",
+      "source": "dial"
+    },
+    {
+      "thing": "corners",
+      "value": "pill",
+      "source": "dial",
+      "on": "selector",
+      "only": true
+    }
+  ],
+  "lifted": [],
+  "palette": "0bb604739b3cd383744a05a9fbbb4b5b7c3cb5a0b3d6f0bdd8eaa474fb79c234"
+}

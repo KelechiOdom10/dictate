@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert } from "lucide-react";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Code } from "@astryxdesign/core/Code";
+import { HStack } from "@astryxdesign/core/HStack";
+import { Text } from "@astryxdesign/core/Text";
+import { VStack } from "@astryxdesign/core/VStack";
 import {
   accuracyLabel,
   cancelDownload,
@@ -19,7 +24,8 @@ import {
   type SpeechModel,
 } from "./models";
 import { readSettings, writeSettings } from "./settings";
-import { Button, ModelCard, type ModelStatus } from "./ui";
+import { ModelCard, type ModelStatus } from "./ui";
+import { ErrorNotice, LoadError, Loading } from "./SettingsStatus";
 
 export default function ModelsPage() {
   const client = useQueryClient();
@@ -71,18 +77,10 @@ export default function ModelsPage() {
     };
   }, [client]);
 
-  if (models.isPending)
-    return (
-      <div className="loading" role="status">
-        Loading models…
-      </div>
-    );
+  if (models.isPending) return <Loading>Loading models…</Loading>;
   if (models.isError)
     return (
-      <div className="notice" role="alert">
-        <p>{String(models.error)}</p>
-        <Button onClick={() => void models.refetch()}>Try again</Button>
-      </div>
+      <LoadError error={models.error} onRetry={() => void models.refetch()} />
     );
 
   const fastest = Math.min(...models.data.map((model) => model.measuredMs));
@@ -131,20 +129,21 @@ export default function ModelsPage() {
     );
 
   return (
-    <div className="models">
+    <VStack gap={4}>
       {whisper.data && <WhisperMissing onCheck={() => whisper.refetch()} />}
       {activeMissing && (
-        <p className="models-hint" role="status">
-          {installed.length === 0
-            ? `Download a model to start dictating. ${recommended?.name ?? "The recommended model"} is a good first choice.`
-            : "Your chosen model isn’t downloaded. Use one of yours, or download it again."}
-        </p>
+        <Banner
+          role="status"
+          status="warning"
+          collapsible={false}
+          title={
+            installed.length === 0
+              ? `Download a model to start dictating. ${recommended?.name ?? "The recommended model"} is a good first choice.`
+              : "Your chosen model isn’t downloaded. Use one of yours, or download it again."
+          }
+        />
       )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
+      <ErrorNotice error={error} />
       {[
         ...models.data.filter((model) => model.recommended),
         ...models.data.filter((model) => !model.recommended),
@@ -182,45 +181,40 @@ export default function ModelsPage() {
           status={status(model)}
         />
       ))}
-      <p className="ui-date models-footnote">
+      <Text type="supporting">
         Speed is the median time to transcribe a{" "}
         {MEASURED_CLIP_SECONDS.toLocaleString()} s sentence, measured on an
         Apple M4 Pro. Accuracy is an estimate, not measured here. Models are
         saved in dictate’s app data folder.
-      </p>
-    </div>
+      </Text>
+    </VStack>
   );
 }
 
 function WhisperMissing({ onCheck }: { onCheck: () => void }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="ui-toast ui-toast-danger models-whisper" role="alert">
-      <span aria-hidden="true">
-        <CircleAlert size={16} />
-      </span>
-      <div className="models-whisper-body">
-        <p className="models-whisper-title">
-          whisper-cli isn’t installed, so dictate can’t transcribe.
-        </p>
-        <p>Install it from Terminal, then check again:</p>
-        <code>{WHISPER_INSTALL}</code>
-        <div className="ui-actions">
+    <Banner
+      status="error"
+      title="whisper-cli isn’t installed, so dictate can’t transcribe."
+      description="Install it from Terminal, then check again."
+      collapsible={false}
+    >
+      <VStack gap={2}>
+        <Code>{WHISPER_INSTALL}</Code>
+        <HStack gap={2}>
           <Button
             size="sm"
+            label={copied ? "Copied" : "Copy command"}
             onClick={() => {
               void writeText(WHISPER_INSTALL)
                 .then(() => setCopied(true))
                 .catch(console.error);
             }}
-          >
-            {copied ? "Copied" : "Copy command"}
-          </Button>
-          <Button size="sm" onClick={onCheck}>
-            Check again
-          </Button>
-        </div>
-      </div>
-    </div>
+          />
+          <Button size="sm" label="Check again" onClick={onCheck} />
+        </HStack>
+      </VStack>
+    </Banner>
   );
 }

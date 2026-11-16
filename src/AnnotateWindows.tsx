@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   AnnotateBar,
   AnnotateCopiedBar,
+  AnnotateStartingBar,
   InkCanvas,
   inkOpacity,
   type InkStroke,
@@ -21,6 +22,7 @@ const barSchema = z.object({
   recording: z.boolean(),
   startedAtMs: z.number(),
   pen: z.boolean(),
+  starting: z.boolean(),
   copied: z.boolean(),
   hasImage: z.boolean(),
 });
@@ -115,9 +117,9 @@ export function inkHandlers(
 }
 
 /**
- * The ink panel. Pointer events only arrive in pen mode, because Rust keeps
- * the panel click-through otherwise. Rust reads the pointer itself, so the
- * page only says when a drag starts and ends.
+ * The ink panel. Pointer events only arrive in pen mode or while Shift is
+ * held alone, because Rust keeps the panel click-through otherwise. Rust
+ * reads the pointer itself, so the page only says when a drag starts and ends.
  */
 export function InkWindow() {
   useTransparentWindow();
@@ -177,6 +179,12 @@ export function AnnotateBarWindow() {
           }
           onClose={() => void invoke("annotate_dismiss").catch(console.error)}
         />
+      </main>
+    );
+  if (state?.starting)
+    return (
+      <main className="annotate-bar-window">
+        <AnnotateStartingBar />
       </main>
     );
   if (!state?.recording) return null;

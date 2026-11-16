@@ -19,7 +19,7 @@ export function LevelMeter({
 }) {
   const value = Math.max(0, Math.min(1, level));
   return (
-    <div className={`ui-level ${value === 0 ? "ui-level-idle" : ""}`}>
+    <div className="ui-level">
       <meter min={0} max={1} value={value} aria-label={label} />
       <div className="ui-level-bars" aria-hidden="true">
         {Array.from({ length: 12 }, (_, index) => (
@@ -33,6 +33,29 @@ export function LevelMeter({
         ))}
       </div>
     </div>
+  );
+}
+const overlayKeys: Record<string, string> = {
+  CommandOrControl: "⌘",
+  Super: "⌘",
+  Meta: "⌘",
+  Control: "⌃",
+  Alt: "⌥",
+  Option: "⌥",
+  Shift: "⇧",
+};
+export function OverlayShortcut({ value }: { value: string }) {
+  return (
+    <span className="ui-keycaps">
+      {value
+        .split("+")
+        .filter(Boolean)
+        .map((key, index) => (
+          <kbd key={index}>
+            {overlayKeys[key] ?? key.replace(/^(Key|Digit)/, "")}
+          </kbd>
+        ))}
+    </span>
   );
 }
 function clock(seconds: number) {

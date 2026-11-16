@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-import { Button, LevelMeter } from "./ui";
+import { Button } from "@astryxdesign/core/Button";
+import { HStack } from "@astryxdesign/core/HStack";
+import { Text } from "@astryxdesign/core/Text";
+import { LevelMeter, SettingsRow } from "./ui";
 
 type Props = {
   testing: boolean;
@@ -49,18 +52,28 @@ export default function MicrophoneTest({
   }, [testing, onError, onTestingChange]);
 
   return (
-    <div className="mic-test">
-      <div className="meter-copy">
-        <LevelMeter level={testing ? level : 0} />
-        <span>
-          {testing
-            ? "Listening · audio is not saved"
-            : "Check your input level"}
-        </span>
-      </div>
-      <Button onClick={() => void onToggle()} disabled={disabled}>
-        {testing ? "Stop test" : "Test microphone"}
-      </Button>
-    </div>
+    <SettingsRow
+      label="Input level"
+      help={testing ? "Listening · audio is not saved" : "Audio is not saved"}
+    >
+      <HStack gap={4} vAlign="center">
+        <HStack gap={2} vAlign="center">
+          <Text type="supporting">Level</Text>
+          <LevelMeter level={testing ? level : 0} label="Live input level" />
+        </HStack>
+        <Button
+          label={testing ? "Stop test" : "Test microphone"}
+          isDisabled={disabled}
+          onClick={() => void onToggle()}
+        >
+          <span className="ui-mic-stack">
+            <span aria-hidden="true" className="ui-mic-ghost">
+              Test microphone
+            </span>
+            <span>{testing ? "Stop test" : "Test microphone"}</span>
+          </span>
+        </Button>
+      </HStack>
+    </SettingsRow>
   );
 }

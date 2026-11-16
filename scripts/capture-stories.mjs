@@ -138,7 +138,7 @@ try {
           !entry.id.includes("loading") &&
           !entry.id.includes("error")
         )
-          await page.locator("#login").waitFor();
+          await page.getByRole("switch", { name: "Launch at login" }).waitFor();
         if (entry.id in historyReady) await historyReady[entry.id](page);
         if (entry.id in modelsReady) await modelsReady[entry.id](page);
         if (entry.id in settingsReady) await settingsReady[entry.id](page);

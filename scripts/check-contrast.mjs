@@ -8,11 +8,11 @@ try {
   );
   const results = [];
   const palettes = [];
-  for (const theme of ["ember", "paper"])
+  for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"])
     for (const mode of ["light", "dark"]) {
       const { pairs, palette } = await page.evaluate(
         ({ theme, mode }) => {
-          document.documentElement.dataset.theme = theme;
+          document.documentElement.dataset.palette = theme;
           document.documentElement.dataset.mode = mode;
           const canvas = document.querySelector("canvas");
           const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -64,6 +64,7 @@ try {
             ])
               pairs.push([foreground, background, 4.5]);
           pairs.push(
+            ["recording", "overlay", 3],
             ["text", "segment-thumb", 4.5],
             ["on-primary", "primary", 4.5],
             ["on-primary", "keycap-primary", 4.5],
@@ -87,7 +88,6 @@ try {
             pairs.push([fg, "overlay", 4.5]);
           for (const bg of ["canvas", "surface", "control", "selected"])
             pairs.push(["accent", bg, 3]);
-          pairs.push(["recording", "overlay", 3]);
           const palette = Object.fromEntries(
             [
               "canvas",

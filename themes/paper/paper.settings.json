@@ -1,0 +1,31 @@
+{
+  "name": "paper",
+  "like": "neutral",
+  "mode": "both",
+  "settings": [
+    {
+      "thing": "font",
+      "value": "Geist, -apple-system, system-ui, sans-serif",
+      "source": "dial"
+    },
+    {
+      "thing": "neutral",
+      "value": "#857f74",
+      "source": "dial"
+    },
+    {
+      "thing": "accent",
+      "value": "#1c1b19",
+      "source": "dial"
+    },
+    {
+      "thing": "corners",
+      "value": "pill",
+      "source": "dial",
+      "on": "selector",
+      "only": true
+    }
+  ],
+  "lifted": [],
+  "palette": "d98570fef95ddbc48075e2ccf031877d83dfff41963c3cf7a87dfcda98fa615c"
+}

@@ -1,7 +1,9 @@
 import { ClipboardPaste, Type } from "lucide-react";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Switch } from "@astryxdesign/core/Switch";
 import { settingsSchema } from "./settings";
 import { SaveStatus, SettingsPending } from "./SettingsStatus";
-import { Select, SettingsGroup, SettingsRow as Row, Toggle } from "./ui";
+import { SettingsGroup, SettingsRow as Row } from "./ui";
 import { useSettings } from "./useSettings";
 
 export default function OutputPage() {
@@ -16,7 +18,6 @@ export default function OutputPage() {
         icon={<ClipboardPaste size={14} aria-hidden="true" />}
       >
         <Row
-          id="paste-method"
           label="After dictation"
           help={
             copyOnly
@@ -24,9 +25,9 @@ export default function OutputPage() {
               : "Your words appear wherever you’re typing."
           }
         >
-          <Select
-            id="paste-method"
-            aria-describedby="paste-method-help"
+          <Selector
+            label="After dictation"
+            isLabelHidden
             value={
               copyOnly
                 ? "copyOnly"
@@ -34,20 +35,21 @@ export default function OutputPage() {
                   ? "paste"
                   : "pasteKeep"
             }
-            disabled={busy}
-            onChange={(e) =>
+            isDisabled={busy}
+            options={[
+              { value: "paste", label: "Paste" },
+              { value: "copyOnly", label: "Copy only" },
+              { value: "pasteKeep", label: "Paste and keep on clipboard" },
+            ]}
+            onChange={(value) =>
               void save({
                 pasteMethod: settingsSchema.shape.pasteMethod.parse(
-                  e.target.value === "pasteKeep" ? "paste" : e.target.value,
+                  value === "pasteKeep" ? "paste" : value,
                 ),
-                restoreClipboard: e.target.value === "paste",
+                restoreClipboard: value === "paste",
               })
             }
-          >
-            <option value="paste">Paste</option>
-            <option value="copyOnly">Copy only</option>
-            <option value="pasteKeep">Paste and keep on clipboard</option>
-          </Select>
+          />
         </Row>
       </SettingsGroup>
       <SettingsGroup
@@ -55,29 +57,27 @@ export default function OutputPage() {
         icon={<Type size={14} aria-hidden="true" />}
       >
         <Row
-          id="capitalize-first"
           label="Capitalise the first letter"
           help="Start every dictation with a capital."
         >
-          <Toggle
-            id="capitalize-first"
-            aria-describedby="capitalize-first-help"
-            checked={settings.capitalizeFirst}
-            disabled={busy}
-            onChange={(e) => void save({ capitalizeFirst: e.target.checked })}
+          <Switch
+            label="Capitalise the first letter"
+            isLabelHidden
+            value={settings.capitalizeFirst}
+            isDisabled={busy}
+            onChange={(checked) => void save({ capitalizeFirst: checked })}
           />
         </Row>
         <Row
-          id="trailing-space"
           label="Add a trailing space"
           help="Leaves room to keep typing or dictate the next sentence."
         >
-          <Toggle
-            id="trailing-space"
-            aria-describedby="trailing-space-help"
-            checked={settings.trailingSpace}
-            disabled={busy}
-            onChange={(e) => void save({ trailingSpace: e.target.checked })}
+          <Switch
+            label="Add a trailing space"
+            isLabelHidden
+            value={settings.trailingSpace}
+            isDisabled={busy}
+            onChange={(checked) => void save({ trailingSpace: checked })}
           />
         </Row>
       </SettingsGroup>

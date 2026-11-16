@@ -1,0 +1,31 @@
+{
+  "name": "rose-pine",
+  "like": "neutral",
+  "mode": "both",
+  "settings": [
+    {
+      "thing": "font",
+      "value": "Geist, -apple-system, system-ui, sans-serif",
+      "source": "dial"
+    },
+    {
+      "thing": "neutral",
+      "value": "#908caa",
+      "source": "dial"
+    },
+    {
+      "thing": "accent",
+      "value": "#c4a7e7",
+      "source": "dial"
+    },
+    {
+      "thing": "corners",
+      "value": "pill",
+      "source": "dial",
+      "on": "selector",
+      "only": true
+    }
+  ],
+  "lifted": [],
+  "palette": "308d12271140d6d94a3432baa6abb42db4847319ed73ce4d466d036f723526ca"
+}
