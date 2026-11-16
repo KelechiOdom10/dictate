@@ -305,7 +305,13 @@ const settingsAlt =
 
       const annotate = document.querySelector<HTMLElement>("[data-annotate]")!;
       const take = document.getElementById("take")!;
+      const pills = annotate.querySelector<HTMLElement>(".pills")!;
       const tabs = [...annotate.querySelectorAll<HTMLButtonElement>("[role=tab]")];
+      const place = () => {
+        const on = tabs.find((tab) => tab.getAttribute("aria-selected") === "true")!;
+        pills.style.setProperty("--x", on.offsetLeft + "px");
+        pills.style.setProperty("--w", on.offsetWidth + "px");
+      };
       const select = (next: HTMLButtonElement) => {
         for (const tab of tabs) {
           tab.setAttribute("aria-selected", String(tab === next));
@@ -313,9 +319,43 @@ const settingsAlt =
         }
         annotate.dataset.step = next.dataset.step;
         take.setAttribute("aria-labelledby", next.id);
+        place();
       };
+      place();
+      requestAnimationFrame(() => requestAnimationFrame(() => (pills.dataset.ready = "")));
+      new ResizeObserver(place).observe(pills);
+
+      let loop = 0;
+      let seen = false;
+      const stopLoop = () => {
+        clearInterval(loop);
+        loop = 0;
+        seen = false;
+        stopped = true;
+        observer?.disconnect();
+      };
+      let stopped = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const advance = () => {
+        const at = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
+        select(tabs[(at + 1) % tabs.length]);
+      };
+      const observer = stopped
+        ? undefined
+        : new IntersectionObserver(([entry]) => {
+            if (stopped) return;
+            seen = entry.isIntersecting;
+            clearInterval(loop);
+            loop = seen ? window.setInterval(advance, 4000) : 0;
+          }, { threshold: 0.5 });
+      if (observer) observer.observe(annotate);
+      for (const part of [pills, take]) part.addEventListener("pointerenter", stopLoop);
+      pills.addEventListener("focusin", stopLoop);
+
       for (const tab of tabs) {
-        tab.addEventListener("click", () => select(tab));
+        tab.addEventListener("click", () => {
+          stopLoop();
+          select(tab);
+        });
         tab.addEventListener("keydown", (event) => {
           const at = tabs.indexOf(tab);
           const to =
