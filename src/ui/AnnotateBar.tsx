@@ -1,4 +1,4 @@
-import { PenLine, Square } from "lucide-react";
+import { Check, ImageDown, PenLine, Square, X } from "lucide-react";
 import { IconButton } from "./Button";
 
 function clock(seconds: number) {
@@ -39,6 +39,48 @@ export function AnnotateBar({
         onClick={onStop}
       >
         <Square />
+      </IconButton>
+    </div>
+  );
+}
+
+/**
+ * The bar after a session: the summary is already on the clipboard. "Copy
+ * image" swaps it for the contact sheet, for chats that cannot open a path.
+ */
+export function AnnotateCopiedBar({
+  hasImage,
+  imageCopied,
+  onCopyImage,
+  onClose,
+}: {
+  hasImage: boolean;
+  imageCopied: boolean;
+  onCopyImage: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="ui-annotate-bar ui-annotate-bar-copied"
+      role="toolbar"
+      aria-label="Annotation"
+    >
+      <Check size={16} aria-hidden="true" />
+      <span role="status" className="ui-annotate-bar-label">
+        {imageCopied ? "Image copied" : "Copied"}
+      </span>
+      {hasImage && (
+        <IconButton
+          label={imageCopied ? "Image copied" : "Copy image"}
+          variant="ghost"
+          size="sm"
+          onClick={onCopyImage}
+        >
+          {imageCopied ? <Check /> : <ImageDown />}
+        </IconButton>
+      )}
+      <IconButton label="Close" variant="ghost" size="sm" onClick={onClose}>
+        <X />
       </IconButton>
     </div>
   );

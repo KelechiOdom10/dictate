@@ -1153,6 +1153,11 @@ h3 {
   margin-inline-end: auto;
   padding-inline-end: var(--space-1);
 }
+.ui-annotate-bar-label {
+  margin-inline-end: auto;
+  font-weight: 600;
+  white-space: nowrap;
+}
 .ui-annotate-bar .ui-button-ghost {
   color: inherit;
 }

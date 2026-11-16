@@ -15,9 +15,11 @@
 //! floats, which serialises to megabytes of JSON for no benefit; the frontend
 //! receives status and small scalar levels, never raw samples.
 
-mod annotate;
+pub mod annotate;
 mod annotate_ui;
 mod audio;
+#[cfg(target_os = "macos")]
+mod clipboard;
 #[cfg(target_os = "macos")]
 pub mod frames;
 mod insert;
@@ -31,7 +33,7 @@ mod history;
 mod ink;
 mod models;
 mod overlay;
-mod problem;
+pub mod problem;
 mod settings;
 mod sound;
 mod surface;
@@ -144,6 +146,9 @@ impl Runtime {
         if self.phase != Phase::Idle || audio::is_recording() {
             return Err("Finish dictating before changing settings".into());
         }
+        if self.annotate != annotate::Phase::Idle {
+            return Err("Stop Annotate before changing settings".into());
+        }
         let changes = settings.validate_changes(
             &self.settings,
             || platform.input_devices(),
@@ -163,6 +168,46 @@ impl Runtime {
                 return Err(error);
             }
         }
+        let undo_shortcut = |errors: &mut Vec<String>| {
+            if let Some((old_chord, chord)) = changes.shortcut {
+                if let Err(error) = platform.unregister(chord) {
+                    errors.push(format!("Remove new shortcut: {error}"));
+                }
+                if self.shortcut_registered
+                    && let Err(error) = platform.register(old_chord)
+                {
+                    errors.push(format!("Restore shortcut: {error}"));
+                }
+            }
+        };
+        let old_annotate = self
+            .annotate_registered
+            .then(|| self.settings.annotate_chord().ok())
+            .flatten();
+        if let Some(new_annotate) = changes.annotate {
+            let swapped = (|| {
+                if let Some(old) = old_annotate {
+                    platform.unregister(old)?;
+                }
+                if let Some(new) = new_annotate
+                    && let Err(error) = platform.register(new)
+                {
+                    let mut errors = vec![format!("Annotate shortcut unavailable: {error}")];
+                    if let Some(old) = old_annotate
+                        && let Err(error) = platform.register(old)
+                    {
+                        errors.push(format!("Restore Annotate shortcut: {error}"));
+                    }
+                    return Err(errors.join("; "));
+                }
+                Ok(())
+            })();
+            if let Err(error) = swapped {
+                let mut errors = vec![error];
+                undo_shortcut(&mut errors);
+                return Err(errors.join("; "));
+            }
+        }
         let result = (|| {
             if settings.launch_at_login != was_enabled {
                 platform.set_login(settings.launch_at_login)?;
@@ -176,24 +221,30 @@ impl Runtime {
             {
                 errors.push(format!("Restore launch at login: {error}"));
             }
-            if let Some((old_chord, chord)) = changes.shortcut {
-                if let Err(error) = platform.unregister(chord) {
-                    errors.push(format!("Remove new shortcut: {error}"));
-                }
-                if self.shortcut_registered
-                    && let Err(error) = platform.register(old_chord)
+            if let Some(new_annotate) = changes.annotate {
+                if let Some(new) = new_annotate
+                    && let Err(error) = platform.unregister(new)
                 {
-                    errors.push(format!("Restore shortcut: {error}"));
+                    errors.push(format!("Remove new Annotate shortcut: {error}"));
+                }
+                if let Some(old) = old_annotate
+                    && let Err(error) = platform.register(old)
+                {
+                    errors.push(format!("Restore Annotate shortcut: {error}"));
                 }
             }
+            undo_shortcut(&mut errors);
             return Err(errors.join("; "));
         }
         if changes.shortcut.is_some() {
             self.capturing_shortcut = false;
             self.shortcut_registered = true;
         }
+        if let Some(new_annotate) = changes.annotate {
+            self.annotate_registered = new_annotate.is_some();
+        }
         self.settings = settings;
-        Ok(changes.shortcut.is_some())
+        Ok(changes.shortcut.is_some() || changes.annotate.is_some())
     }
 
     fn capture_shortcut(
@@ -1153,6 +1204,15 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 report_error(app, &transcribe::missing_model(&model));
                 return;
             }
+            if !screen::has_permission() {
+                drop(runtime);
+                // The first time, this shows the system prompt and puts
+                // dictate in the Screen Recording list; afterwards it only
+                // answers.
+                screen::request_permission();
+                report_error(app, &annotate::screen_permission_needed());
+                return;
+            }
             let clock = Instant::now();
             let unix_ms = history::now_ms();
             surface::clear_error(app);
@@ -1169,12 +1229,33 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
             };
             let audio_offset_ms = clock.elapsed().as_millis() as u64;
             let display = annotate::recorded_display();
+            let options = screen::CaptureOptions {
+                include_own_windows: runtime.settings.annotate_show_in_recordings,
+                ..Default::default()
+            };
+            if let Err(error) = screen::start(screen::DisplayTarget::Id(display.id), options) {
+                if let Err(stop) = audio::stop() {
+                    log::warn!("[annotate] release microphone: {stop}");
+                }
+                drop(runtime);
+                report_error(
+                    app,
+                    &if error == screen::PERMISSION_DENIED {
+                        annotate::screen_permission_needed()
+                    } else {
+                        annotate::screen_start_failed(error)
+                    },
+                );
+                return;
+            }
+            let video_offset_ms = clock.elapsed().as_millis() as u64;
             runtime.annotate = next;
             runtime.annotate_started = Some((
                 clock,
                 annotate::Started {
                     unix_ms,
                     audio_offset_ms,
+                    video_offset_ms,
                     display: display.clone(),
                     frontmost_app: focus::frontmost_app_id(),
                 },
@@ -1185,10 +1266,11 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
             surface::set_phase(app, "annotating");
             drop(runtime);
             log::info!(
-                "[annotate] started, audio_offset_ms={audio_offset_ms} display={} at ({}, {})",
+                "[annotate] started, audio_offset_ms={audio_offset_ms} video_offset_ms={video_offset_ms} display={} at ({}, {}) own_windows_in_video={}",
                 display.id,
                 display.frame.x,
-                display.frame.y
+                display.frame.y,
+                options.include_own_windows,
             );
             annotate_ui::begin(app, display, clock, unix_ms);
             // The floating bar shows the session; the pill only appears to
@@ -1202,6 +1284,7 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 runtime.annotate = annotate::Phase::Idle;
                 return;
             };
+            let stopped = Instant::now();
             let duration_ms = clock.elapsed().as_millis() as u64;
             let samples = audio::stop();
             runtime.annotate = next;
@@ -1212,107 +1295,231 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
             // wait on the main thread.
             let strokes = annotate_ui::end(app);
             if let Err(error) = overlay::show(app) {
-                log::warn!("[annotate] show saving: {error}");
+                log::warn!("[annotate] show packaging: {error}");
             }
             let app = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let outcome = match samples {
-                    Ok(samples) => {
-                        save_annotation(&app, &samples, started, duration_ms, strokes, &model)
-                    }
-                    Err(error) => Err(error),
+                let video = stop_screen(&started);
+                let recorded = annotate::Recorded {
+                    started,
+                    duration_ms,
+                    model: transcribe::model_name(&model),
+                    strokes,
+                    video,
                 };
-                let phase = match &outcome {
-                    Ok(()) => "annotated",
-                    Err(_) => "idle",
-                };
+                let outcome = samples
+                    .and_then(|samples| save_annotation(&app, &samples, recorded, stopped, &model));
                 if let Ok(mut runtime) = app.state::<Mutex<Runtime>>().lock() {
                     runtime.annotate = annotate::packaged(runtime.annotate);
-                    surface::set_phase(&app, phase);
+                    surface::set_phase(&app, "idle");
                 }
-                if let Err(error) = &outcome {
-                    report_error(&app, error);
-                    return;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1800));
-                let state = app.state::<Mutex<Runtime>>();
-                let Ok(runtime) = state.lock() else {
-                    return;
+                let packaged = match outcome {
+                    Ok(packaged) => packaged,
+                    Err(error) => return report_error(&app, &error),
                 };
-                if runtime.phase != Phase::Idle
-                    || runtime.annotate != annotate::Phase::Idle
-                    || surface::status(&app).phase != "annotated"
-                {
-                    return;
+                if let Err(error) = clipboard::copy_text(&packaged.summary) {
+                    return report_error(
+                        &app,
+                        &Problem::new(
+                            "Annotation saved, not copied",
+                            "Open Settings › History › Annotations and choose Copy again.",
+                        )
+                        .because(error),
+                    );
                 }
-                surface::set_phase(&app, "idle");
-                drop(runtime);
+                notify_copied(&app);
+                if let Err(error) = app.emit("annotations-changed", ()) {
+                    log::warn!("[annotate] emit annotations-changed: {error}");
+                }
+                // The pill and the bar share the bottom of the screen, so
+                // only one shows: a warning in the pill, or the bar's Copied.
+                if let Some(warning) = &packaged.warning {
+                    return report_error(&app, warning);
+                }
                 if surface::status(&app).should_hide()
                     && let Some(window) = app.get_webview_window("main")
                     && let Err(error) = window.hide()
                 {
                     log::warn!("[annotate] hide: {error}");
                 }
+                annotate_ui::show_copied(&app, packaged.contact_sheet());
             });
         }
         annotate::Phase::Idle => {}
     }
 }
 
-/// Transcribes with word times and writes `audio.wav` and `annotation.json`.
-/// A failed transcription still saves the audio, with an empty transcript,
-/// and then reports the failure.
+/// Stops the screen recording. A failure leaves a session without video,
+/// not a lost session.
+fn stop_screen(started: &annotate::Started) -> Option<annotate::Recording> {
+    match screen::stop() {
+        Ok(video) => {
+            log::info!(
+                "[annotate] video {}x{} {} fps duration_ms={} bytes={} frames={:?} finalize_wall_ms={} own_windows_excluded={}",
+                video.width,
+                video.height,
+                video.fps,
+                video.duration_ms,
+                video.file_bytes,
+                video.frames,
+                video.wall_ms,
+                video.own_windows_excluded,
+            );
+            Some(annotate::Recording {
+                path: video.path,
+                offset_ms: started.video_offset_ms,
+                width: video.width,
+                height: video.height,
+                fps: video.fps,
+                duration_ms: video.duration_ms,
+            })
+        }
+        Err(error) => {
+            log::warn!("[annotate] screen stop: {error}");
+            None
+        }
+    }
+}
+
+fn notify_copied(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(error) = app
+        .notification()
+        .builder()
+        .title("Annotation copied")
+        .body("Paste it into your agent. The images are in the folder it names.")
+        .show()
+    {
+        log::warn!("[annotate] notify: {error}");
+    }
+}
+
+/// Builds the package from a stopped session: video moved in, audio,
+/// transcript with word times, frames, contact sheet, `annotation.json` and
+/// `summary.md`. Logs the stop-to-package time, which is also stored in
+/// `annotation.json` as `packagingMs`.
 fn save_annotation(
     app: &AppHandle,
     samples: &[f32],
-    started: annotate::Started,
-    duration_ms: u64,
-    strokes: Vec<package::Stroke>,
+    recorded: annotate::Recorded,
+    stopped: Instant,
     model: &Path,
-) -> Result<(), Problem> {
-    let stopped = Instant::now();
-    let folder = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| Problem::new("Annotation not saved", "Restart dictate.").because(e))?
-        .join(annotate::FOLDER)
-        .join(annotate::session_id(started.unix_ms));
-    let (words, transcribe_error) = match transcribe::transcribe_timed(samples, model) {
-        Ok(words) => (words, None),
-        Err(error) => (Vec::new(), Some(error)),
-    };
-    let transcribe_ms = stopped.elapsed().as_millis();
-    let annotation = annotate::annotation(
-        started,
-        duration_ms,
-        transcribe::model_name(model),
-        words,
-        strokes,
-    );
-    annotate::write(&folder, samples, &annotation).map_err(|e| {
+) -> Result<annotate::Packaged, Problem> {
+    let dir = annotations_dir(app)?;
+    let folder = dir.join(annotate::session_id(recorded.started.unix_ms));
+    let temp_video = recorded.video.as_ref().map(|video| video.path.clone());
+    let packaged = annotate::package(&folder, samples, recorded, stopped, |samples| {
+        transcribe::transcribe_timed(samples, model)
+    })
+    .map_err(|e| {
         Problem::new(
             "Annotation not saved",
             "Check there is free disk space, then try again.",
         )
         .because(e)
     })?;
+    // `screen` writes each take into its own temp folder; the MP4 has moved
+    // out, so remove the folder now rather than at the next day's sweep.
+    if let Some(parent) = temp_video.as_deref().and_then(Path::parent)
+        && let Err(error) = std::fs::remove_dir(parent)
+    {
+        log::warn!("[annotate] remove {}: {error}", parent.display());
+    }
+    let annotation = &packaged.annotation;
     log::info!(
-        "[annotate] saved {} samples={} duration_ms={duration_ms} words={} strokes={} marks={} transcribe_ms={transcribe_ms} stop_to_saved_ms={}",
+        "[annotate] packaged {} samples={} duration_ms={} words={} strokes={} marks={} frames={} transcribe_ms={} stop_to_package_ms={} render={:?}",
         folder.display(),
         samples.len(),
+        annotation.duration_ms,
         annotation.transcript.words.len(),
         annotation.strokes.len(),
         annotation.marks.len(),
-        stopped.elapsed().as_millis()
+        annotation.frames.len(),
+        packaged.transcribe_ms,
+        annotation.packaging_ms.unwrap_or_default(),
+        packaged.rendered,
     );
-    match transcribe_error {
-        Some(error) => Err(Problem::new(
-            "Annotation saved without a transcript",
-            error.fix.clone(),
-        )
-        .because(error)),
-        None => Ok(()),
+    Ok(packaged)
+}
+
+fn annotations_dir(app: &AppHandle) -> Result<PathBuf, Problem> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| Problem::new("Annotations folder unavailable", "Restart dictate.").because(e))?
+        .join(annotate::FOLDER))
+}
+
+fn annotation_folder(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    annotate::session_folder(&annotations_dir(app)?, id)
+        .filter(|folder| folder.is_dir())
+        .ok_or_else(|| format!("No annotation {id}"))
+}
+
+#[tauri::command]
+fn list_annotations(app: AppHandle) -> Result<Vec<annotate::AnnotationEntry>, String> {
+    annotate::list(&annotations_dir(&app)?).map_err(|e| format!("Read annotations: {e}"))
+}
+
+#[tauri::command]
+fn reveal_annotation(app: AppHandle, id: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let folder = annotation_folder(&app, &id)?;
+    app.opener()
+        .reveal_item_in_dir(folder.join(annotate::SUMMARY_FILE))
+        .map_err(|e| e.to_string())
+}
+
+/// History's "Copy again": the session's summary, as at stop.
+#[tauri::command]
+fn copy_annotation(app: AppHandle, id: String) -> Result<(), String> {
+    let folder = annotation_folder(&app, &id)?;
+    let summary = std::fs::read_to_string(folder.join(annotate::SUMMARY_FILE))
+        .map_err(|e| format!("Read summary: {e}"))?;
+    clipboard::copy_text(&summary)?;
+    notify_copied(&app);
+    Ok(())
+}
+
+/// The floating bar's "Copy image": the contact sheet of the session that
+/// just finished.
+#[tauri::command]
+fn annotate_copy_image(app: AppHandle) -> Result<(), String> {
+    let sheet = annotate_ui::copied_contact_sheet(&app).ok_or("This annotation has no images")?;
+    clipboard::copy_png(&sheet)
+}
+
+#[tauri::command]
+fn annotate_dismiss(app: AppHandle) {
+    annotate_ui::dismiss(&app);
+}
+
+#[tauri::command]
+fn screen_permission() -> bool {
+    screen::has_permission()
+}
+
+/// Asks once (which lists dictate under Screen Recording), then opens that
+/// pane of System Settings.
+#[tauri::command]
+fn open_screen_recording_settings(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !screen::has_permission() {
+        screen::request_permission();
     }
+    app.opener()
+        .open_url(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            None::<&str>,
+        )
+        .map_err(|e| e.to_string())
+}
+
+fn annotate_shortcut_taken() -> Problem {
+    Problem::new(
+        "Annotate shortcut unavailable",
+        "Choose another in Settings › Annotate, or quit the app that uses it.",
+    )
 }
 
 const ANNOTATE_SHORTCUT_CLASH: &str =
@@ -1346,6 +1553,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
@@ -1373,6 +1581,13 @@ pub fn run() {
             annotate_pen_down,
             annotate_pen_up,
             annotate_stop,
+            annotate_copy_image,
+            annotate_dismiss,
+            list_annotations,
+            reveal_annotation,
+            copy_annotation,
+            screen_permission,
+            open_screen_recording_settings,
             report_settings_refresh_error,
             list_history,
             delete_history,
@@ -1441,25 +1656,20 @@ pub fn run() {
                 }
             };
             let annotate_registered = match settings.annotate_chord() {
+                _ if !settings.annotate_enabled => Ok(false),
                 Ok(chord) if settings.chord().ok() == Some(chord) => Err(Problem::new(
                     "Annotate shortcut unavailable",
                     ANNOTATE_SHORTCUT_CLASH,
                 )),
-                Ok(chord) => app.global_shortcut().register(chord).map_err(|error| {
-                    Problem::new(
-                        "Annotate shortcut unavailable",
-                        "Quit the app that uses ⌥ ⇧ S, then reopen dictate.",
-                    )
-                    .because(error)
-                }),
-                Err(error) => Err(Problem::new(
-                    "Annotate shortcut unavailable",
-                    "Quit the app that uses ⌥ ⇧ S, then reopen dictate.",
-                )
-                .because(error)),
+                Ok(chord) => app
+                    .global_shortcut()
+                    .register(chord)
+                    .map(|()| true)
+                    .map_err(|error| annotate_shortcut_taken().because(error)),
+                Err(error) => Err(annotate_shortcut_taken().because(error)),
             };
             let annotate_registered = match annotate_registered {
-                Ok(()) => true,
+                Ok(registered) => registered,
                 Err(problem) => {
                     startup_error = Some(match startup_error {
                         Some(previous) => previous.and(problem),
@@ -1683,6 +1893,53 @@ mod take_tests {
         fn persist(&self, settings: &Settings) -> Result<(), String> {
             settings::save(&self.path, settings)
         }
+    }
+
+    #[test]
+    fn annotate_toggle_and_shortcut_change_what_is_registered() {
+        let dir = tempfile::tempdir().unwrap();
+        let platform = TestSettingsPlatform {
+            path: dir.path().join("settings.json"),
+            login: std::cell::Cell::new(false),
+            device_checks: std::cell::Cell::new(0),
+            registered: std::cell::RefCell::new(Vec::new()),
+        };
+        let mut runtime = unavailable_shortcut();
+        let s = Settings::default().annotate_chord().unwrap();
+        platform.register(s).unwrap();
+        runtime.annotate_registered = true;
+
+        let off = Settings {
+            annotate_enabled: false,
+            ..runtime.settings.clone()
+        };
+        assert!(runtime.save_settings(off.clone(), &platform).unwrap());
+        assert!(platform.registered.borrow().is_empty());
+        assert!(!runtime.annotate_registered);
+
+        let moved = Settings {
+            annotate_enabled: true,
+            annotate_shortcut: "Control+Shift+KeyA".into(),
+            ..off
+        };
+        assert!(runtime.save_settings(moved.clone(), &platform).unwrap());
+        assert_eq!(
+            platform.registered.borrow().as_slice(),
+            &[moved.annotate_chord().unwrap()]
+        );
+        assert!(runtime.annotate_registered);
+        assert_eq!(settings::load(&platform.path).unwrap(), moved);
+
+        runtime.annotate = annotate::Phase::Recording;
+        let during = Settings {
+            annotate_show_in_recordings: true,
+            ..moved.clone()
+        };
+        assert_eq!(
+            runtime.save_settings(during, &platform).unwrap_err(),
+            "Stop Annotate before changing settings"
+        );
+        assert_eq!(runtime.settings, moved);
     }
 
     #[test]

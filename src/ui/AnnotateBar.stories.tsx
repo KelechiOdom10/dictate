@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
-import { AnnotateBar } from "./AnnotateBar";
+import { AnnotateBar, AnnotateCopiedBar } from "./AnnotateBar";
 
 const meta = {
   title: "Components/AnnotateBar",
@@ -68,5 +68,65 @@ export const TogglePen: Story = {
     await expect(
       bar.getByRole("button", { name: "Stop drawing (Esc)" }),
     ).toHaveAttribute("aria-pressed", "true");
+  },
+};
+
+const barSize = { width: 168, height: 44 };
+
+function CopiedDemo() {
+  const [imageCopied, setImageCopied] = useState(false);
+  const [closed, setClosed] = useState(false);
+  if (closed) return <p>Closed</p>;
+  return (
+    <div className="story-annotate-bar" style={barSize}>
+      <AnnotateCopiedBar
+        hasImage
+        imageCopied={imageCopied}
+        onCopyImage={() => setImageCopied(true)}
+        onClose={() => setClosed(true)}
+      />
+    </div>
+  );
+}
+
+export const Copied: Story = {
+  name: "Copied / with image",
+  render: () => <CopiedDemo />,
+  play: async ({ canvasElement }) => {
+    const bar = within(canvasElement);
+    await expect(bar.getByRole("status")).toHaveTextContent("Copied");
+    const toolbar = bar.getByRole("toolbar", { name: "Annotation" });
+    await expect(toolbar.scrollWidth).toBeLessThanOrEqual(toolbar.clientWidth);
+  },
+};
+
+export const CopyImageAndClose: Story = {
+  name: "Copied / copy image, then close",
+  render: () => <CopiedDemo />,
+  play: async ({ canvasElement }) => {
+    const bar = within(canvasElement);
+    await userEvent.click(bar.getByRole("button", { name: "Copy image" }));
+    await expect(bar.getByRole("status")).toHaveTextContent("Image copied");
+    await userEvent.click(bar.getByRole("button", { name: "Close" }));
+    await expect(bar.getByText("Closed")).toBeInTheDocument();
+  },
+};
+
+export const CopiedWithoutImage: Story = {
+  name: "Copied / no frames",
+  render: () => (
+    <div className="story-annotate-bar" style={barSize}>
+      <AnnotateCopiedBar
+        hasImage={false}
+        imageCopied={false}
+        onCopyImage={fn()}
+        onClose={fn()}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const bar = within(canvasElement);
+    await expect(bar.queryByRole("button", { name: "Copy image" })).toBeNull();
+    await expect(bar.getByRole("button", { name: "Close" })).toBeVisible();
   },
 };

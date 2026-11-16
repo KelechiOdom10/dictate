@@ -7,7 +7,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Check, Copy, Trash2 } from "lucide-react";
+import { Check, Copy, FolderOpen, Trash2 } from "lucide-react";
 import {
   deleteHistory,
   entryTitle,
@@ -35,9 +35,19 @@ import {
   IconButton,
   KeyboardShortcut,
   SearchField,
+  SegmentedControl,
   Select,
   SelectList,
 } from "./ui";
+import {
+  annotationMeta,
+  annotationTitle,
+  clock,
+  copyAnnotation,
+  readAnnotations,
+  revealAnnotation,
+  type AnnotationEntry,
+} from "./annotations";
 
 type Filter = "all" | TakeStatus;
 type Retention = Settings["historyRetention"];
@@ -71,7 +81,31 @@ function useNow() {
   return now;
 }
 
-export default function HistoryPage() {
+const views = [
+  { value: "dictations", label: "Dictations" },
+  { value: "annotations", label: "Annotations" },
+];
+
+export default function HistoryPage({
+  initialView = "dictations",
+}: {
+  initialView?: "dictations" | "annotations";
+}) {
+  const [view, setView] = useState<string>(initialView);
+  return (
+    <div className="history">
+      <SegmentedControl
+        label="Show"
+        options={views}
+        value={view}
+        onChange={setView}
+      />
+      {view === "annotations" ? <Annotations /> : <Dictations />}
+    </div>
+  );
+}
+
+function Dictations() {
   const client = useQueryClient();
   const now = useNow();
   const [search, setSearch] = useState("");
@@ -181,22 +215,22 @@ export default function HistoryPage() {
 
   if (history.isPending)
     return (
-      <div className="history">
+      <>
         {toolbar}
         <div className="loading" role="status">
           Loading your history…
         </div>
-      </div>
+      </>
     );
   if (history.isError)
     return (
-      <div className="history">
+      <>
         {toolbar}
         <div className="notice" role="alert">
           <p>{String(history.error)}</p>
           <Button onClick={() => void history.refetch()}>Try again</Button>
         </div>
-      </div>
+      </>
     );
 
   const nothingYet = !query && history.data.entries.length === 0;
@@ -215,7 +249,7 @@ export default function HistoryPage() {
     </div>
   );
   return (
-    <div className="history">
+    <>
       {toolbar}
       {!nothingYet && (
         <FilterChips
@@ -293,7 +327,7 @@ export default function HistoryPage() {
           />
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -404,6 +438,169 @@ function Detail({
             : "No words were heard, so nothing was pasted."}
         </p>
       )}
+    </DetailPanel>
+  );
+}
+
+function Annotations() {
+  const client = useQueryClient();
+  const now = useNow();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const annotations = useQuery({
+    queryKey: ["annotations"],
+    queryFn: readAnnotations,
+  });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+
+  useEffect(() => {
+    const subscription = listen("annotations-changed", () => {
+      void client.invalidateQueries({ queryKey: ["annotations"] });
+    });
+    return () => {
+      void subscription.then((stop) => stop()).catch(console.error);
+    };
+  }, [client]);
+
+  if (annotations.isPending)
+    return (
+      <div className="loading" role="status">
+        Loading your annotations…
+      </div>
+    );
+  if (annotations.isError)
+    return (
+      <div className="notice" role="alert">
+        <p>{String(annotations.error)}</p>
+        <Button onClick={() => void annotations.refetch()}>Try again</Button>
+      </div>
+    );
+  const entries = annotations.data;
+  const selected =
+    entries.find((entry) => entry.id === selectedId) ?? entries[0];
+  if (!selected)
+    return (
+      <EmptyState title="No annotations yet">
+        {settings.data ? (
+          <>
+            Tap <KeyboardShortcut value={settings.data.annotateShortcut} /> to
+            record your screen, draw and talk. Each session appears here.
+          </>
+        ) : (
+          "Each Annotate session appears here."
+        )}
+      </EmptyState>
+    );
+  return (
+    <>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="history-split">
+        <div className="history-list">
+          <SelectList
+            label="Annotations"
+            items={entries.map((entry) => ({
+              id: entry.id,
+              title: annotationTitle(entry),
+              meta: annotationMeta(entry),
+              date: relativeTime(Date.parse(entry.startedAt), now),
+            }))}
+            value={selected.id}
+            onChange={setSelectedId}
+          />
+        </div>
+        <AnnotationDetail
+          key={selected.id}
+          entry={selected}
+          now={now}
+          onError={setError}
+        />
+      </div>
+    </>
+  );
+}
+
+function AnnotationDetail({
+  entry,
+  now,
+  onError,
+}: {
+  entry: AnnotationEntry;
+  now: number;
+  onError: (error: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const reset = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(reset.current), []);
+  const started = Date.parse(entry.startedAt);
+  async function copy() {
+    onError("");
+    try {
+      await copyAnnotation(entry.id);
+      setCopied(true);
+      clearTimeout(reset.current);
+      reset.current = setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      onError(String(e));
+    }
+  }
+  async function reveal() {
+    onError("");
+    try {
+      await revealAnnotation(entry.id);
+    } catch (e) {
+      onError(String(e));
+    }
+  }
+  return (
+    <DetailPanel
+      title="Annotation"
+      subtitle={`${relativeTime(started, now)} · ${fullDate.format(started)}`}
+      metadata={[
+        { label: "Application", value: entry.app ?? "Unknown" },
+        { label: "Length", value: clock(entry.durationMs) },
+        { label: "Marks", value: entry.marks.toLocaleString() },
+        {
+          label: "Frames",
+          value: entry.hasContactSheet
+            ? `${entry.frames.toLocaleString()} with a contact sheet`
+            : "None",
+        },
+        {
+          label: "Stop to package",
+          value:
+            entry.packagingMs === null
+              ? "Not recorded"
+              : formatSeconds(entry.packagingMs),
+        },
+        { label: "Folder", value: entry.folder },
+      ]}
+    >
+      {entry.text ? (
+        <p>{entry.text}</p>
+      ) : (
+        <p className="ui-preview">Nothing was said in this session.</p>
+      )}
+      <div className="ui-actions annotation-actions">
+        <Button size="sm" onClick={() => void copy()}>
+          {copied ? (
+            <Check size={16} aria-hidden="true" />
+          ) : (
+            <Copy size={16} aria-hidden="true" />
+          )}
+          {copied ? "Copied" : "Copy again"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void reveal()}>
+          <FolderOpen size={16} aria-hidden="true" />
+          Reveal in Finder
+        </Button>
+        <span className="sr-only" role="status">
+          {copied ? "Summary copied to clipboard" : ""}
+        </span>
+      </div>
     </DetailPanel>
   );
 }

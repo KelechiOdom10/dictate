@@ -23,6 +23,13 @@ const historyReady = {
     page
       .locator(".ui-detail", { hasText: "Then hand it to review." })
       .waitFor(),
+  "pages--history-annotations": (page) =>
+    page
+      .locator(".ui-detail", { hasText: "with a contact sheet" })
+      .and(page.locator(".ui-detail", { hasText: "This toggle" }))
+      .waitFor(),
+  "pages--history-annotations-empty": (page) =>
+    page.getByRole("heading", { name: "No annotations yet" }).waitFor(),
   "pages--history-no-matches": (page) =>
     page.getByRole("heading", { name: "No matches for “zebra”" }).waitFor(),
 };
@@ -47,6 +54,13 @@ const settingsReady = {
     page.locator("#mic-warm:checked:enabled").waitFor(),
   "pages--about": (page) =>
     page.locator("output#version", { hasText: "0.1.0" }).waitFor(),
+  "pages--annotate": (page) =>
+    page
+      .getByText("Allowed", { exact: true })
+      .and(page.locator("output"))
+      .waitFor(),
+  "pages--annotate-not-allowed": (page) =>
+    page.getByText("Not allowed", { exact: true }).waitFor(),
   "pages--general-no-model": (page) =>
     page.getByRole("button", { name: "Download a model" }).waitFor(),
 };

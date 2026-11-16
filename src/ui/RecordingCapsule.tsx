@@ -3,7 +3,6 @@ import {
   Check,
   CircleAlert,
   ClipboardCheck,
-  FolderCheck,
   LoaderCircle,
   Mic,
   MicOff,
@@ -42,7 +41,6 @@ export type RecordingState =
   | { kind: "recording"; seconds: number; level?: number }
   | { kind: "annotating"; seconds: number }
   | { kind: "packaging" }
-  | { kind: "annotated" }
   | { kind: "transcribing" }
   | { kind: "done" }
   | { kind: "copied" }
@@ -66,8 +64,7 @@ export function RecordingCapsule({
     copied: "Copied to clipboard",
     skipped: "No speech captured",
     annotating: "Annotating",
-    packaging: "Saving annotation…",
-    annotated: "Annotation saved",
+    packaging: "Packaging…",
   };
   const icons: Record<RecordingState["kind"], ReactNode> = {
     ready: <Mic size={18} />,
@@ -78,7 +75,6 @@ export function RecordingCapsule({
     skipped: <MicOff size={18} />,
     annotating: <span className="ui-record-dot" />,
     packaging: <LoaderCircle size={18} className="ui-spin" />,
-    annotated: <FolderCheck size={18} />,
     error: <CircleAlert size={18} />,
   };
   return (

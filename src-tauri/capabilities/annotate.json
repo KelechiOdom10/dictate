@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "annotate-panels",
+  "description": "Annotate's ink panel and floating bar: core defaults and events only. They call dictate's own annotate_* commands, never a plugin.",
+  "windows": [
+    "ink",
+    "annotate-bar"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

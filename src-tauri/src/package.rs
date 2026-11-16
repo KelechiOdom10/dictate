@@ -84,6 +84,10 @@ pub struct Annotation {
     pub frames: Vec<Frame>,
     pub contact_sheet: String,
     pub missing_permissions: Vec<String>,
+    /// Stop tap to finished package (video finalised, transcript, frames and
+    /// contact sheet), in ms. Written by the session; `build` leaves it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packaging_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -274,6 +278,7 @@ pub fn build(session: Session) -> Annotation {
         frames,
         contact_sheet: CONTACT_SHEET.to_string(),
         missing_permissions: session.missing_permissions,
+        packaging_ms: None,
     }
 }
 
@@ -384,9 +389,22 @@ pub fn summary(annotation: &Annotation, folder: &Path) -> String {
     header.push(folder.display().to_string());
 
     let mut out = format!("[{}]\n", header.join(" · "));
-    out.push_str(&format!(
-        "Open {CONTACT_SHEET} and frames/ in that folder first: the marks only make sense on the images.\n"
-    ));
+    if let (Some(first), Some(last)) = (annotation.frames.first(), annotation.frames.last()) {
+        let path = |file: &str| folder.join(file).display().to_string();
+        out.push_str(&format!(
+            "Before you answer, open {}: every frame below, numbered, with the ink drawn in. The marks only make sense on the images.\n",
+            path(&annotation.contact_sheet)
+        ));
+        let range = if first.n == last.n {
+            path(&first.file)
+        } else {
+            let last_name = Path::new(&last.file)
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            format!("{} … {last_name}", path(&first.file))
+        };
+        out.push_str(&format!("Each frame on its own: {range}.\n"));
+    }
     out.push_str(
         "Positions are fractions of the screen, x left→right, y top→bottom. Full data: annotation.json.\n",
     );
@@ -411,6 +429,9 @@ pub fn summary(annotation: &Annotation, folder: &Path) -> String {
         }
         out.push_str(&line);
         out.push('\n');
+    }
+    if annotation.frames.is_empty() && !annotation.transcript.text.is_empty() {
+        out.push_str(&format!("Said: “{}”\n", annotation.transcript.text));
     }
     out
 }
@@ -1053,7 +1074,8 @@ mod tests {
             summary(&annotation, Path::new(EXAMPLE_FOLDER)),
             "\
 [annotation 0:31 · System Settings · /Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36]
-Open contact-sheet.png and frames/ in that folder first: the marks only make sense on the images.
+Before you answer, open /Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36/contact-sheet.png: every frame below, numbered, with the ink drawn in. The marks only make sense on the images.
+Each frame on its own: /Users/me/Library/Application Support/com.kelechiodom.dictate/annotations/2026-11-14_14-56-36/frames/frame-01.png … frame-03.png.
 Positions are fractions of the screen, x left→right, y top→bottom. Full data: annotation.json.
 - #1 (0:08) circled region x 0.62–0.91, y 0.18–0.33 (3 strokes) — “Here is the settings page. This toggle should be on the right.”
 - #2 (0:21) circled region x 0.20–0.74, y 0.18–0.70; stroke across x 0.80–0.95, y 0.75–0.76 — “And this list is too dense.”
@@ -1118,6 +1140,27 @@ Positions are fractions of the screen, x left→right, y top→bottom. Full data
         );
         let back: Annotation = serde_json::from_value(value).unwrap();
         assert_eq!(back, annotation);
+    }
+
+    #[test]
+    fn a_summary_without_frames_points_at_no_images() {
+        let mut annotation = build(example_session());
+        annotation.frames.clear();
+        let text = summary(&annotation, Path::new("/tmp/a"));
+        assert!(!text.contains("contact-sheet.png"), "{text}");
+        assert!(!text.contains("frames/"), "{text}");
+        assert!(text.ends_with(&format!("Said: “{}”\n", annotation.transcript.text)));
+    }
+
+    #[test]
+    fn a_single_frame_is_named_on_its_own() {
+        let mut annotation = build(example_session());
+        annotation.frames.truncate(1);
+        let text = summary(&annotation, Path::new("/tmp/a"));
+        assert!(
+            text.contains("Each frame on its own: /tmp/a/frames/frame-01.png.\n"),
+            "{text}"
+        );
     }
 
     #[test]

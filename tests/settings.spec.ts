@@ -78,6 +78,8 @@ async function openSettings(
         soundFeedback: false,
         debugRecordings: false,
         annotateShortcut: "Alt+Shift+KeyS",
+        annotateEnabled: true,
+        annotateShowInRecordings: false,
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
         value: { unregisterListener: () => {} },
@@ -321,6 +323,8 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           soundFeedback: false,
           debugRecordings: false,
           annotateShortcut: "Alt+Shift+KeyS",
+          annotateEnabled: true,
+          annotateShowInRecordings: false,
         },
       },
       "*",
@@ -495,6 +499,8 @@ test("overlay applies appearance events live, including System changes", async (
                 soundFeedback: false,
                 debugRecordings: false,
                 annotateShortcut: "Alt+Shift+KeyS",
+                annotateEnabled: true,
+                annotateShowInRecordings: false,
               },
             },
             "*",
@@ -552,7 +558,7 @@ test("overlay renders live level, resets its timer and keeps terminal states dis
   await expect(page.getByRole("status")).toContainText("Hold the shortcut");
 });
 
-test("overlay shows an Annotate session, its blocked-dictation notice and the save", async ({
+test("overlay shows an Annotate session, its blocked-dictation notice and packaging", async ({
   page,
 }) => {
   await openSettings(page, { overlay: true });
@@ -580,10 +586,8 @@ test("overlay shows an Annotate session, its blocked-dictation notice and the sa
   );
   await page.screenshot({ path: "target/overlay-annotate-blocked.png" });
   await state("packaging");
-  await expect(page.getByRole("status")).toHaveText("Saving annotation…");
+  await expect(page.getByRole("status")).toHaveText("Packaging…");
   await expect(page.locator(".ui-timer")).toHaveCount(0);
-  await state("annotated");
-  await expect(page.getByRole("status")).toHaveText("Annotation saved");
 });
 
 test("invalid appearance events show a recoverable overlay error", async ({
@@ -638,6 +642,8 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 soundFeedback: false,
                 debugRecordings: false,
                 annotateShortcut: "Alt+Shift+KeyS",
+                annotateEnabled: true,
+                annotateShowInRecordings: false,
               },
             },
             "*",
@@ -656,7 +662,6 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
         "skipped",
         "annotating",
         "packaging",
-        "annotated",
         "error",
       ]) {
         await page.evaluate(

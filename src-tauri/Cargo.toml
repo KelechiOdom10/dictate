@@ -38,6 +38,7 @@ rusqlite = { version = "0.42.0", features = ["bundled"] }
 ureq = "3"
 sha2 = "0.10"
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+tauri-plugin-notification = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

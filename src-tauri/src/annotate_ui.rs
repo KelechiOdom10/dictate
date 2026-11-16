@@ -5,6 +5,8 @@
 //! - `ink`: a transparent, click-through panel over the recorded display. It
 //!   draws the ink and, in pen mode only, takes the mouse.
 //! - `annotate-bar`: the floating bar with the timer, pen and stop buttons.
+//!   After a session it comes back for a few seconds as "Copied", with
+//!   "Copy image" for the contact sheet.
 //!
 //! Both are non-activating `NSPanel`s (`tauri-nspanel`, as in spike #13) that
 //! can never become key, so clicking or drawing on them never activates
@@ -13,7 +15,10 @@
 //! Nothing here sends input to other apps. The pointer is read with
 //! `CGEvent::location` on a fresh event object that is never posted.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -30,6 +35,8 @@ pub const BAR: &str = "annotate-bar";
 /// The backstop checks pen mode this often, so it ends at most this long
 /// after `ink::PEN_TIMEOUT_MS`.
 const BACKSTOP_TICK: Duration = Duration::from_millis(500);
+/// How long the bar stays up as "Copied" after a session.
+pub const COPIED_VISIBLE: Duration = Duration::from_secs(8);
 
 mod panel {
     tauri_nspanel::tauri_panel! {
@@ -59,6 +66,38 @@ impl Live {
 #[derive(Default)]
 pub struct State(Mutex<Option<Live>>);
 
+/// The pen states to put on screen, in the order the ink decided them.
+/// One thread (`apply_pens`) owns click-through and the Esc registration,
+/// so no two callers can interleave them and leave the overlay blocking
+/// clicks with pen mode off.
+struct PenQueue(Mutex<Sender<Pen>>);
+
+/// Queues `pen`. Callers hold the `State` lock, so the queue order is the
+/// order the ink changed.
+fn queue_pen(app: &AppHandle, pen: Pen) {
+    let queue = app.state::<PenQueue>();
+    let sender = queue.0.lock().unwrap_or_else(|e| e.into_inner());
+    if sender.send(pen).is_err() {
+        log::warn!("[annotate] pen thread gone");
+    }
+}
+
+/// The package that just finished, while the bar shows "Copied". `id` tells
+/// the hide timer whether a newer one replaced it.
+struct Copied {
+    id: u64,
+    contact_sheet: Option<PathBuf>,
+}
+
+#[derive(Default)]
+struct CopiedState(Mutex<Option<Copied>>);
+
+fn with_copied<T>(app: &AppHandle, f: impl FnOnce(&mut Option<Copied>) -> T) -> T {
+    let state = app.state::<CopiedState>();
+    let mut copied = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut copied)
+}
+
 fn with_live<T>(app: &AppHandle, f: impl FnOnce(&mut Live) -> T) -> Option<T> {
     let state = app.state::<State>();
     let mut live = state.0.lock().unwrap_or_else(|e| e.into_inner());
@@ -73,19 +112,85 @@ pub struct BarState {
     /// Unix ms of the start tap, for the bar's own timer.
     pub started_at_ms: i64,
     pub pen: bool,
+    /// The session finished and its summary is on the clipboard.
+    pub copied: bool,
+    /// The finished session has a contact sheet to copy.
+    pub has_image: bool,
 }
 
 pub fn bar_state(app: &AppHandle) -> BarState {
+    let idle = BarState {
+        recording: false,
+        started_at_ms: 0,
+        pen: false,
+        copied: false,
+        has_image: false,
+    };
     with_live(app, |live| BarState {
         recording: true,
         started_at_ms: live.started_at_ms,
         pen: !live.ink.pen().click_through(),
+        ..idle.clone()
     })
-    .unwrap_or(BarState {
-        recording: false,
-        started_at_ms: 0,
-        pen: false,
+    .or_else(|| {
+        with_copied(app, |copied| {
+            copied.as_ref().map(|copied| BarState {
+                copied: true,
+                has_image: copied.contact_sheet.is_some(),
+                ..idle.clone()
+            })
+        })
     })
+    .unwrap_or(idle)
+}
+
+/// A session's package is on the clipboard: bring the bar back as "Copied"
+/// for `COPIED_VISIBLE`, where it last stood.
+pub fn show_copied(app: &AppHandle, contact_sheet: Option<PathBuf>) {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    with_copied(app, |copied| *copied = Some(Copied { id, contact_sheet }));
+    emit_bar(app);
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        if let Ok(panel) = handle.get_webview_panel(BAR) {
+            panel.order_front_regardless();
+        }
+    }) {
+        log::warn!("[annotate] show copied: {error}");
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(COPIED_VISIBLE);
+        if with_copied(&app, |copied| copied.as_ref().is_some_and(|c| c.id == id)) {
+            dismiss(&app);
+        }
+    });
+}
+
+pub fn copied_contact_sheet(app: &AppHandle) -> Option<PathBuf> {
+    with_copied(app, |copied| {
+        copied
+            .as_ref()
+            .and_then(|copied| copied.contact_sheet.clone())
+    })
+}
+
+/// Hides the "Copied" bar. Never hides the bar of a session that records.
+pub fn dismiss(app: &AppHandle) {
+    with_copied(app, |copied| *copied = None);
+    if with_live(app, |_| ()).is_some() {
+        return;
+    }
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        if let Ok(panel) = handle.get_webview_panel(BAR) {
+            panel.hide();
+        }
+    }) {
+        log::warn!("[annotate] hide copied: {error}");
+    }
+    emit_bar(app);
 }
 
 pub fn escape() -> Shortcut {
@@ -105,6 +210,11 @@ pub fn pointer() -> Option<(f64, f64)> {
 /// which is where the spike converted its window.
 pub fn setup(app: &App) -> tauri::Result<()> {
     app.manage(State::default());
+    let (pens, queued) = mpsc::channel();
+    app.manage(PenQueue(Mutex::new(pens)));
+    let handle = app.handle().clone();
+    std::thread::spawn(move || apply_pens(handle, queued));
+    app.manage(CopiedState::default());
     let handle = app.handle();
     for (label, query, level) in [(INK, "ink", 1000), (BAR, "annotate-bar", 1001)] {
         let window = WebviewWindowBuilder::new(
@@ -144,6 +254,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
 /// A session started: cover `display` with the ink panel, put the bar on it,
 /// and start the pointer poll.
 pub fn begin(app: &AppHandle, display: Display, clock: Instant, started_at_ms: i64) {
+    with_copied(app, |copied| *copied = None);
     let frame = display.frame.clone();
     *app.state::<State>()
         .0
@@ -187,21 +298,15 @@ pub fn begin(app: &AppHandle, display: Display, clock: Instant, started_at_ms: i
 /// The session stopped: every stroke, with pen mode off, Esc released and
 /// both panels hidden.
 pub fn end(app: &AppHandle) -> Vec<Stroke> {
-    let live = app
-        .state::<State>()
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    let strokes = match live {
-        Some(live) => {
+    let strokes = {
+        let state = app.state::<State>();
+        let mut live = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        let strokes = live.take().map(|live| {
             let now = live.now();
-            let pen = live.ink.pen();
-            let strokes = live.ink.finish(now);
-            apply_pen(app, pen, Pen::Off);
-            strokes
-        }
-        None => Vec::new(),
+            live.ink.finish(now)
+        });
+        queue_pen(app, Pen::Off);
+        strokes.unwrap_or_default()
     };
     let handle = app.clone();
     let hidden = app.run_on_main_thread(move || {
@@ -248,6 +353,10 @@ pub fn released(app: &AppHandle) -> bool {
             emit(app, INK, "ink-end", id);
             false
         }
+        Some(Release::Shadowed { id }) => {
+            emit(app, INK, "ink-discard", id);
+            false
+        }
         Some(Release::Nothing) | None => false,
     }
 }
@@ -275,12 +384,16 @@ pub fn pen_up(app: &AppHandle) {
     }
 }
 
-/// The pen button, Esc, or the backstop's tick.
+/// The pen button, Esc, or the backstop's tick. The new state is queued for
+/// `apply_pens` while the state lock is still held.
 pub fn pen(app: &AppHandle, input: impl FnOnce(u64) -> PenInput) {
     let Some((before, after, closed)) = with_live(app, |live| {
         let now = live.now();
         let before = live.ink.pen();
         let (after, closed) = live.ink.set_pen(input(now), now);
+        if after != before {
+            queue_pen(app, after);
+        }
         (before, after, closed)
     }) else {
         return;
@@ -288,7 +401,6 @@ pub fn pen(app: &AppHandle, input: impl FnOnce(u64) -> PenInput) {
     if let Some(id) = closed {
         emit(app, INK, "ink-end", id);
     }
-    apply_pen(app, before, after);
     if let Pen::On { since_ms } = after
         && before.click_through()
     {
@@ -297,32 +409,38 @@ pub fn pen(app: &AppHandle, input: impl FnOnce(u64) -> PenInput) {
     }
 }
 
-/// Makes the windows and Esc match the pen state. Called without the state
-/// lock held, because the window and shortcut calls wait on the main thread.
-fn apply_pen(app: &AppHandle, before: Pen, after: Pen) {
-    if before.click_through() != after.click_through()
-        && let Some(window) = app.get_webview_window(INK)
-        && let Err(error) = window.set_ignore_cursor_events(after.click_through())
-    {
-        log::warn!("[annotate] click-through: {error}");
-    }
-    if before.wants_escape() != after.wants_escape() {
-        let shortcuts = app.global_shortcut();
-        let result = if after.wants_escape() {
-            shortcuts.register(escape())
-        } else {
-            shortcuts.unregister(escape())
-        };
-        if let Err(error) = result {
-            log::warn!("[annotate] Esc: {error}");
+/// The only caller of the click-through and Esc calls. Each queued pen state
+/// is compared with what is on screen, so a repeated or stale state changes
+/// nothing. These calls wait on the main thread, which is why they run here
+/// and not under the `State` lock.
+fn apply_pens(app: AppHandle, queued: mpsc::Receiver<Pen>) {
+    let mut shown = Pen::Off;
+    for pen in queued {
+        if pen.click_through() != shown.click_through()
+            && let Some(window) = app.get_webview_window(INK)
+            && let Err(error) = window.set_ignore_cursor_events(pen.click_through())
+        {
+            log::warn!("[annotate] click-through: {error}");
         }
-    }
-    if before != after {
-        log::info!(
-            "[annotate] pen {}",
-            if after.click_through() { "off" } else { "on" }
-        );
-        emit_bar(app);
+        if pen.wants_escape() != shown.wants_escape() {
+            let shortcuts = app.global_shortcut();
+            let result = if pen.wants_escape() {
+                shortcuts.register(escape())
+            } else {
+                shortcuts.unregister(escape())
+            };
+            if let Err(error) = result {
+                log::warn!("[annotate] Esc: {error}");
+            }
+        }
+        if pen.click_through() != shown.click_through() {
+            log::info!(
+                "[annotate] pen {}",
+                if pen.click_through() { "off" } else { "on" }
+            );
+        }
+        shown = pen;
+        emit_bar(&app);
     }
 }
 
