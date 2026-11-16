@@ -1198,6 +1198,99 @@ That is everything for this page, thank you.";
     const FOX: &str = "The quick brown fox jumps over the lazy dog.";
 
     #[test]
+    fn parakeet_decodes_speech_below_the_former_dictation_gate() {
+        let _turn = transcription_turn();
+        let Some(samples) = parakeet_speech("quiet Parakeet", FOX) else {
+            return;
+        };
+        let model = parakeet_model();
+        let rms = (samples.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>()
+            / samples.len() as f64)
+            .sqrt();
+        for target in [0.002295, 0.000239, 0.000075] {
+            let gain = (target / rms) as f32;
+            let quiet: Vec<f32> = samples.iter().map(|s| s * gain).collect();
+            assert_eq!(
+                spoken_words(&transcribe(&quiet, &model).unwrap()),
+                spoken_words(FOX)
+            );
+        }
+        held::unload();
+    }
+
+    #[test]
+    fn parakeet_streams_speech_below_the_former_dictation_gate() {
+        let _turn = transcription_turn();
+        let Some(samples) = parakeet_speech("quiet streamed Parakeet", MEMO) else {
+            return;
+        };
+        let model = parakeet_model();
+        let baseline = transcribe(&samples, &model).unwrap();
+        let rms = (samples.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>()
+            / samples.len() as f64)
+            .sqrt();
+        for target in [0.002295, 0.000075] {
+            let gain = (target / rms) as f32;
+            let quiet: Vec<f32> = samples.iter().map(|s| s * gain).collect();
+            let (text, decoded, _) = paced_take(&quiet, &model, Duration::ZERO);
+            assert_eq!(decoded, Decoded::Streamed);
+            assert_eq!(spoken_words(&text), spoken_words(&baseline));
+        }
+        held::unload();
+    }
+
+    #[test]
+    #[ignore = "Measures an existing real-speech WAV without printing its transcript"]
+    fn measure_real_speech_levels() {
+        let _turn = transcription_turn();
+        let path = std::env::var_os("DICTATE_SPEECH_WAV").expect("set DICTATE_SPEECH_WAV");
+        let mut reader = hound::WavReader::open(path).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16_000);
+        assert_eq!(reader.spec().channels, 1);
+        let samples: Vec<f32> = match reader.spec().sample_format {
+            hound::SampleFormat::Float => reader.samples::<f32>().map(Result::unwrap).collect(),
+            hound::SampleFormat::Int => {
+                let scale = 2_f32.powi(i32::from(reader.spec().bits_per_sample) - 1);
+                reader
+                    .samples::<i32>()
+                    .map(|s| s.unwrap() as f32 / scale)
+                    .collect()
+            }
+        };
+        let rms = |audio: &[f32]| {
+            (audio.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / audio.len() as f64).sqrt()
+        };
+        let speech = samples
+            .chunks(5 * SAMPLE_RATE)
+            .filter(|chunk| chunk.len() == 5 * SAMPLE_RATE)
+            .max_by(|a, b| rms(a).total_cmp(&rms(b)))
+            .expect("at least five seconds");
+        let model = parakeet_model();
+        let baseline = transcribe(speech, &model).unwrap();
+        assert!(!baseline.trim().is_empty());
+        println!(
+            "real_speech ms={} rms={:.6} words={}",
+            speech.len() / 16,
+            rms(speech),
+            word_count(&baseline)
+        );
+        for target in [0.002295, 0.000239, 0.000075] {
+            let gain = (target / rms(speech)) as f32;
+            let quiet: Vec<f32> = speech.iter().map(|s| s * gain).collect();
+            let text = transcribe(&quiet, &model).unwrap();
+            println!(
+                "scaled_real_speech rms={:.6} words={} same_words={}",
+                rms(&quiet),
+                word_count(&text),
+                spoken_words(&text) == spoken_words(&baseline)
+            );
+        }
+        let silence = transcribe(&vec![0.0; 5 * SAMPLE_RATE], &model).unwrap();
+        println!("digital_silence words={}", word_count(&silence));
+        held::unload();
+    }
+
+    #[test]
     fn gguf_files_run_in_process_and_the_rest_through_whisper_cli() {
         assert_eq!(engine(Path::new("/m/parakeet.gguf")), Engine::InProcess);
         assert_eq!(engine(Path::new("/m/ggml-base.en.bin")), Engine::WhisperCli);

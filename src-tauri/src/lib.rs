@@ -474,20 +474,26 @@ fn open_location(app: AppHandle, location: Location) -> Result<(), String> {
 }
 
 const MIN_TAKE_SAMPLES: usize = 4_800;
-const MIN_TAKE_RMS: f64 = 0.003;
 
 fn take_skip_reason(samples: &[f32]) -> Option<String> {
     let seconds = samples.len() as f64 / 16_000.0;
     if samples.len() < MIN_TAKE_SAMPLES {
         return Some(format!("{seconds:.2} s, below minimum 0.30 s"));
     }
-    let rms =
-        (samples.iter().map(|&s| f64::from(s).powi(2)).sum::<f64>() / samples.len() as f64).sqrt();
-    if !rms.is_finite() {
+    if samples.iter().any(|s| !s.is_finite()) {
         return Some("nonfinite audio".into());
     }
-    (rms < MIN_TAKE_RMS)
-        .then(|| format!("{seconds:.2} s, RMS {rms:.6} below minimum {MIN_TAKE_RMS}"))
+    samples
+        .iter()
+        .all(|s| *s == 0.0)
+        .then(|| "Digital silence".into())
+}
+
+fn no_speech_detail(reason: &str, source: &audio::Source) -> String {
+    format!(
+        "{reason}. Recorded from {}. Another app may be holding or processing this microphone. Check its input level in Settings → General, or choose another microphone.",
+        source.describe()
+    )
 }
 
 fn transcript_has_text(text: &str) -> bool {
@@ -1231,8 +1237,8 @@ fn dictation_change(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runt
         let settings = runtime.settings.clone();
         let live = runtime.live.take();
         let stopping = Instant::now();
-        match audio::stop() {
-            Ok(samples) => {
+        match audio::stop_take() {
+            Ok(audio::Take { samples, source }) => {
                 let stop_ms = stopping.elapsed().as_millis();
                 log::info!("[dictate] audio_stop_ms={stop_ms}");
                 if settings.sound_feedback {
@@ -1279,7 +1285,10 @@ fn dictation_change(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runt
                     let (status, detail) = match &result {
                         Ok(Some(insert::Outcome::Copied)) => (TakeStatus::Copied, None),
                         Ok(Some(insert::Outcome::Pasted)) => (TakeStatus::Pasted, None),
-                        Ok(None) => (TakeStatus::Skipped, skip_reason),
+                        Ok(None) => (
+                            TakeStatus::Skipped,
+                            skip_reason.map(|reason| no_speech_detail(&reason, &source)),
+                        ),
                         Err(error) => (TakeStatus::Failed, Some(error.to_string())),
                     };
                     record_take(
@@ -2670,7 +2679,7 @@ mod take_tests {
     fn silence_and_short_speech_are_skipped() {
         assert!(take_skip_reason(&vec![0.0; 32_000]).is_some());
         assert!(take_skip_reason(&vec![0.2; 2_400]).is_some());
-        assert!(take_skip_reason(&vec![0.002; 16_000]).is_some());
+        assert!(take_skip_reason(&vec![0.002; 16_000]).is_none());
         assert!(take_skip_reason(&[]).is_some());
         for samples in [vec![0.0; 32_000], vec![0.2; 2_400]] {
             let transcript = dictation_text(&samples, Path::new("/nonexistent.bin"), None).unwrap();
@@ -2678,6 +2687,41 @@ mod take_tests {
             assert_eq!(transcript.inference_ms, None);
             assert!(transcript.skip_reason.is_some());
         }
+    }
+
+    #[test]
+    fn quiet_audio_reaches_the_transcriber_without_an_energy_gate() {
+        for rms in [0.002295_f32, 0.001, 0.000239, 0.000075] {
+            let samples: Vec<f32> = (0..32_000)
+                .map(|i| if i % 2 == 0 { rms } else { -rms })
+                .collect();
+            assert!(take_skip_reason(&samples).is_none());
+            let problem = dictation_text(&samples, Path::new("/nonexistent.bin"), None)
+                .err()
+                .expect("quiet audio must attempt transcription, not silently skip");
+            assert!(!problem.title.is_empty());
+        }
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut samples = vec![0.01; 16_000];
+            samples[100] = invalid;
+            assert_eq!(
+                take_skip_reason(&samples).as_deref(),
+                Some("nonfinite audio")
+            );
+        }
+    }
+
+    #[test]
+    fn no_words_detail_names_the_actual_device_and_an_action() {
+        let source = audio::Source {
+            device: "MacBook Pro Microphone".into(),
+            channels: 3,
+            rate: 96_000,
+        };
+        let detail = no_speech_detail("No words detected", &source);
+        assert!(detail.contains("MacBook Pro Microphone (3 channels at 96000 Hz)"));
+        assert!(detail.contains("Another app may be holding or processing"));
+        assert!(detail.contains("Settings → General"));
     }
 
     #[test]

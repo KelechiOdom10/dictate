@@ -678,3 +678,112 @@ is still required to measure the full improvement.
 Independent Capy review on this Mac reran the same offline test on 15 Nov 2026:
 **10 ms**, with the same exact 222,976 output samples. This is one fresh
 conversion run, not native dictation latency, an end-to-end improvement or p95.
+
+## Quiet takes and a microphone shared with a call — 16 November 2026
+
+**The 0.003 RMS dictation gate rejects audio Parakeet can transcribe.** This
+is established with both the owner's real recorded speech and an independent
+voice-processing holder. Removing that gate, rather than choosing another
+amplitude threshold, is the fix. Low amplitude alone does not mean no speech.
+
+Apple M4 Pro, built-in MacBook Pro Microphone, debug build, Parakeet Unified
+English Q8_0. Measurements use 16 kHz mono f32 at the transcription boundary.
+No transcript or audio from the owner's recordings is committed here.
+
+### Real speech, unchanged and deliberately attenuated
+
+`measure_real_speech_levels` reads an existing 16 kHz mono WAV and selects the
+highest-RMS complete five-second block. Here it used the owner's real Annotate
+recording from 16:18:07 on 16 November. The app log identifies that recording's
+source as the built-in microphone, 96 kHz, one channel. The 16-word baseline
+below is Parakeet's output, not a human-verified accuracy score. Scaling changes
+amplitude only; it is not a measurement of someone speaking quietly.
+
+| Input | RMS | Parakeet words | Same words as unchanged audio |
+|---|---:|---:|---|
+| Real speech, five seconds | 0.026990 | 16 | baseline |
+| Same speech, attenuated | 0.002295 | 16 | yes |
+| Same speech, attenuated | 0.000239 | 16 | yes |
+| Same speech, attenuated | 0.000075 | 16 | yes |
+| Five seconds of digital silence | 0 | 0 | — |
+
+All three attenuated inputs would have been discarded before inference by the
+old gate. The direct transcription test passed with exit code 0. A separate
+automated regression generates a public sentence with `say`, scales it to
+these levels, and checks the words. The real-speech measurement never prints
+the private transcript.
+
+```sh
+source "$HOME/.cargo/env"
+export PATH="$HOME/.nvm/versions/node/v24.22.2/bin:/opt/homebrew/bin:$PATH"
+export DICTATE_PARAKEET_MODEL="$HOME/Library/Application Support/com.kelechiodom.dictate/models/parakeet-unified-en-0.6b-Q8_0.gguf"
+DICTATE_SPEECH_WAV="/path/to/existing-real-speech.wav" \
+  cargo test --manifest-path src-tauri/Cargo.toml --lib measure_real_speech_levels \
+  -- --ignored --nocapture --test-threads=1
+```
+
+### Capture while another process holds voice processing
+
+A scratch Swift AVAudioEngine process enabled input voice processing, installed
+an input tap and ran concurrently with a fresh CPAL input stream. This models
+one call-app mechanism; it is not a test of a particular conferencing app.
+
+| Condition | CPAL source format | Measured RMS |
+|---|---|---:|
+| No deliberate playback, no holder, 3 s | 96 kHz, mono | 0.002926 |
+| No deliberate playback, repeated 3–4 s takes | 96 kHz, mono | 0.003268–0.004059 |
+| Voice-processing holder, no deliberate playback | 96 kHz, 3 channels, downmixed | 0.000061–0.000075 |
+| Holder + speaker-replayed synthetic sentence, quiet playback | 96 kHz, 3 channels, downmixed | 0.000075 |
+| Holder + speaker-replayed synthetic sentence, louder playback | 96 kHz, 3 channels, downmixed | 0.000094 |
+
+Parakeet returned the full replayed sentence from both held-microphone takes,
+without gain normalization; it returned no words on the held-microphone ambient
+take. This shows that a shared stream can be very quiet yet usable. It does
+not prove every call app behaves the same way, or that the microphone was
+exclusively locked. Ordinary replay without the holder also decoded at
+0.002295 and 0.000239 after scaling. Those exploratory test assertions completed
+but their processes aborted during model teardown; they are supporting
+observations, not passing test exits. The real-speech test above explicitly
+unloads the model and exits cleanly.
+
+The ambient values are recordings with no deliberate playback, not controlled
+acoustic silence. They straddle 0.003 while intelligible speech can be far below
+it. There is no defensible universal speech/no-speech cutoff at that number.
+System input gain was 69; output gain was temporarily 70 for speaker-replay
+experiments and restored to 13. Speaker replay is synthetic speech, not a human
+normal/quiet voice comparison. That hands-on comparison remains outstanding.
+
+### What the device code does, and what changes
+
+On-demand capture resolves the system default and reads its current format on
+every new stream. A selected named device gets a fresh config even when its
+device handle is cached; a missing named device falls back to the default.
+Warm streams check the requested preference, the current default's name and
+whether a previously missing device has returned before reuse. They do not
+watch a same-device format change or an app taking voice processing mid-take.
+CPAL's stream-error callback reports actual errors, not valid low-amplitude
+buffers. In the reproduced holder case, buffers arrived without such an error.
+The owner's logs likewise show a switch from mono to three channels on the
+18:14 failed take; the original rejected audio was not saved, so its contents
+cannot be reconstructed.
+
+The patch keeps default-device selection and channel averaging unchanged: the
+measured shared capture already contains transcribable speech. Dictation now
+sends finite, nonzero audio of at least 300 ms to the chosen transcriber,
+regardless of RMS. Exact digital silence still skips inference; nonfinite and
+too-short takes remain rejected. No adaptive constant or gain boost is added.
+Timed Annotate speech segmentation is separate and unchanged by this fix.
+
+`audio::stop` still returns independent 16 kHz mono f32 samples. A second stop
+entry point returns those same samples together with the actual device name,
+channel count and input rate, atomically, for dictation diagnostics. Empty
+transcripts remain visible in History with that device, the possibility of
+another app holding/processing it, and a Settings action in the existing detail
+pane. This is a possibility, not a claim to detect the call app.
+
+Still requires real hands: normal human speech, genuinely quiet human speech
+and a controlled silent take through the built-in mic; repeat while using the
+owner's actual call app; join/leave a call during an active/warm take; switch
+the system default during a take; confirm the native completion notice, History
+detail and focused-app paste behavior. The measurements above do not certify
+those native interactions.
