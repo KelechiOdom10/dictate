@@ -195,6 +195,35 @@
   --overlay-danger: var(--red-800);
   --on-thumb: var(--brown-925);
 }
+:root[data-palette="capy"] {
+  --overlay: #1a1d38;
+  --overlay-text: #f5f6fc;
+  --overlay-muted: #a2aacc;
+  --overlay-accent: #a99cf5;
+  --recording: #f38ba8;
+}
+:root[data-palette="capy"][data-mode="dark"] {
+  --overlay: #2a2d4d;
+  --overlay-text: #d2daf6;
+}
+:root[data-palette="rosePine"] {
+  --overlay: #26233a;
+  --overlay-text: #e0def4;
+  --overlay-muted: #908caa;
+  --overlay-accent: #c4a7e7;
+  --recording: #eb6f92;
+}
+:root[data-palette="neutral"] {
+  --overlay: #18181b;
+  --overlay-text: #fafafa;
+  --overlay-muted: #a1a1aa;
+  --overlay-accent: var(--overlay-text);
+  --recording: #f87171;
+}
+:root[data-palette="neutral"][data-mode="dark"] {
+  --overlay: #27272a;
+  --overlay-text: #f4f4f5;
+}
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-fast: 0ms;

@@ -143,7 +143,7 @@
       "primary": "rgb(28 26 24)",
       "on-primary": "rgb(251 250 248)",
       "live": "rgb(223 88 34)",
-      "recording": "rgb(241 105 53)",
+      "recording": "rgb(243 139 168)",
       "toggle-off": "rgb(223 218 212)",
       "toggle-on": "rgb(223 88 34)",
       "success": "rgb(240 247 240)",
@@ -154,9 +154,9 @@
       "danger-surface": "rgb(253 242 241)",
       "info": "rgb(40 74 108)",
       "info-surface": "rgb(239 246 253)",
-      "overlay": "rgb(28 26 24)",
-      "overlay-text": "rgb(251 250 248)",
-      "overlay-accent": "rgb(246 125 81)"
+      "overlay": "rgb(26 29 56)",
+      "overlay-text": "rgb(245 246 252)",
+      "overlay-accent": "rgb(169 156 245)"
     }
   },
   {
@@ -175,7 +175,7 @@
       "primary": "rgb(241 238 234)",
       "on-primary": "rgb(26 24 22)",
       "live": "rgb(246 125 81)",
-      "recording": "rgb(246 125 81)",
+      "recording": "rgb(243 139 168)",
       "toggle-off": "rgb(62 58 52)",
       "toggle-on": "rgb(246 125 81)",
       "success": "rgb(25 41 25)",
@@ -186,9 +186,9 @@
       "danger-surface": "rgb(51 29 28)",
       "info": "rgb(168 207 247)",
       "info-surface": "rgb(23 37 52)",
-      "overlay": "rgb(46 43 38)",
-      "overlay-text": "rgb(251 250 248)",
-      "overlay-accent": "rgb(246 125 81)"
+      "overlay": "rgb(42 45 77)",
+      "overlay-text": "rgb(210 218 246)",
+      "overlay-accent": "rgb(169 156 245)"
     }
   },
   {
@@ -207,7 +207,7 @@
       "primary": "rgb(28 26 24)",
       "on-primary": "rgb(251 250 248)",
       "live": "rgb(223 88 34)",
-      "recording": "rgb(241 105 53)",
+      "recording": "rgb(235 111 146)",
       "toggle-off": "rgb(223 218 212)",
       "toggle-on": "rgb(223 88 34)",
       "success": "rgb(240 247 240)",
@@ -218,9 +218,9 @@
       "danger-surface": "rgb(253 242 241)",
       "info": "rgb(40 74 108)",
       "info-surface": "rgb(239 246 253)",
-      "overlay": "rgb(28 26 24)",
-      "overlay-text": "rgb(251 250 248)",
-      "overlay-accent": "rgb(246 125 81)"
+      "overlay": "rgb(38 35 58)",
+      "overlay-text": "rgb(224 222 244)",
+      "overlay-accent": "rgb(196 167 231)"
     }
   },
   {
@@ -239,7 +239,7 @@
       "primary": "rgb(241 238 234)",
       "on-primary": "rgb(26 24 22)",
       "live": "rgb(246 125 81)",
-      "recording": "rgb(246 125 81)",
+      "recording": "rgb(235 111 146)",
       "toggle-off": "rgb(62 58 52)",
       "toggle-on": "rgb(246 125 81)",
       "success": "rgb(25 41 25)",
@@ -250,9 +250,9 @@
       "danger-surface": "rgb(51 29 28)",
       "info": "rgb(168 207 247)",
       "info-surface": "rgb(23 37 52)",
-      "overlay": "rgb(46 43 38)",
-      "overlay-text": "rgb(251 250 248)",
-      "overlay-accent": "rgb(246 125 81)"
+      "overlay": "rgb(38 35 58)",
+      "overlay-text": "rgb(224 222 244)",
+      "overlay-accent": "rgb(196 167 231)"
     }
   },
   {
@@ -271,7 +271,7 @@
       "primary": "rgb(28 26 24)",
       "on-primary": "rgb(251 250 248)",
       "live": "rgb(223 88 34)",
-      "recording": "rgb(241 105 53)",
+      "recording": "rgb(248 113 113)",
       "toggle-off": "rgb(223 218 212)",
       "toggle-on": "rgb(223 88 34)",
       "success": "rgb(240 247 240)",
@@ -282,9 +282,9 @@
       "danger-surface": "rgb(253 242 241)",
       "info": "rgb(40 74 108)",
       "info-surface": "rgb(239 246 253)",
-      "overlay": "rgb(28 26 24)",
-      "overlay-text": "rgb(251 250 248)",
-      "overlay-accent": "rgb(246 125 81)"
+      "overlay": "rgb(24 24 27)",
+      "overlay-text": "rgb(250 250 250)",
+      "overlay-accent": "rgb(250 250 250)"
     }
   },
   {
@@ -303,7 +303,7 @@
       "primary": "rgb(241 238 234)",
       "on-primary": "rgb(26 24 22)",
       "live": "rgb(246 125 81)",
-      "recording": "rgb(246 125 81)",
+      "recording": "rgb(248 113 113)",
       "toggle-off": "rgb(62 58 52)",
       "toggle-on": "rgb(246 125 81)",
       "success": "rgb(25 41 25)",
@@ -314,9 +314,9 @@
       "danger-surface": "rgb(51 29 28)",
       "info": "rgb(168 207 247)",
       "info-surface": "rgb(23 37 52)",
-      "overlay": "rgb(46 43 38)",
-      "overlay-text": "rgb(251 250 248)",
-      "overlay-accent": "rgb(246 125 81)"
+      "overlay": "rgb(39 39 42)",
+      "overlay-text": "rgb(244 244 245)",
+      "overlay-accent": "rgb(244 244 245)"
     }
   }
 ]

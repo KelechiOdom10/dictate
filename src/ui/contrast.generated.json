@@ -1966,7 +1966,7 @@
     "mode": "light",
     "foreground": "recording",
     "background": "overlay",
-    "ratio": 5.63,
+    "ratio": 7.1,
     "minimum": 3,
     "pass": true
   },
@@ -2002,7 +2002,7 @@
     "mode": "light",
     "foreground": "overlay-text",
     "background": "keycap-overlay",
-    "ratio": 13.33,
+    "ratio": 12.23,
     "minimum": 4.5,
     "pass": true
   },
@@ -2011,7 +2011,7 @@
     "mode": "light",
     "foreground": "overlay-danger",
     "background": "keycap-error",
-    "ratio": 8.15,
+    "ratio": 7.77,
     "minimum": 4.5,
     "pass": true
   },
@@ -2092,7 +2092,7 @@
     "mode": "light",
     "foreground": "overlay-text",
     "background": "overlay",
-    "ratio": 16.63,
+    "ratio": 15.25,
     "minimum": 4.5,
     "pass": true
   },
@@ -2101,7 +2101,7 @@
     "mode": "light",
     "foreground": "overlay-muted",
     "background": "overlay",
-    "ratio": 7.79,
+    "ratio": 7.17,
     "minimum": 4.5,
     "pass": true
   },
@@ -2110,7 +2110,7 @@
     "mode": "light",
     "foreground": "overlay-success",
     "background": "overlay",
-    "ratio": 10.87,
+    "ratio": 10.31,
     "minimum": 4.5,
     "pass": true
   },
@@ -2119,7 +2119,7 @@
     "mode": "light",
     "foreground": "overlay-danger",
     "background": "overlay",
-    "ratio": 9.55,
+    "ratio": 9.05,
     "minimum": 4.5,
     "pass": true
   },
@@ -2398,7 +2398,7 @@
     "mode": "dark",
     "foreground": "recording",
     "background": "overlay",
-    "ratio": 5.35,
+    "ratio": 5.74,
     "minimum": 3,
     "pass": true
   },
@@ -2434,7 +2434,7 @@
     "mode": "dark",
     "foreground": "overlay-text",
     "background": "keycap-overlay",
-    "ratio": 10.56,
+    "ratio": 7.79,
     "minimum": 4.5,
     "pass": true
   },
@@ -2443,7 +2443,7 @@
     "mode": "dark",
     "foreground": "overlay-danger",
     "background": "keycap-error",
-    "ratio": 6.56,
+    "ratio": 6.21,
     "minimum": 4.5,
     "pass": true
   },
@@ -2524,7 +2524,7 @@
     "mode": "dark",
     "foreground": "overlay-text",
     "background": "overlay",
-    "ratio": 13.51,
+    "ratio": 9.55,
     "minimum": 4.5,
     "pass": true
   },
@@ -2533,7 +2533,7 @@
     "mode": "dark",
     "foreground": "overlay-muted",
     "background": "overlay",
-    "ratio": 6.33,
+    "ratio": 5.79,
     "minimum": 4.5,
     "pass": true
   },
@@ -2542,7 +2542,7 @@
     "mode": "dark",
     "foreground": "overlay-success",
     "background": "overlay",
-    "ratio": 8.84,
+    "ratio": 8.33,
     "minimum": 4.5,
     "pass": true
   },
@@ -2551,7 +2551,7 @@
     "mode": "dark",
     "foreground": "overlay-danger",
     "background": "overlay",
-    "ratio": 7.76,
+    "ratio": 7.31,
     "minimum": 4.5,
     "pass": true
   },
@@ -2830,7 +2830,7 @@
     "mode": "light",
     "foreground": "recording",
     "background": "overlay",
-    "ratio": 5.63,
+    "ratio": 5.22,
     "minimum": 3,
     "pass": true
   },
@@ -2866,7 +2866,7 @@
     "mode": "light",
     "foreground": "overlay-text",
     "background": "keycap-overlay",
-    "ratio": 13.33,
+    "ratio": 9.35,
     "minimum": 4.5,
     "pass": true
   },
@@ -2875,7 +2875,7 @@
     "mode": "light",
     "foreground": "overlay-danger",
     "background": "keycap-error",
-    "ratio": 8.15,
+    "ratio": 7.07,
     "minimum": 4.5,
     "pass": true
   },
@@ -2956,7 +2956,7 @@
     "mode": "light",
     "foreground": "overlay-text",
     "background": "overlay",
-    "ratio": 16.63,
+    "ratio": 11.51,
     "minimum": 4.5,
     "pass": true
   },
@@ -2965,7 +2965,7 @@
     "mode": "light",
     "foreground": "overlay-muted",
     "background": "overlay",
-    "ratio": 7.79,
+    "ratio": 4.71,
     "minimum": 4.5,
     "pass": true
   },
@@ -2974,7 +2974,7 @@
     "mode": "light",
     "foreground": "overlay-success",
     "background": "overlay",
-    "ratio": 10.87,
+    "ratio": 9.51,
     "minimum": 4.5,
     "pass": true
   },
@@ -2983,7 +2983,7 @@
     "mode": "light",
     "foreground": "overlay-danger",
     "background": "overlay",
-    "ratio": 9.55,
+    "ratio": 8.35,
     "minimum": 4.5,
     "pass": true
   },
@@ -3262,7 +3262,7 @@
     "mode": "dark",
     "foreground": "recording",
     "background": "overlay",
-    "ratio": 5.35,
+    "ratio": 5.22,
     "minimum": 3,
     "pass": true
   },
@@ -3298,7 +3298,7 @@
     "mode": "dark",
     "foreground": "overlay-text",
     "background": "keycap-overlay",
-    "ratio": 10.56,
+    "ratio": 9.35,
     "minimum": 4.5,
     "pass": true
   },
@@ -3307,7 +3307,7 @@
     "mode": "dark",
     "foreground": "overlay-danger",
     "background": "keycap-error",
-    "ratio": 6.56,
+    "ratio": 7.07,
     "minimum": 4.5,
     "pass": true
   },
@@ -3388,7 +3388,7 @@
     "mode": "dark",
     "foreground": "overlay-text",
     "background": "overlay",
-    "ratio": 13.51,
+    "ratio": 11.51,
     "minimum": 4.5,
     "pass": true
   },
@@ -3397,7 +3397,7 @@
     "mode": "dark",
     "foreground": "overlay-muted",
     "background": "overlay",
-    "ratio": 6.33,
+    "ratio": 4.71,
     "minimum": 4.5,
     "pass": true
   },
@@ -3406,7 +3406,7 @@
     "mode": "dark",
     "foreground": "overlay-success",
     "background": "overlay",
-    "ratio": 8.84,
+    "ratio": 9.51,
     "minimum": 4.5,
     "pass": true
   },
@@ -3415,7 +3415,7 @@
     "mode": "dark",
     "foreground": "overlay-danger",
     "background": "overlay",
-    "ratio": 7.76,
+    "ratio": 8.35,
     "minimum": 4.5,
     "pass": true
   },
@@ -3694,7 +3694,7 @@
     "mode": "light",
     "foreground": "recording",
     "background": "overlay",
-    "ratio": 5.63,
+    "ratio": 6.4,
     "minimum": 3,
     "pass": true
   },
@@ -3730,7 +3730,7 @@
     "mode": "light",
     "foreground": "overlay-text",
     "background": "keycap-overlay",
-    "ratio": 13.33,
+    "ratio": 13.71,
     "minimum": 4.5,
     "pass": true
   },
@@ -3739,7 +3739,7 @@
     "mode": "light",
     "foreground": "overlay-danger",
     "background": "keycap-error",
-    "ratio": 8.15,
+    "ratio": 8.38,
     "minimum": 4.5,
     "pass": true
   },
@@ -3820,7 +3820,7 @@
     "mode": "light",
     "foreground": "overlay-text",
     "background": "overlay",
-    "ratio": 16.63,
+    "ratio": 16.97,
     "minimum": 4.5,
     "pass": true
   },
@@ -3829,7 +3829,7 @@
     "mode": "light",
     "foreground": "overlay-muted",
     "background": "overlay",
-    "ratio": 7.79,
+    "ratio": 6.91,
     "minimum": 4.5,
     "pass": true
   },
@@ -3838,7 +3838,7 @@
     "mode": "light",
     "foreground": "overlay-success",
     "background": "overlay",
-    "ratio": 10.87,
+    "ratio": 11.1,
     "minimum": 4.5,
     "pass": true
   },
@@ -3847,7 +3847,7 @@
     "mode": "light",
     "foreground": "overlay-danger",
     "background": "overlay",
-    "ratio": 9.55,
+    "ratio": 9.75,
     "minimum": 4.5,
     "pass": true
   },
@@ -4126,7 +4126,7 @@
     "mode": "dark",
     "foreground": "recording",
     "background": "overlay",
-    "ratio": 5.35,
+    "ratio": 5.38,
     "minimum": 3,
     "pass": true
   },
@@ -4162,7 +4162,7 @@
     "mode": "dark",
     "foreground": "overlay-text",
     "background": "keycap-overlay",
-    "ratio": 10.56,
+    "ratio": 10.79,
     "minimum": 4.5,
     "pass": true
   },
@@ -4171,7 +4171,7 @@
     "mode": "dark",
     "foreground": "overlay-danger",
     "background": "keycap-error",
-    "ratio": 6.56,
+    "ratio": 6.98,
     "minimum": 4.5,
     "pass": true
   },
@@ -4252,7 +4252,7 @@
     "mode": "dark",
     "foreground": "overlay-text",
     "background": "overlay",
-    "ratio": 13.51,
+    "ratio": 13.55,
     "minimum": 4.5,
     "pass": true
   },
@@ -4261,7 +4261,7 @@
     "mode": "dark",
     "foreground": "overlay-muted",
     "background": "overlay",
-    "ratio": 6.33,
+    "ratio": 5.81,
     "minimum": 4.5,
     "pass": true
   },
@@ -4270,7 +4270,7 @@
     "mode": "dark",
     "foreground": "overlay-success",
     "background": "overlay",
-    "ratio": 8.84,
+    "ratio": 9.34,
     "minimum": 4.5,
     "pass": true
   },
@@ -4279,7 +4279,7 @@
     "mode": "dark",
     "foreground": "overlay-danger",
     "background": "overlay",
-    "ratio": 7.76,
+    "ratio": 8.2,
     "minimum": 4.5,
     "pass": true
   },

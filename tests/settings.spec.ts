@@ -841,7 +841,8 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 436, height: 200 });
   await openSettings(page, { overlay: true });
-  for (const theme of ["ember", "paper"])
+  const backgrounds: Record<string, string> = {};
+  for (const theme of themeCases.map(({ id }) => id))
     for (const appearanceMode of ["light", "dark"]) {
       await page.evaluate(
         ({ theme, appearanceMode }) =>
@@ -927,6 +928,9 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
             ),
           );
           await expect(page.getByRole("meter")).toHaveAttribute("value", "0.4");
+          backgrounds[`${theme}-${appearanceMode}`] = await page
+            .locator(".ui-capsule")
+            .evaluate((capsule) => getComputedStyle(capsule).backgroundColor);
         }
         await page.evaluate(() => document.fonts.ready);
         await page.locator(".ui-capsule").screenshot({
@@ -942,6 +946,11 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
         await page.setViewportSize({ width: 436, height: 200 });
       }
     }
+  for (const theme of ["capy", "rosePine", "neutral"])
+    for (const mode of ["light", "dark"])
+      expect(backgrounds[`${theme}-${mode}`]).not.toBe(
+        backgrounds[`ember-${mode}`],
+      );
 });
 
 for (const exit of ["tab", "window-blur", "navigation"]) {
