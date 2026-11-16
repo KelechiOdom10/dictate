@@ -136,10 +136,8 @@ fn run() -> Result<(), String> {
     );
     if info.own_windows_excluded {
         println!("own windows excluded: yes");
-    } else if args.include_own_windows {
-        println!("own windows excluded: no (--include-own-windows)");
     } else {
-        println!("own windows excluded: NO, this process was not in the shareable content");
+        println!("own windows excluded: no (--include-own-windows)");
     }
     Ok(())
 }
