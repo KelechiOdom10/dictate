@@ -38,6 +38,14 @@ Each DMG is committed to git, so the repository grows by its size every
 release. That is fine at 7.6 MB for a handful of releases. If it starts to hurt,
 move the DMG to R2.
 
+## The settings screenshots
+
+`public/app/settings-{light,dark}.webp` (1440 px, 2× the 720 × 580 settings
+window) and their 720 px versions are Storybook captures of the
+`Pages / General Fresh Profile` story in Ember, taken from PR #48 at
+`5f19989`. The page shows the light or dark capture to match the visitor's
+mode. Retake both when the settings window changes.
+
 ## Deploying on Cloudflare Pages
 
 You do these steps once, in the Cloudflare dashboard, signed in to the account

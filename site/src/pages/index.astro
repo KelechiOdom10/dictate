@@ -5,7 +5,7 @@ import geist from "../assets/fonts/geist-latin.woff2?url";
 import { release } from "../release";
 import "../styles/site.css";
 
-const requirement = `Apple Silicon, macOS 15 or later, ${release.size}`;
+const requirement = `Apple silicon, macOS 15 or later, ${release.size}`;
 
 const themes = [
   {
@@ -37,6 +37,11 @@ const themes = [
 
 const swatch = (colors: { plate: string; ink: string; live: string }) =>
   `--plate: ${colors.plate}; --ink: ${colors.ink}; --live: ${colors.live}`;
+
+const shotSizes = "(min-width: 64rem) 60rem, calc(100vw - 2.5rem)";
+
+const settingsAlt =
+  "dictate's General settings: the Option-Shift-Space shortcut in Hold to talk mode, Parakeet English as the speech model, and the microphone.";
 ---
 
 <!doctype html>
@@ -44,10 +49,10 @@ const swatch = (colors: { plate: string; ink: string; live: string }) =>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>dictate: hold a key, speak, and it types</title>
+    <title>dictate: hold to talk, on your Mac</title>
     <meta
       name="description"
-      content="Hold Option-Shift-Space, speak, and the text appears wherever you are. Local, on-device dictation for Mac. No account."
+      content="Hold Option-Shift-Space and speak. Let go, and dictate types it into the app you are using. It runs on your Mac, with no account."
     />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -89,91 +94,100 @@ const swatch = (colors: { plate: string; ink: string; live: string }) =>
 
     <main id="main">
       <section class="hero" aria-labelledby="title">
-        <div class="wrap hero-grid">
-          <div class="hero-copy">
-            <h1 id="title">Talk where you&nbsp;type.</h1>
-            <p class="lead">
-              Hold Option-Shift-Space, speak, and the text appears wherever you are. Local,
-              on-device, no account.
-            </p>
-            <div class="cta">
-              <a class="button" href={release.href} download>
-                <Icon name="download" />
-                Download for Mac
-              </a>
-              <p class="meta">{requirement}</p>
-            </div>
-          </div>
+        <div class="wrap hero-inner">
+          <ul class="tiles" aria-hidden="true">
+            <li class="tile"><Icon name="mic" /></li>
+            <li class="tile"><Icon name="type" /></li>
+            <li class="tile"><Icon name="lock" /></li>
+            <li class="tile"><Icon name="pen" /></li>
+          </ul>
 
           <div class="stage" data-stage>
-            <span class="tile tile-mic"><Icon name="mic" /></span>
-            <span class="tile tile-lock"><Icon name="lock" /></span>
-            <span class="tile tile-type"><Icon name="type" /></span>
-            <span class="tile tile-pen"><Icon name="pen" /></span>
             <Mark class="hero-mark" label="The dictate icon: five bars, the middle one lit" />
             <button
               class="keys"
               type="button"
               data-keys
-              aria-label="Option Shift Space: hold to listen"
+              aria-label="Option Shift Space: hold to talk"
               aria-pressed="false"
-              aria-describedby="keys-hint"
+              aria-describedby="keys-status"
             >
               <kbd>⌥</kbd><kbd>⇧</kbd><kbd class="space">Space</kbd>
             </button>
-            <p class="hint" id="keys-hint" aria-live="polite" data-hint>Hold the keys</p>
+            <p class="status" id="keys-status" data-status="idle">
+              <span class="status-hint">Press and hold</span>
+              <span class="capsule capsule-recording" aria-hidden="true">
+                <span class="dot"></span>Recording <span class="timer" data-timer>00:00</span>
+                <span class="levels"><i></i><i></i><i></i><i></i><i></i></span>
+              </span>
+              <span class="capsule capsule-done" aria-hidden="true">
+                <Icon name="check" />Text inserted
+              </span>
+              <span class="visually-hidden" aria-live="polite" data-announce></span>
+            </p>
           </div>
+
+          <h1 id="title">Hold to talk.</h1>
+          <p class="lead">
+            Hold Option-Shift-Space and speak. Let go, and dictate types it into the app you are
+            using. It runs on your Mac, with no account.
+          </p>
+
+          <dl class="install" id="download">
+            <div>
+              <dt>Download</dt>
+              <dd class="meta">{requirement}</dd>
+              <dd class="action">
+                <a class="button" href={release.href} download>
+                  <Icon name="download" />
+                  Download
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt>First open</dt>
+              <dd class="meta">
+                Not notarised: open it once, then click Open Anyway in System Settings, Privacy
+                &amp; Security.
+              </dd>
+            </div>
+          </dl>
         </div>
       </section>
 
-      <section class="wrap section" id="download" aria-labelledby="download-title">
-        <h2 id="download-title" class="visually-hidden">Download and install</h2>
-        <dl class="install">
-          <div>
-            <dt>Download</dt>
-            <dd>
-              <a class="file" href={release.href} download>{release.file}</a>
-              <span class="meta">{requirement}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>Install</dt>
-            <dd>
-              Drag dictate into Applications. The first time, right-click it and choose Open,
-              because it is not notarised by Apple. Then allow the microphone and Accessibility,
-              and download a speech model (about 700 MB) from Models.
-            </dd>
-          </div>
-        </dl>
-      </section>
-
-      <section class="wrap section split" aria-labelledby="annotate-title">
-        <div>
-          <h2 id="annotate-title">Annotate</h2>
-          <p class="lead">Show an AI agent what you mean, not just what you said.</p>
-          <ol class="steps">
-            <li><strong>Record.</strong> Tap Option-Shift-A to record your screen and voice.</li>
-            <li><strong>Draw.</strong> Hold the shortcut and move the pointer. Ink follows, then fades.</li>
-            <li><strong>Talk.</strong> Say what you are pointing at, the way you would to a colleague.</li>
-            <li><strong>Copy.</strong> Tap again. A summary is on your clipboard, pointing at the package.</li>
-          </ol>
-        </div>
-        <figure class="package">
-          <figcaption><Icon name="folder" /> One package per take</figcaption>
-          <ul>
-            <li>recording.mp4</li>
-            <li>audio.wav</li>
-            <li>frames/frame-01.png</li>
-            <li>contact-sheet.png</li>
-            <li>annotation.json</li>
-            <li class="pasted">summary.md <span>on your clipboard</span></li>
-          </ul>
+      <section class="wrap section shot" aria-labelledby="app-title">
+        <h2 id="app-title" class="visually-hidden">The settings window</h2>
+        <figure class="shot">
+          <img
+            class="shot-light"
+            src="/app/settings-light.webp"
+            srcset={`/app/settings-light-720.webp 720w, /app/settings-light.webp 1440w`}
+            sizes={shotSizes}
+            width="1440"
+            height="1160"
+            alt={settingsAlt}
+            loading="lazy"
+            decoding="async"
+          />
+          <img
+            class="shot-dark"
+            src="/app/settings-dark.webp"
+            srcset={`/app/settings-dark-720.webp 720w, /app/settings-dark.webp 1440w`}
+            sizes={shotSizes}
+            width="1440"
+            height="1160"
+            alt={settingsAlt}
+            loading="lazy"
+            decoding="async"
+          />
         </figure>
       </section>
 
-      <section class="wrap section" aria-labelledby="themes-title">
-        <h2 id="themes-title">Five themes, light and dark</h2>
-        <p class="lead">Each one follows your system, or stays where you put it.</p>
+      <section class="wrap section shot" aria-labelledby="themes-title">
+        <div class="section-head">
+          <h2 id="themes-title">Five themes, light and dark</h2>
+          <p class="lead">Pick one under Appearance. Each has a light and a dark side.</p>
+        </div>
         <ul class="themes">
           {
             themes.map((theme) => (
@@ -192,26 +206,86 @@ const swatch = (colors: { plate: string; ink: string; live: string }) =>
           }
         </ul>
       </section>
+
+      <section class="wrap section annotate" aria-labelledby="annotate-title">
+        <div class="annotate-copy">
+          <h2 id="annotate-title">Annotate</h2>
+          <ol class="steps">
+            <li><strong>Record.</strong> Tap Option-Shift-A to record your screen and voice.</li>
+            <li><strong>Draw.</strong> Hold the shortcut and move the pointer. Ink follows, then fades.</li>
+            <li><strong>Talk.</strong> Say what you are pointing at.</li>
+            <li><strong>Copy.</strong> Tap again. A summary is on your clipboard, pointing at the package.</li>
+          </ol>
+        </div>
+        <ol class="sequence annotate-states" aria-label="What the overlay shows during a take">
+          <li>
+            <span class="capsule"><span class="dot"></span>Annotating <span class="timer">00:10</span></span>
+            <span class="meta">While you record and draw</span>
+          </li>
+          <li>
+            <span class="capsule"><span class="spinner"></span>Packaging…</span>
+            <span class="meta">After the second tap</span>
+          </li>
+          <li class="final">
+            <span class="capsule capsule-copied"><Icon name="clipboard" />Copied — paste it anywhere</span>
+            <span class="meta">Ready to paste into an AI agent</span>
+          </li>
+        </ol>
+        <figure class="package">
+          <figcaption><Icon name="folder" /> One package per take</figcaption>
+          <ul>
+            <li>recording.mp4</li>
+            <li>audio.wav</li>
+            <li>frames/frame-01.png</li>
+            <li>contact-sheet.png</li>
+            <li>annotation.json</li>
+            <li class="pasted">summary.md <span>on your clipboard</span></li>
+          </ul>
+        </figure>
+      </section>
     </main>
 
     <footer class="wrap foot">
-      <p>
-        dictate {release.version}. Speech is turned into text on your Mac; the only thing it
-        downloads is the speech model.
-      </p>
+      <p>dictate {release.version}</p>
     </footer>
 
     <script>
       const root = document.documentElement;
       const stage = document.querySelector<HTMLElement>("[data-stage]")!;
       const keys = document.querySelector<HTMLButtonElement>("[data-keys]")!;
-      const hint = document.querySelector<HTMLElement>("[data-hint]")!;
+      const status = document.querySelector<HTMLElement>("[data-status]")!;
+      const timer = document.querySelector<HTMLElement>("[data-timer]")!;
+      const announce = document.querySelector<HTMLElement>("[data-announce]")!;
+      let started = 0;
+      let tick = 0;
+      let settle = 0;
+
+      const clock = (seconds: number) =>
+        `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
+      const show = (state: "idle" | "recording" | "done") => {
+        status.dataset.status = state;
+        announce.textContent =
+          state === "recording" ? "Recording" : state === "done" ? "Text inserted" : "";
+      };
 
       const listen = (on: boolean) => {
         if (stage.hasAttribute("data-listening") === on) return;
         stage.toggleAttribute("data-listening", on);
         keys.setAttribute("aria-pressed", String(on));
-        hint.textContent = on ? "Listening" : "Hold the keys";
+        clearInterval(tick);
+        clearTimeout(settle);
+        if (on) {
+          started = Date.now();
+          timer.textContent = clock(0);
+          tick = window.setInterval(() => {
+            timer.textContent = clock(Math.floor((Date.now() - started) / 1000));
+          }, 250);
+          show("recording");
+          return;
+        }
+        show("done");
+        settle = window.setTimeout(() => show("idle"), 1600);
       };
       const stop = () => listen(false);
 
@@ -219,10 +293,9 @@ const swatch = (colors: { plate: string; ink: string; live: string }) =>
         keys.setPointerCapture(event.pointerId);
         listen(true);
       });
-      keys.addEventListener("pointerup", stop);
-      keys.addEventListener("pointercancel", stop);
-      keys.addEventListener("lostpointercapture", stop);
-      keys.addEventListener("blur", stop);
+      for (const type of ["pointerup", "pointercancel", "lostpointercapture", "blur"]) {
+        keys.addEventListener(type, stop);
+      }
       keys.addEventListener("keydown", (event) => {
         if (event.key !== " " && event.key !== "Enter") return;
         event.preventDefault();
@@ -231,7 +304,6 @@ const swatch = (colors: { plate: string; ink: string; live: string }) =>
       keys.addEventListener("keyup", (event) => {
         if (event.key === " " || event.key === "Enter") stop();
       });
-
       window.addEventListener("keydown", (event) => {
         if (event.code !== "Space" || !event.altKey || !event.shiftKey) return;
         event.preventDefault();
