@@ -461,28 +461,6 @@ meter.ui-rating::-moz-meter-bar {
   background: var(--color-accent);
 }
 
-/* Glass: the window's own backdrop steps aside so the material macOS puts
-   behind the webview shows through. The page and the sidebar keep part of
-   their theme surface, and cards stay opaque, so text in them keeps the
-   contrast it was measured at. */
-html[data-glass="true"] .astryx-app-shell {
-  background-color: transparent;
-}
-html[data-glass="true"] .astryx-app-shell [role="main"] {
-  background-color: color-mix(
-    in oklab,
-    var(--color-background-body) 60%,
-    transparent
-  );
-}
-html[data-glass="true"] .astryx-side-nav {
-  background-color: color-mix(
-    in oklab,
-    var(--color-background-muted) 72%,
-    transparent
-  );
-}
-
 .ui-history-row,
 .ui-history-accordion > button[aria-expanded] {
   padding-inline-start: var(--spacing-4);

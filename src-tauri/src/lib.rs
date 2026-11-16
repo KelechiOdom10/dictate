@@ -839,9 +839,6 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
         .lock()
         .map_err(|e| e.to_string())? = settings.overlay_position;
     surface::update_shortcut(&app, &settings.shortcut);
-    if previous.glass != settings.glass {
-        apply_glass(&app);
-    }
     if let Err(error) = app.emit("settings-changed", &settings) {
         report_error(
             &app,
@@ -985,36 +982,6 @@ struct SettingsVisibility {
     page: Option<&'static str>,
 }
 
-/// What the settings window asks the window server for. On, it takes the
-/// system's own material behind the page; off, it asks for nothing, which is
-/// the opaque window every earlier build drew.
-fn glass_effects(on: bool) -> Option<tauri::utils::config::WindowEffectsConfig> {
-    on.then(|| tauri::utils::config::WindowEffectsConfig {
-        effects: vec![tauri::utils::WindowEffect::ContentBackground],
-        state: Some(tauri::utils::WindowEffectState::FollowsWindowActiveState),
-        radius: None,
-        color: None,
-        interactive: false,
-    })
-}
-
-/// Applies the setting to the window that is already there. A system that
-/// cannot take the material ignores the request, so the page keeps its own
-/// background and nothing fails; the CSS only steps aside while glass is on.
-fn apply_glass(app: &AppHandle) {
-    let glass = app
-        .state::<Mutex<Runtime>>()
-        .lock()
-        .map(|runtime| runtime.settings.glass)
-        .unwrap_or(false);
-    let Some(window) = app.get_webview_window("settings") else {
-        return;
-    };
-    if let Err(error) = window.set_effects(glass_effects(glass)) {
-        log::warn!("[glass] window material not applied: {error}");
-    }
-}
-
 fn show_settings(app: &AppHandle) {
     let state = app.state::<Mutex<SettingsVisibility>>();
     let mut visibility = state.lock().unwrap_or_else(|error| error.into_inner());
@@ -1036,9 +1003,6 @@ fn show_settings(app: &AppHandle) {
         }
     }
     drop(visibility);
-    // The material is only given to a window that is on screen, and the
-    // setting may have changed while this one was closed.
-    apply_glass(app);
 }
 
 #[tauri::command]
@@ -2176,23 +2140,6 @@ pub fn run() {
 #[cfg(test)]
 mod take_tests {
     use super::*;
-
-    /// The toggle is the whole native side of glass: off asks for nothing and
-    /// leaves the opaque window every earlier build drew, on asks for the
-    /// system's content material in step with the window's active state.
-    #[test]
-    fn glass_asks_for_a_material_only_while_it_is_on() {
-        assert_eq!(glass_effects(false), None);
-        let effects = glass_effects(true).expect("material requested");
-        assert_eq!(
-            effects.effects,
-            vec![tauri::utils::WindowEffect::ContentBackground]
-        );
-        assert_eq!(
-            effects.state,
-            Some(tauri::utils::WindowEffectState::FollowsWindowActiveState)
-        );
-    }
 
     #[test]
     fn missing_microphone_is_a_notice_and_does_not_block_a_take() {

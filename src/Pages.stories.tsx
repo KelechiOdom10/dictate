@@ -201,7 +201,6 @@ function mockApp(
     annotateShortcut: "Alt+Shift+KeyS",
     annotateEnabled: true,
     annotateShowInRecordings: false,
-    glass: false,
     ...overrides,
   };
   mockWindows("settings");
@@ -1121,30 +1120,6 @@ export const Appearance: Story = {
     // Every theme is a picture of its light and dark side, nothing else.
     expect(themes.querySelectorAll("svg")).toHaveLength(5);
     expect(themes.querySelectorAll(".astryx-status-dot")).toHaveLength(0);
-    // Glass is opt-in and starts off.
-    expect(
-      c.getByRole("switch", { name: "Translucent window" }),
-    ).not.toBeChecked();
-  },
-};
-
-export const AppearanceGlass: Story = {
-  name: "Appearance / translucent window on",
-  beforeEach: ({ globals }) => mockApp(globals, [], undefined, { glass: true }),
-  render: () => <GeneralPage page="Appearance" />,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement);
-    const toggle = await c.findByRole("switch", {
-      name: "Translucent window",
-    });
-    expect(toggle).toBeChecked();
-    expect(
-      c.getByText(/Lets what is behind the window show through/),
-    ).toBeInTheDocument();
-    await userEvent.click(toggle);
-    await expect(
-      c.getByRole("switch", { name: "Translucent window" }),
-    ).not.toBeChecked();
   },
 };
 
