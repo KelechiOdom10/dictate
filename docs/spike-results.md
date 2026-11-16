@@ -170,6 +170,122 @@ delete it afterward. Repeat with quiet speech and normal room noise. Physical
 hotkey, real-mic gate behavior, first/last phonemes, and focused-app insertion
 were not verified in this run; the seven-check gate remains open.
 
+
+## Startup recovery: microphone lookup — 15 November 2026
+
+Measured on this Mac with 30 sequential calls to the same CPAL device-listing
+path formerly called on key-down. `cargo test --manifest-path
+src-tauri/Cargo.toml measure_input_device_listing -- --ignored --nocapture`:
+first call 105.576 ms, median 46.802 ms, p95 50.972 ms, maximum 105.576 ms.
+These are device-discovery timings, not end-to-end capture latency.
+
+Named-device selection now reuses cached CPAL handles. The cache is populated
+by listing devices in Settings or on the first named selection. A cached handle
+must still return a valid input configuration; failed validation or a missing
+name refreshes the list. This also checks for a reconnected microphone rather
+than remembering its absence. System-default selection needs no list. The
+separate availability scan before opening the stream has been removed.
+
+`cargo test --manifest-path src-tauri/Cargo.toml measure_cached_device_selection
+-- --ignored --nocapture` measured 30 selections: median 24.428 ms, p95
+26.603 ms, maximum 27.558 ms. This includes configuration validation; stream
+creation is outside this measurement. A missing saved name still requires a
+fresh enumeration to detect reconnection, then falls back to the current system
+default. Physical unplug/replug during capture remains unverified.
+
+The explicit `disconnected_preference` smoke test used a nonexistent saved name,
+opened the MacBook Pro Microphone at 96 kHz mono F32, returned fallback=true,
+retained samples for a 150 ms take and read a finite level during a separate
+150 ms monitor session. No capture was written to disk. This proves default
+fallback at the audio boundary; it does not prove native overlay focus, physical
+hotkey conflicts, tray rendering, or end-to-end paste after recovery.
+
+## Settings review follow-up: named-microphone startup — 15 November 2026
+
+The named-device path previously fetched the default input configuration twice:
+when checking the cached handle, then again when opening the recording stream.
+Device selection now returns the handle and its configuration together. A failed
+cached configuration still refreshes the device list; missing names still use the
+system default. Both recording and microphone monitoring use this path.
+
+Measured on this Mac with the MacBook Pro Microphone explicitly selected by name
+(96 kHz, mono F32), a populated device cache, and 30 sequential starts per version:
+
+| `start_device(Some(name))` → stream playing | Before | After |
+| --- | ---: | ---: |
+| First call | 93.160 ms | 61.480 ms |
+| Median | 94.836 ms | 77.419 ms |
+| p95 | 98.309 ms | 82.595 ms |
+| Maximum | 99.981 ms | 82.925 ms |
+
+Command: `cargo test --manifest-path src-tauri/Cargo.toml
+measure_named_microphone_startup -- --ignored --nocapture`. The same test ran
+before and after the audio change in an unoptimised test build. Each timer ends
+when `start_device` returns; a separate 150 ms capture afterward verifies samples
+arrive before stopping. No audio is written to disk. These measurements include
+the audio-thread request, device selection, stream creation and `play()`, but
+exclude physical key delivery, overlay rendering and first-sample latency.
+They do not close the end-to-end spike latency gate. Physical unplug/replug
+remains unverified.
+
+## Speech model speed — 15 November 2026
+
+Measured on this machine (Apple M4 Pro), Homebrew whisper.cpp 1.9.5, with the
+`measure_catalog_models` test in `src-tauri/src/transcribe.rs`. The fixture is
+generated at test time with `say -v Samantha` and converted to 16 kHz mono:
+94,335 samples (5.90 s) of “Please move the Thursday design review to Friday
+morning, and send Priya the updated budget before lunch.” Each model gets one
+warm-up call, then five timed calls of the real `transcribe` stage (WAV
+writing, subprocess startup, model load, inference, cleanup). Every file was
+checked against the catalog's size and SHA-256 before the run.
+
+| Model | Median | Min | Max | Returned text |
+|---|---:|---:|---:|---|
+| tiny.en | 188 ms | 177 ms | 194 ms | …send free of the updated budget before launch. |
+| base.en | 232 ms | 224 ms | 235 ms | …send free of the updated budget before launch. |
+| small.en | 437 ms | 435 ms | 502 ms | …send Priya the updated budget before lunch. |
+| medium.en | 1,037 ms | 1,031 ms | 1,052 ms | …send free of the updated budget before launch. |
+| large-v3-turbo | 1,084 ms | 1,075 ms | 1,093 ms | …send pre of the updated budget before launch. |
+
+The medians are the speed meters on the Models page (`models::CATALOG`). A
+first run of the same test about 20 minutes earlier gave medians within 3% of
+these. Only small.en got every word of this one sentence right, which is one
+synthetic sentence and not an accuracy measurement. The accuracy meters stay
+labelled as estimates from model size.
+
+Reproduce (about 3.9 GB of weights, kept outside the repo):
+
+```sh
+DICTATE_MEASURE_MODELS_DIR=/path/to/ggml/files \
+  cargo test --manifest-path src-tauri/Cargo.toml measure_catalog_models -- --ignored --nocapture
+```
+
+## Warm microphone — 15 November 2026
+
+Advanced → *Keep the microphone ready* leaves the input stream open between
+takes and keeps the last 300 ms in a ring buffer. A take starts by handing that
+buffer over instead of opening a stream.
+
+Measured on this Mac (Apple M4 Pro, system default input) with
+`warm_microphone_starts_takes_with_preroll_and_stays_open` in
+`src-tauri/src/audio.rs`, four runs:
+
+| | Result |
+| --- | ---: |
+| `start_device(None)` with the mic warm | 0.615–0.654 ms |
+| Samples from a 200 ms hold, first take | 8,042–8,128 (0.50–0.51 s) |
+| Samples from a 200 ms hold, second take | 8,042–8,128 |
+
+Compare the cold named-device start above: 61–83 ms before the stream plays.
+The extra ~300 ms in each take is the pre-roll from before the key press, and
+the second take proves the stream stays warm after a take ends. Unoptimised test
+build; the timer stops when `start_device` returns. Physical key delivery and a
+real clipped-word comparison are left to the manual checks.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml warm_microphone -- --ignored --nocapture
+```
+
 ## Annotate screen stage — 15 November 2026
 
 `src-tauri/src/screen.rs` records one display to an H.264 MP4 through

@@ -1,3 +1,4 @@
+use crate::problem::Problem;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
@@ -22,12 +23,18 @@ pub struct Segment {
     pub end_ms: u64,
     pub text: String,
 }
-
-pub fn transcribe(samples: &[f32]) -> Result<String, String> {
-    let text = run_whisper(samples, &["-nt", "-otxt"], "txt")?;
+/// Transcribe 16 kHz mono audio with the GGML model at `model`.
+pub fn transcribe(samples: &[f32], model: &Path) -> Result<String, Problem> {
+    validate(samples)?;
+    let _guard = lock()?;
+    let cli = ready(model)?;
+    let text = run_whisper(&cli, model, samples, &["-nt", "-otxt"], "txt").map_err(failed)?;
     Ok(text.trim().to_string())
 }
 
+/// Like `transcribe`, with the same model and the same failures, but returns
+/// each word with its time on the audio clock.
+///
 /// `-ml 1 -sow` makes whisper-cli emit one segment per word, and `-ojf` writes
 /// each segment's offsets in ms, so every JSON segment becomes one `Word`.
 ///
@@ -35,18 +42,31 @@ pub fn transcribe(samples: &[f32]) -> Result<String, String> {
 /// audio opens with silence (4 s of silence made the first word 4 s early), and
 /// less so after long pauses. So the audio is cut into runs of speech with
 /// `speech_spans`, each run is transcribed alone, and its offset is added back.
-pub fn transcribe_timed(samples: &[f32]) -> Result<Vec<Word>, String> {
+pub fn transcribe_timed(samples: &[f32], model: &Path) -> Result<Vec<Word>, Problem> {
     validate(samples)?;
     let _guard = lock()?;
+    let cli = ready(model)?;
     let mut words = Vec::new();
     for span in speech_spans(samples) {
         let offset_ms = span.start as u64 * 1000 / SAMPLE_RATE as u64;
-        let json = run_whisper_locked(&samples[span], &["-ojf", "-ml", "1", "-sow"], "json")?;
-        words.extend(parse_words(&json)?.into_iter().map(|word| Word {
-            start_ms: word.start_ms + offset_ms,
-            end_ms: word.end_ms + offset_ms,
-            text: word.text,
-        }));
+        let json = run_whisper(
+            &cli,
+            model,
+            &samples[span],
+            &["-ojf", "-ml", "1", "-sow"],
+            "json",
+        )
+        .map_err(failed)?;
+        words.extend(
+            parse_words(&json)
+                .map_err(failed)?
+                .into_iter()
+                .map(|word| Word {
+                    start_ms: word.start_ms + offset_ms,
+                    end_ms: word.end_ms + offset_ms,
+                    text: word.text,
+                }),
+        );
     }
     Ok(words)
 }
@@ -181,44 +201,54 @@ fn parse_words(json: &str) -> Result<Vec<Word>, String> {
         .collect())
 }
 
-/// Validates the audio, writes it as a WAV, runs whisper-cli with the shared
-/// flags plus `output_args`, and returns the output file with `extension`.
-fn run_whisper(samples: &[f32], output_args: &[&str], extension: &str) -> Result<String, String> {
-    validate(samples)?;
-    let _guard = lock()?;
-    run_whisper_locked(samples, output_args, extension)
-}
-
-fn validate(samples: &[f32]) -> Result<(), String> {
+fn validate(samples: &[f32]) -> Result<(), Problem> {
     if samples.is_empty() || samples.iter().any(|sample| !sample.is_finite()) {
-        return Err("Expected nonempty, finite 16 kHz mono audio".into());
+        return Err(failed("Expected nonempty, finite 16 kHz mono audio"));
     }
     Ok(())
 }
 
-fn lock() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+fn lock() -> Result<std::sync::MutexGuard<'static, ()>, Problem> {
     TRANSCRIPTION.try_lock().map_err(|_| {
-        eprintln!("[transcribe] rejected: transcription is already running");
-        "Transcription is already running; try again when it finishes".to_string()
+        log::warn!("[transcribe] rejected: transcription is already running");
+        Problem::new(
+            "Still transcribing",
+            "Wait for the last dictation to finish.",
+        )
     })
 }
 
-/// Callers hold the `TRANSCRIPTION` guard.
-fn run_whisper_locked(
+/// whisper-cli, once both it and the model file are present.
+fn ready(model: &Path) -> Result<PathBuf, Problem> {
+    let cli = whisper_cli()?;
+    if !model.is_file() {
+        return Err(missing_model(model));
+    }
+    Ok(cli)
+}
+
+fn failed(cause: impl std::fmt::Display) -> Problem {
+    Problem::new("Transcription failed", "Hold the shortcut and try again.").because(cause)
+}
+
+/// Writes the audio as a WAV, runs whisper-cli with the shared flags plus
+/// `output_args`, and returns the output file with `extension`. Callers hold
+/// the `TRANSCRIPTION` guard.
+fn run_whisper(
+    cli: &Path,
+    model: &Path,
     samples: &[f32],
     output_args: &[&str],
     extension: &str,
 ) -> Result<String, String> {
-    let cli = whisper_cli()?;
-    let model = model_path()?;
     let temp =
         tempfile::tempdir().map_err(|e| format!("Create transcription temp directory: {e}"))?;
     let wav = temp.path().join("audio.wav");
     write_wav(&wav, samples)?;
     let output_base = temp.path().join("transcript");
-    let output = Command::new(&cli)
+    let output = Command::new(cli)
         .arg("-m")
-        .arg(&model)
+        .arg(model)
         .arg("-f")
         .arg(&wav)
         .args(["-l", "en", "-np"])
@@ -238,13 +268,26 @@ fn run_whisper_locked(
         .map_err(|e| format!("Read whisper-cli transcript: {e}"))
 }
 
-fn whisper_cli() -> Result<PathBuf, String> {
+/// The model file name without extension, e.g. `ggml-base.en`.
+pub fn model_name(model: &Path) -> String {
+    model
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Unavailable".into())
+}
+
+pub const WHISPER_INSTALL: &str = "brew install whisper.cpp";
+
+pub fn whisper_cli() -> Result<PathBuf, Problem> {
     if let Some(path) = std::env::var_os("DICTATE_WHISPER_CLI") {
         let path = PathBuf::from(path);
-        return path
-            .is_file()
-            .then_some(path)
-            .ok_or_else(|| "DICTATE_WHISPER_CLI must point to the whisper-cli executable".into());
+        return path.is_file().then_some(path.clone()).ok_or_else(|| {
+            Problem::new(
+                "whisper-cli not found",
+                "Point DICTATE_WHISPER_CLI at the whisper-cli executable.",
+            )
+            .because(format!("no file at {}", path.display()))
+        });
     }
     std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .map(|directory| directory.join("whisper-cli"))
@@ -253,24 +296,23 @@ fn whisper_cli() -> Result<PathBuf, String> {
             PathBuf::from("/usr/local/bin/whisper-cli"),
         ])
         .find(|path| path.is_file())
-        .ok_or_else(|| {
-            "whisper-cli is missing: install whisper-cpp, add whisper-cli to PATH, or set DICTATE_WHISPER_CLI to its absolute path".into()
-        })
+        .ok_or_else(whisper_missing)
 }
 
-fn model_path() -> Result<PathBuf, String> {
-    let path = std::env::var_os("DICTATE_WHISPER_MODEL")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../models/ggml-base.en.bin")
-        });
-    if !path.is_file() {
-        return Err(format!(
-            "Whisper model is missing at {}: download ggml-base.en.bin into models/ or set DICTATE_WHISPER_MODEL to an English GGML model path",
-            path.display()
-        ));
-    }
-    Ok(path)
+pub fn whisper_missing() -> Problem {
+    Problem::new(
+        "whisper-cli not found",
+        format!("Run `{WHISPER_INSTALL}` in Terminal, then try again."),
+    )
+    .because("not on PATH, /opt/homebrew/bin or /usr/local/bin")
+}
+
+pub fn missing_model(path: &Path) -> Problem {
+    Problem::new(
+        "Speech model missing",
+        "Download a speech model in Settings › Models.",
+    )
+    .because(format!("no file at {}", path.display()))
 }
 
 fn write_wav(path: &Path, samples: &[f32]) -> Result<(), String> {
@@ -315,19 +357,58 @@ mod tests {
         );
     }
 
+    /// The spike's model: `DICTATE_WHISPER_MODEL`, else this checkout's
+    /// `models/ggml-base.en.bin`. Tests only; the app uses the chosen model.
+    fn test_model() -> PathBuf {
+        std::env::var_os("DICTATE_WHISPER_MODEL")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../models/ggml-base.en.bin")
+            })
+    }
+
+    #[test]
+    fn models_page_shows_the_same_install_command() {
+        assert!(
+            include_str!("../../src/models.ts")
+                .contains(&format!("WHISPER_INSTALL = \"{WHISPER_INSTALL}\";"))
+        );
+        assert!(whisper_missing().fix.contains(WHISPER_INSTALL));
+    }
+
+    #[test]
+    fn missing_model_points_to_the_models_page() {
+        if whisper_cli().is_err() {
+            eprintln!("SKIP missing model: whisper-cli is checked first");
+            return;
+        }
+        let _turn = whisper_turn();
+        let model = Path::new("/nonexistent/ggml-base.en.bin");
+        for problem in [
+            transcribe(&[0.1], model).unwrap_err(),
+            transcribe_timed(&[0.1], model).unwrap_err(),
+        ] {
+            assert_eq!(problem.title, "Speech model missing");
+            assert!(problem.fix.contains("Settings › Models"));
+            assert!(
+                problem
+                    .detail
+                    .unwrap()
+                    .contains("/nonexistent/ggml-base.en.bin")
+            );
+        }
+    }
+
     #[test]
     fn rejects_empty_and_nonfinite_audio() {
         for samples in [&[][..], &[f32::NAN], &[f32::INFINITY]] {
-            assert!(
-                transcribe(samples)
-                    .unwrap_err()
-                    .contains("finite 16 kHz mono")
-            );
-            assert!(
-                transcribe_timed(samples)
-                    .unwrap_err()
-                    .contains("finite 16 kHz mono")
-            );
+            for problem in [
+                transcribe(samples, &test_model()).unwrap_err(),
+                transcribe_timed(samples, &test_model()).unwrap_err(),
+            ] {
+                assert_eq!(problem.title, "Transcription failed");
+                assert!(problem.detail.unwrap().contains("finite 16 kHz mono"));
+            }
         }
     }
 
@@ -489,14 +570,23 @@ mod tests {
     /// Speaks `text` with macOS `say` and returns it as 16 kHz mono f32, or
     /// `None` after printing why the integration test is skipped.
     fn generated_speech(test: &str, text: &str) -> Option<Vec<f32>> {
-        if let Err(error) = whisper_cli().and_then(|_| model_path()) {
+        if let Err(error) = whisper_cli() {
             eprintln!("SKIP {test}: {error}");
+            return None;
+        }
+        let model = test_model();
+        if !model.is_file() {
+            eprintln!("SKIP {test}: no model at {}", model.display());
             return None;
         }
         if !cfg!(target_os = "macos") {
             eprintln!("SKIP {test}: requires macOS say and afconvert");
             return None;
         }
+        Some(say(text))
+    }
+
+    fn say(text: &str) -> Vec<f32> {
         let temp = tempfile::tempdir().unwrap();
         let aiff = temp.path().join("speech.aiff");
         let wav = temp.path().join("speech.wav");
@@ -519,12 +609,10 @@ mod tests {
                 .success()
         );
         let mut reader = hound::WavReader::open(wav).unwrap();
-        Some(
-            reader
-                .samples::<i16>()
-                .map(|sample| f32::from(sample.unwrap()) / 32768.0)
-                .collect(),
-        )
+        reader
+            .samples::<i16>()
+            .map(|sample| f32::from(sample.unwrap()) / 32768.0)
+            .collect()
     }
 
     #[test]
@@ -537,10 +625,10 @@ mod tests {
             return;
         };
         let start = std::time::Instant::now();
-        let text = transcribe(&samples).unwrap();
+        let text = transcribe(&samples, &test_model()).unwrap();
         eprintln!(
             "model={} samples={} transcription_ms={} text={text:?}",
-            model_path().unwrap().display(),
+            test_model().display(),
             samples.len(),
             start.elapsed().as_millis()
         );
@@ -601,7 +689,7 @@ mod tests {
         samples.extend(near_silence(4_000));
         let expected = 4_000 + onset_ms(&speech);
 
-        let words = transcribe_timed(&samples).unwrap();
+        let words = transcribe_timed(&samples, &test_model()).unwrap();
         let error = report_onset(test, &words, expected);
         assert!(error <= ONSET_TOLERANCE_MS, "words: {words:?}");
         let speech_end = 4_000 + speech.len() as u64 / 16;
@@ -628,7 +716,7 @@ mod tests {
         samples.extend(&second);
         samples.extend(near_silence(1_000));
 
-        let words = transcribe_timed(&samples).unwrap();
+        let words = transcribe_timed(&samples, &test_model()).unwrap();
         report_onset(test, &words, 1_000 + onset_ms(&first));
         let then = words
             .iter()
@@ -667,12 +755,12 @@ That is everything for this page, thank you.";
         };
         let audio_ms = samples.len() as u64 * 1000 / 16_000;
         let start = std::time::Instant::now();
-        let words = transcribe_timed(&samples).unwrap();
+        let words = transcribe_timed(&samples, &test_model()).unwrap();
         let elapsed = start.elapsed();
         let rebuilt = segments(&words);
         eprintln!(
             "model={} audio_ms={audio_ms} transcribe_timed_ms={} words={} segments={} last_word_end_ms={}",
-            model_path().unwrap().display(),
+            test_model().display(),
             elapsed.as_millis(),
             words.len(),
             rebuilt.len(),
@@ -701,5 +789,38 @@ That is everything for this page, thank you.";
             rebuilt.len() >= 10,
             "expected about one segment per sentence"
         );
+    }
+
+    /// Times every catalog model on one generated sentence: one warm-up, then
+    /// five runs. Point `DICTATE_MEASURE_MODELS_DIR` at a folder holding the
+    /// GGML files. Results go in `docs/spike-results.md` and `models::CATALOG`.
+    #[test]
+    #[ignore = "Needs every model downloaded; run explicitly with --ignored --nocapture"]
+    fn measure_catalog_models() {
+        let dir = PathBuf::from(std::env::var_os("DICTATE_MEASURE_MODELS_DIR").unwrap());
+        let sentence = "Please move the Thursday design review to Friday morning, \
+                        and send Priya the updated budget before lunch.";
+        let samples = say(sentence);
+        println!(
+            "fixture_samples={} seconds={:.2}",
+            samples.len(),
+            samples.len() as f64 / 16_000.0
+        );
+        for info in &crate::models::CATALOG {
+            let model = crate::models::path(&dir, info.id);
+            transcribe(&samples, &model).unwrap();
+            let mut timings = Vec::new();
+            let mut text = String::new();
+            for _ in 0..5 {
+                let start = std::time::Instant::now();
+                text = transcribe(&samples, &model).unwrap();
+                timings.push(start.elapsed().as_millis());
+            }
+            timings.sort();
+            println!(
+                "model={} median_ms={} min_ms={} max_ms={} text={text:?}",
+                info.file_name, timings[2], timings[0], timings[4]
+            );
+        }
     }
 }
