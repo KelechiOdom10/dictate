@@ -285,7 +285,13 @@ function mockApp(
   );
   return () => clearMocks();
 }
-function GeneralPage({ page = "General" }: { page?: string }) {
+function GeneralPage({
+  page = "General",
+  width,
+}: {
+  page?: string;
+  width?: number;
+}) {
   const [client] = useState(
     () =>
       new QueryClient({
@@ -296,7 +302,7 @@ function GeneralPage({ page = "General" }: { page?: string }) {
       }),
   );
   return (
-    <div style={{ height: "100vh" }}>
+    <div style={{ height: "100vh", width }}>
       <QueryClientProvider client={client}>
         <SettingsWindow initialPage={page} />
       </QueryClientProvider>
@@ -455,6 +461,40 @@ export const HistoryCopy: Story = {
     await expect(layoutOf(...parts())).toEqual(before);
   },
 };
+export const HistoryNarrow: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  render: () => <GeneralPage page="History" width={640} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const list = await c.findByRole("group", { name: "Dictations" });
+    const rows = within(list).getAllByRole("button", { expanded: false });
+    await expect(rows).toHaveLength(5);
+    await expect(c.queryByRole("region", { name: "Dictation" })).toBeNull();
+  },
+};
+export const HistoryNarrowOpen: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  render: () => <GeneralPage page="History" width={640} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const bakery = await c.findByRole("button", { name: /bakery/i });
+    const slack = c.getByRole("button", { name: /Ship the history/ });
+    await userEvent.click(bakery);
+    await userEvent.click(slack);
+    await expect(bakery).toHaveAttribute("aria-expanded", "false");
+    await expect(slack).toHaveAttribute("aria-expanded", "true");
+    const detail = c.getByRole("region", { name: "Dictation" });
+    await expect(detail).toHaveTextContent("Then hand it to review.");
+    await expect(detail.scrollWidth).toBeLessThanOrEqual(detail.clientWidth);
+    await userEvent.click(
+      within(detail).getByRole("button", { name: "Copy text" }),
+    );
+    await expect(await c.findByText("Copied to clipboard")).toBeInTheDocument();
+    await expect(
+      within(detail).getByRole("button", { name: "Delete dictation" }),
+    ).toBeVisible();
+  },
+};
 const annotationsHistory = ({
   globals,
 }: {
@@ -482,6 +522,34 @@ export const HistoryAnnotations: Story = {
     await expect(detail).toHaveTextContent("3 with a contact sheet");
     await expect(detail).toHaveTextContent("3.2 s");
     await expect(detail.scrollWidth).toBeLessThanOrEqual(detail.clientWidth);
+  },
+};
+export const HistoryAnnotationsNarrowOpen: Story = {
+  beforeEach: annotationsHistory,
+  render: () => <GeneralPage page="History" width={640} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("radio", { name: "Annotations" }));
+    const list = await c.findByRole("group", { name: "Annotations" });
+    const [first, second] = within(list).getAllByRole("button", {
+      expanded: false,
+    });
+    await userEvent.click(first!);
+    await userEvent.click(second!);
+    await expect(first).toHaveAttribute("aria-expanded", "false");
+    await expect(second).toHaveAttribute("aria-expanded", "true");
+    const detail = c.getByRole("region", { name: "Annotation" });
+    await expect(detail).toHaveTextContent("Nothing was said in this session.");
+    await userEvent.click(
+      within(detail).getByRole("button", { name: "Copy again" }),
+    );
+    await userEvent.click(
+      within(detail).getByRole("button", { name: "Reveal in Finder" }),
+    );
+    await expect(annotateCalls).toEqual([
+      "copy_annotation 2026-11-14_16-05-51",
+      "reveal_annotation 2026-11-14_16-05-51",
+    ]);
   },
 };
 export const HistoryAnnotationActions: Story = {

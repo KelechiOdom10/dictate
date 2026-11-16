@@ -1,6 +1,8 @@
 import {
+  useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -18,6 +20,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -123,7 +126,102 @@ export default function HistoryPage({
   );
 }
 
+const PANE_MIN_WIDTH = 260;
+
+function useTwoPanes() {
+  const [twoPanes, setTwoPanes] = useState(true);
+  const panes = useCallback((grid: HTMLDivElement | null) => {
+    if (!grid) return;
+    const measure = () => {
+      const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+      setTwoPanes(grid.clientWidth >= 2 * PANE_MIN_WIDTH + gap);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, []);
+  return [panes, twoPanes] as const;
+}
+
+function scrollParent(node: Element) {
+  for (let el = node.parentElement; el; el = el.parentElement) {
+    const { overflowY } = getComputedStyle(el);
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      el.scrollHeight > el.clientHeight
+    )
+      return el;
+  }
+  return document.scrollingElement ?? document.documentElement;
+}
+
 type Row<Id> = { id: Id; title: string; meta?: string; date: string };
+
+function Accordion<Id extends string | number>({
+  label,
+  rows,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  rows: Row<Id>[];
+  value: Id | null;
+  onChange: (id: Id | null) => void;
+  children: ReactNode;
+}) {
+  const anchor = useRef<{ trigger: Element; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const held = anchor.current;
+    anchor.current = null;
+    if (!held?.trigger.isConnected) return;
+    const moved = held.trigger.getBoundingClientRect().top - held.top;
+    if (moved) scrollParent(held.trigger).scrollTop += moved;
+  }, [value]);
+  return (
+    <Card padding={2} role="group" aria-label={label}>
+      <CollapsibleGroup
+        hasDividers
+        value={value === null ? [] : String(value)}
+        onChange={(next) =>
+          onChange(rows.find((row) => String(row.id) === next)?.id ?? null)
+        }
+      >
+        {rows.map((row) => (
+          <Collapsible
+            key={row.id}
+            value={String(row.id)}
+            onClickCapture={(event) => {
+              const trigger = event.currentTarget.querySelector(
+                ":scope > button[aria-expanded]",
+              );
+              if (trigger && trigger.contains(event.target as Node))
+                anchor.current = {
+                  trigger,
+                  top: trigger.getBoundingClientRect().top,
+                };
+            }}
+            trigger={
+              <HStack gap={2} hAlign="between" vAlign="center">
+                <VStack gap={0.5}>
+                  <Text maxLines={2}>{row.title}</Text>
+                  {row.meta && <Text type="supporting">{row.meta}</Text>}
+                </VStack>
+                <Text type="supporting" textWrap="nowrap">
+                  {row.date}
+                </Text>
+              </HStack>
+            }
+          >
+            {row.id === value && children}
+          </Collapsible>
+        ))}
+      </CollapsibleGroup>
+    </Card>
+  );
+}
+
 function Rows<Id extends string | number>({
   label,
   rows,
@@ -184,37 +282,52 @@ function Detail({
   subtitle,
   actions,
   metadata,
+  isInline,
   children,
 }: {
   title: string;
   subtitle: string;
   actions?: ReactNode;
   metadata: { label: string; value: string }[];
+  isInline: boolean;
   children: ReactNode;
 }) {
-  return (
-    <Card role="region" aria-label={title}>
-      <VStack gap={4}>
-        <HStack gap={2} hAlign="between" vAlign="start">
+  const body = (
+    <>
+      <HStack gap={2} hAlign="between" vAlign={isInline ? "center" : "start"}>
+        {isInline ? (
+          <Text type="supporting">{subtitle}</Text>
+        ) : (
           <VStack gap={1}>
             <Heading level={2}>{title}</Heading>
             <Text type="supporting">{subtitle}</Text>
           </VStack>
-          {actions && (
-            <HStack gap={1} vAlign="center">
-              {actions}
-            </HStack>
-          )}
-        </HStack>
-        {children}
-        <MetadataList>
-          {metadata.map((row) => (
-            <MetadataListItem key={row.label} label={row.label}>
-              {row.value}
-            </MetadataListItem>
-          ))}
-        </MetadataList>
+        )}
+        {actions && (
+          <HStack gap={1} vAlign="center">
+            {actions}
+          </HStack>
+        )}
+      </HStack>
+      {children}
+      <MetadataList>
+        {metadata.map((row) => (
+          <MetadataListItem key={row.label} label={row.label}>
+            {row.value}
+          </MetadataListItem>
+        ))}
+      </MetadataList>
+    </>
+  );
+  if (isInline)
+    return (
+      <VStack gap={4} role="region" aria-label={title}>
+        {body}
       </VStack>
+    );
+  return (
+    <Card role="region" aria-label={title}>
+      <VStack gap={4}>{body}</VStack>
     </Card>
   );
 }
@@ -225,6 +338,7 @@ function Dictations() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [panes, twoPanes] = useTwoPanes();
   const [pendingRetention, setPendingRetention] = useState<Retention | null>(
     null,
   );
@@ -264,8 +378,8 @@ function Dictations() {
   const entries = (history.data?.entries ?? []).filter(
     (entry) => filter === "all" || entry.status === filter,
   );
-  const selected =
-    entries.find((entry) => entry.id === selectedId) ?? entries[0];
+  const open = entries.find((entry) => entry.id === selectedId);
+  const selected = open ?? entries[0];
   const current = settings.data?.historyRetention ?? "week";
 
   function saveRetention(value: Retention) {
@@ -275,12 +389,11 @@ function Dictations() {
     retention.mutate({ ...settings.data, historyRetention: value });
   }
 
-  async function removeSelected() {
-    if (!selected) return;
+  async function removeEntry(entry: HistoryEntry) {
     setError("");
-    const index = entries.indexOf(selected);
+    const index = entries.indexOf(entry);
     const next = entries[index + 1] ?? entries[index - 1];
-    await remove.mutateAsync(selected.id);
+    await remove.mutateAsync(entry.id);
     setSelectedId(next?.id ?? null);
   }
 
@@ -370,6 +483,28 @@ function Dictations() {
       </>
     );
 
+  const rows = entries.map((entry) => ({
+    id: entry.id,
+    title: entryTitle(entry),
+    meta: [
+      entry.app ?? "Unknown app",
+      entry.status === "pasted" ? null : statusLabels[entry.status],
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    date: relativeTime(entry.createdAtMs, now),
+  }));
+  const detailOf = (entry: HistoryEntry, isInline: boolean) => (
+    <DictationDetail
+      key={entry.id}
+      entry={entry}
+      now={now}
+      isInline={isInline}
+      deleting={remove.isPending}
+      onDelete={() => void removeEntry(entry).catch(() => {})}
+      onError={setError}
+    />
+  );
   const more = history.data.hasMore && (
     <HStack gap={2} vAlign="center" hAlign="between">
       <Text type="supporting">
@@ -422,34 +557,38 @@ function Dictations() {
           }
         />
       ) : (
-        <Grid columns={{ minWidth: 260, repeat: "fit" }} gap={4} align="start">
-          <VStack gap={2}>
-            <Rows
-              label="Dictations"
-              rows={entries.map((entry) => ({
-                id: entry.id,
-                title: entryTitle(entry),
-                meta: [
-                  entry.app ?? "Unknown app",
-                  entry.status === "pasted" ? null : statusLabels[entry.status],
-                ]
-                  .filter(Boolean)
-                  .join(" · "),
-                date: relativeTime(entry.createdAtMs, now),
-              }))}
-              value={selected.id}
-              onChange={setSelectedId}
-            />
-            {more}
-          </VStack>
-          <DictationDetail
-            key={selected.id}
-            entry={selected}
-            now={now}
-            deleting={remove.isPending}
-            onDelete={() => void removeSelected().catch(() => {})}
-            onError={setError}
-          />
+        <Grid
+          ref={panes}
+          columns={{ minWidth: PANE_MIN_WIDTH, repeat: "fit" }}
+          gap={4}
+          align="start"
+        >
+          {twoPanes ? (
+            <>
+              <VStack gap={2}>
+                <Rows
+                  label="Dictations"
+                  rows={rows}
+                  value={selected.id}
+                  onChange={setSelectedId}
+                />
+                {more}
+              </VStack>
+              {detailOf(selected, false)}
+            </>
+          ) : (
+            <VStack gap={2}>
+              <Accordion
+                label="Dictations"
+                rows={rows}
+                value={open?.id ?? null}
+                onChange={setSelectedId}
+              >
+                {open && detailOf(open, true)}
+              </Accordion>
+              {more}
+            </VStack>
+          )}
         </Grid>
       )}
       {keepFor}
@@ -465,12 +604,14 @@ const fullDate = new Intl.DateTimeFormat(undefined, {
 function DictationDetail({
   entry,
   now,
+  isInline,
   deleting,
   onDelete,
   onError,
 }: {
   entry: HistoryEntry;
   now: number;
+  isInline: boolean;
   deleting: boolean;
   onDelete: () => void;
   onError: (error: string) => void;
@@ -497,6 +638,7 @@ function DictationDetail({
   return (
     <Detail
       title="Dictation"
+      isInline={isInline}
       subtitle={`${relativeTime(entry.createdAtMs, now)} · ${fullDate.format(entry.createdAtMs)}`}
       actions={
         <>
@@ -570,6 +712,7 @@ function Annotations() {
   const client = useQueryClient();
   const now = useNow();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [panes, twoPanes] = useTwoPanes();
   const [error, setError] = useState("");
   const annotations = useQuery({
     queryKey: ["annotations"],
@@ -596,8 +739,8 @@ function Annotations() {
       />
     );
   const entries = annotations.data;
-  const selected =
-    entries.find((entry) => entry.id === selectedId) ?? entries[0];
+  const open = entries.find((entry) => entry.id === selectedId);
+  const selected = open ?? entries[0];
   if (!selected)
     return (
       <EmptyState
@@ -614,33 +757,56 @@ function Annotations() {
         }
       />
     );
+  const rows = entries.map((entry) => ({
+    id: entry.id,
+    title: annotationTitle(entry),
+    meta: annotationMeta(entry),
+    date: relativeTime(Date.parse(entry.startedAt), now),
+  }));
+  const detailOf = (entry: AnnotationEntry, isInline: boolean) => (
+    <AnnotationDetail
+      key={entry.id}
+      entry={entry}
+      now={now}
+      isInline={isInline}
+      onError={setError}
+      onDeleted={() => {
+        const index = entries.indexOf(entry);
+        const next = entries[index + 1] ?? entries[index - 1];
+        setSelectedId(next?.id ?? null);
+        void client.invalidateQueries({ queryKey: ["annotations"] });
+      }}
+    />
+  );
   return (
     <>
       <ErrorNotice error={error} />
-      <Grid columns={{ minWidth: 260, repeat: "fit" }} gap={4} align="start">
-        <Rows
-          label="Annotations"
-          rows={entries.map((entry) => ({
-            id: entry.id,
-            title: annotationTitle(entry),
-            meta: annotationMeta(entry),
-            date: relativeTime(Date.parse(entry.startedAt), now),
-          }))}
-          value={selected.id}
-          onChange={setSelectedId}
-        />
-        <AnnotationDetail
-          key={selected.id}
-          entry={selected}
-          now={now}
-          onError={setError}
-          onDeleted={() => {
-            const index = entries.indexOf(selected);
-            const next = entries[index + 1] ?? entries[index - 1];
-            setSelectedId(next?.id ?? null);
-            void client.invalidateQueries({ queryKey: ["annotations"] });
-          }}
-        />
+      <Grid
+        ref={panes}
+        columns={{ minWidth: PANE_MIN_WIDTH, repeat: "fit" }}
+        gap={4}
+        align="start"
+      >
+        {twoPanes ? (
+          <>
+            <Rows
+              label="Annotations"
+              rows={rows}
+              value={selected.id}
+              onChange={setSelectedId}
+            />
+            {detailOf(selected, false)}
+          </>
+        ) : (
+          <Accordion
+            label="Annotations"
+            rows={rows}
+            value={open?.id ?? null}
+            onChange={setSelectedId}
+          >
+            {open && detailOf(open, true)}
+          </Accordion>
+        )}
       </Grid>
     </>
   );
@@ -649,11 +815,13 @@ function Annotations() {
 function AnnotationDetail({
   entry,
   now,
+  isInline,
   onError,
   onDeleted,
 }: {
   entry: AnnotationEntry;
   now: number;
+  isInline: boolean;
   onError: (error: string) => void;
   onDeleted: () => void;
 }) {
@@ -697,6 +865,7 @@ function AnnotationDetail({
   return (
     <Detail
       title="Annotation"
+      isInline={isInline}
       subtitle={`${relativeTime(started, now)} · ${fullDate.format(started)}`}
       actions={
         <>
