@@ -1,0 +1,89 @@
+[
+  {
+    "id": "tiny.en",
+    "name": "Tiny English",
+    "description": "Instant, for short notes. Misses more words.",
+    "bytes": 77704715,
+    "accuracy": 1,
+    "measuredMs": 188,
+    "recommended": false,
+    "licence": null,
+    "active": false,
+    "state": {
+      "kind": "available"
+    }
+  },
+  {
+    "id": "base.en",
+    "name": "Base English",
+    "description": "Fast and dependable for everyday dictation.",
+    "bytes": 147964211,
+    "accuracy": 2,
+    "measuredMs": 232,
+    "recommended": false,
+    "licence": null,
+    "active": true,
+    "state": {
+      "kind": "available"
+    }
+  },
+  {
+    "id": "small.en",
+    "name": "Small English",
+    "description": "Noticeably more accurate, still quick on this Mac.",
+    "bytes": 487614201,
+    "accuracy": 3,
+    "measuredMs": 437,
+    "recommended": false,
+    "licence": null,
+    "active": false,
+    "state": {
+      "kind": "available"
+    }
+  },
+  {
+    "id": "medium.en",
+    "name": "Medium English",
+    "description": "Careful with names and jargon, but slower.",
+    "bytes": 1533774781,
+    "accuracy": 4,
+    "measuredMs": 1037,
+    "recommended": false,
+    "licence": null,
+    "active": false,
+    "state": {
+      "kind": "available"
+    }
+  },
+  {
+    "id": "large-v3-turbo",
+    "name": "Large v3 Turbo",
+    "description": "The most accurate. Multilingual, set to English here.",
+    "bytes": 1624555275,
+    "accuracy": 5,
+    "measuredMs": 1084,
+    "recommended": false,
+    "licence": null,
+    "active": false,
+    "state": {
+      "kind": "available"
+    }
+  },
+  {
+    "id": "parakeet-unified-en",
+    "name": "Parakeet English",
+    "description": "NVIDIA's dictation model. Very accurate, and stays loaded so text is ready fast.",
+    "bytes": 731357568,
+    "accuracy": 5,
+    "measuredMs": 134,
+    "recommended": true,
+    "licence": {
+      "name": "NVIDIA Open Model License",
+      "url": "https://huggingface.co/nvidia/parakeet-unified-en-0.6b"
+    },
+    "active": false,
+    "state": {
+      "kind": "available"
+    }
+  }
+]

@@ -28,6 +28,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 | `src-tauri/src/audio.rs` | Capture. `start`/`stop`, 16 kHz mono f32 |
 | `src-tauri/src/transcribe.rs` | Speech to text. Samples in, text out |
 | `src-tauri/src/insert.rs` | Paste into the focused app, restore clipboard |
+| `src-tauri/src/screen.rs` | Annotate screen recording. `start`/`stop`, one display to MP4 |
 | `models/` | Whisper GGML weights. Never committed. |
 | `docs/` | The spike question, and later the kickoff docs |
 
@@ -46,6 +47,8 @@ because it was slowing the build down.
 
 ## Conventions
 
+- New UI is built from `src/ui` components; every new or changed component ships
+  with stories for its states. See `docs/design-system.md` for the component contracts.
 - The three pipeline stages stay separate and independently callable. A stage you
   cannot call alone is a stage you cannot measure alone.
 - Audio is 16 kHz mono f32 at every boundary. Convert once, at capture.
