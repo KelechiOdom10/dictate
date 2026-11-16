@@ -118,10 +118,12 @@ export default function HistoryPage({
   const [view, setView] = useState<string>(initialView);
   return (
     <VStack gap={4}>
-      <SegmentedControl label="Show" value={view} onChange={setView}>
-        <SegmentedControlItem value="dictations" label="Dictations" />
-        <SegmentedControlItem value="annotations" label="Annotations" />
-      </SegmentedControl>
+      <VStack paddingBlockEnd={6}>
+        <SegmentedControl label="Show" value={view} onChange={setView}>
+          <SegmentedControlItem value="dictations" label="Dictations" />
+          <SegmentedControlItem value="annotations" label="Annotations" />
+        </SegmentedControl>
+      </VStack>
       {view === "annotations" ? <Annotations /> : <Dictations />}
     </VStack>
   );

@@ -2384,7 +2384,7 @@ const edgeMarker = (row: Locator) =>
 
 /** The History list is a List in two panes and an accordion group when narrow. */
 const historyList = (page: Page, view: string, width: number) =>
-  width >= 900
+  width >= 820
     ? page.getByRole("list", { name: view, exact: true })
     : page.getByRole("group", { name: view, exact: true });
 
@@ -2434,7 +2434,7 @@ test("the entry the detail belongs to is marked in both History layouts", async 
   ).toBe("2px");
 });
 
-for (const width of [640, 1100]) {
+for (const width of [640, 720, 820, 1100]) {
   for (const view of ["Dictations", "Annotations"] as const) {
     test(`at ${width}px ${view} says what it keeps on disk above the list`, async ({
       page,
@@ -2477,6 +2477,62 @@ for (const width of [640, 1100]) {
         await expect(
           page.getByRole("combobox", { name: "Keep history for" }),
         ).toBeVisible();
+    });
+  }
+}
+
+for (const width of [640, 720, 820, 1100]) {
+  for (const view of ["Dictations", "Annotations"] as const) {
+    test(`at ${width}px ${view} storage stays readable with the navigation hint`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 760 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await openSettings(page, { history: takes, annotations: sessions });
+      await page.getByRole("button", { name: "History", exact: true }).click();
+      await page.keyboard.press("Tab");
+      const tab = page.getByRole("radio", { name: view, exact: true });
+      await tab.focus();
+      await tab.press("Space");
+      const hint = page.getByText("to navigate", { exact: true });
+      await expect(hint).toBeVisible();
+      const line = page.getByText(
+        view === "Dictations"
+          ? /^17\.6 MB on this Mac/
+          : /^3\.0 MB on this Mac · 14 sessions$/,
+      );
+      await expect(line).toBeVisible();
+      const readable = () =>
+        line.evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const text = range.getBoundingClientRect();
+          const box = element.getBoundingClientRect();
+          const overlays = [...document.querySelectorAll("[popover]")]
+            .filter((node) => node.matches(":popover-open"))
+            .map((node) => node.getBoundingClientRect());
+          return {
+            complete:
+              text.left >= box.left - 1 &&
+              text.right <= box.right + 1 &&
+              text.top >= box.top - 1 &&
+              text.bottom <= box.bottom + 1 &&
+              text.right <= innerWidth,
+            covered: overlays.some(
+              (overlay) =>
+                overlay.left < text.right &&
+                overlay.right > text.left &&
+                overlay.top < text.bottom &&
+                overlay.bottom > text.top,
+            ),
+          };
+        });
+      await expect.poll(readable).toEqual({ complete: true, covered: false });
+      const before = await line.boundingBox();
+      await tab.press("Tab");
+      await expect(hint).not.toBeVisible();
+      expect(await readable()).toEqual({ complete: true, covered: false });
+      expect(await line.boundingBox()).toEqual(before);
     });
   }
 }
