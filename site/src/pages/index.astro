@@ -9,7 +9,7 @@ const requirement = `Apple silicon, macOS 15 or later, ${release.size}`;
 
 const shotSizes = "(min-width: 64rem) 60rem, calc(100vw - 2.5rem)";
 
-const frameSizes = "(min-width: 56rem) 40rem, calc(100vw - 2.5rem)";
+const frameSizes = "(min-width: 56rem) 420px, calc(100vw - 5rem)";
 
 const steps = [
   { id: "record", name: "Record", text: "Tap Option-Shift-A to record your screen and voice." },
@@ -23,20 +23,20 @@ const frames = [
     id: "record",
     at: "00:06",
     caption: "Recording. The toolbar keeps time at the top of the screen.",
-    alt: "dictate's General settings, six seconds into a real take. The Annotate toolbar at the top reads 00:06.",
+    alt: "The Annotate toolbar above dictate's settings window, six seconds into a real take. It reads 00:06.",
   },
   {
     id: "draw",
     at: "0:21",
     caption: "stroke across x 0.24–0.77, y 0.57–0.73",
-    alt: "The same window at 0:21, with a red ink loop drawn around the Input level row and the Test microphone button.",
+    alt: "A red ink loop drawn at 0:21 around the Input level row and the Test microphone button.",
   },
   {
     id: "talk",
     at: "0:54",
     quote: true,
     caption: "I'd rather it starts with like the segmented stuff already so that when you click test it just starts listening",
-    alt: "The window at 0:53, mid microphone test, with a second ink loop around Input level and its segmented meter.",
+    alt: "At 0:53, mid microphone test, a second ink loop around Input level and its segmented meter, beside Stop test.",
   },
 ];
 
@@ -237,10 +237,10 @@ const settingsAlt =
                 <figure>
                   <img
                     src={`/app/annotate-${frame.id}.webp`}
-                    srcset={`/app/annotate-${frame.id}-640.webp 640w, /app/annotate-${frame.id}.webp 1040w`}
+                    srcset={`/app/annotate-${frame.id}-420.webp 420w, /app/annotate-${frame.id}.webp 840w`}
                     sizes={frameSizes}
-                    width="1040"
-                    height="976"
+                    width="840"
+                    height="420"
                     alt={frame.alt}
                     loading="lazy"
                     decoding="async"

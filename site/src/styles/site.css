@@ -730,6 +730,12 @@ kbd.space {
 
 .panels {
   display: grid;
+  width: 100%;
+  max-width: calc(420px + 3rem);
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
 }
 
 .panel {
@@ -740,23 +746,23 @@ kbd.space {
   border-radius: 12px;
 }
 
+.panel[hidden] {
+  display: none;
+}
+
 .panel figure {
   display: grid;
   gap: 1rem;
-}
-
-.panel[hidden] {
-  display: none;
 }
 
 .panel img {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 12px;
+  border-radius: 10px;
   box-shadow:
     0 0 0 1px var(--line),
-    0 40px 80px -40px var(--shadow);
+    0 24px 48px -28px var(--shadow);
 }
 
 .panel img + figcaption {
@@ -764,6 +770,7 @@ kbd.space {
   gap: 0.75rem;
   align-items: baseline;
   font-size: var(--size-small);
+  line-height: 1.5;
   color: var(--muted);
 }
 
@@ -783,11 +790,7 @@ kbd.space {
 }
 
 .panel-copy {
-  gap: 1rem;
-  padding: 1.25rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
+  gap: 0.75rem;
 }
 
 .copied {
@@ -799,17 +802,18 @@ kbd.space {
 
 .files {
   list-style: none;
-  border-block: 1px solid var(--line);
-  padding-block: 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0 1.5rem;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: var(--size-small);
+  font-size: 0.75rem;
 }
 
 .files li {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  padding-block: 0.3125rem;
+  padding-block: 0.125rem;
   color: var(--muted);
 }
 
@@ -823,17 +827,19 @@ kbd.space {
 }
 
 .panel-copy figure {
-  gap: 0.5rem;
+  gap: 0.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
   font-size: var(--size-small);
 }
 
 .summary {
   list-style: none;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.25rem;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.8125rem;
-  line-height: 1.5;
+  font-size: 0.6875rem;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -852,7 +858,8 @@ kbd.space {
 
 @media (min-width: 56rem) {
   .annotate {
-    grid-template-columns: 20rem 1fr;
+    grid-template-columns: 20rem calc(420px + 3rem);
+    justify-content: center;
   }
 
   .panel[hidden] {
