@@ -1227,3 +1227,56 @@ for (const mode of ["light", "dark"]) {
     await expect(page.getByRole("status")).toContainText("Ready");
   });
 }
+
+for (const width of [720, 560, 390])
+  test(`shortcut keycaps are never clipped at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 580 });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await openSettings(page);
+    const recorder = page.getByRole("button", {
+      name: "Shortcut",
+      exact: true,
+    });
+    await expect(recorder.locator("kbd")).toHaveText(["⌥", "⇧", "Space"]);
+    const clipped = await recorder.evaluate((button) =>
+      [...button.querySelectorAll("kbd")].flatMap((kbd) => {
+        const key = kbd.getBoundingClientRect();
+        const hidden: string[] = [];
+        for (let el = kbd.parentElement; el; el = el.parentElement) {
+          if (getComputedStyle(el).overflowX === "visible") continue;
+          const box = el.getBoundingClientRect();
+          if (key.left < box.left - 0.5 || key.right > box.right + 0.5)
+            hidden.push(
+              `${kbd.textContent} clipped by ${el.tagName}.${el.className}`,
+            );
+        }
+        const control = button.getBoundingClientRect();
+        if (key.left < control.left - 0.5 || key.right > control.right + 0.5)
+          hidden.push(`${kbd.textContent} outside the recorder`);
+        return hidden;
+      }),
+    );
+    expect(clipped).toEqual([]);
+  });
+
+test("settings controls share one pill shape", async ({ page }) => {
+  await openSettings(page);
+  await expect(page.getByRole("switch")).toBeAttached();
+  const radii = await page.locator("main").evaluate((main) =>
+    [
+      ...main.querySelectorAll(
+        ".ui-group button:not(.row-link), .ui-group select, .ui-shortcut",
+      ),
+    ]
+      .filter((el) => el.getBoundingClientRect().width > 0)
+      .map((el) => {
+        const { height } = el.getBoundingClientRect();
+        return (
+          parseFloat(getComputedStyle(el).borderTopLeftRadius) >=
+          height / 2 - 0.5
+        );
+      }),
+  );
+  expect(radii.length).toBeGreaterThan(3);
+  expect(radii.every(Boolean)).toBe(true);
+});

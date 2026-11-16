@@ -2,7 +2,7 @@
 
 The settings window uses Astryx 0.7.16 components over a customized Neutral
 theme: warm off-white light surfaces, dark surfaces taken from the owner's Capy Catppuccin theme,
-Geist, and Ember primary actions and bright accents. Paper keeps ink actions.
+Geist, and ink primary actions in both palettes.
 The recording overlay remains a separate, compact native-window presentation;
 Paper uses a warm red recording dot while its switches and level bars stay ink.
 General › Appearance saves Theme (Ember / Paper) and Mode (System / Light / Dark)
@@ -51,6 +51,20 @@ selects and radio groups retain their platform keyboard behavior and ids.
 The overlay has no Theme provider and keeps its existing buttons and sizing.
 Reduced motion disables
 transitions and the busy spinner's rotation; focus rings stay visible.
+
+## Shape rule
+
+One rule per role, enforced by `tests/settings.spec.ts` ("settings controls share one pill shape"):
+
+| Role | Radius | Members |
+| --- | --- | --- |
+| Inline control (28–40px tall) | pill (`--radius-pill`) | Button and IconButton (Astryx Button themed to pill), Select, SearchField, SegmentedControl and its thumb, Chip/FilterChips, ShortcutRecorder, Switch track, Test microphone |
+| Row or navigation item | 8px (`--radius-control`) | SidebarNav items, SelectList/History rows |
+| Container | 14px (`--radius-panel`) | Settings groups, cards, detail panel, toasts |
+| Keycap | 6px | KeyboardShortcut keys |
+| Text link | none | "Manage models" and other inline links |
+
+Colour follows the same restraint as the original system: primary actions are ink (near-black in light, near-white in dark); colour is reserved for status. Ember orange is never a fill in settings.
 
 ## Astryx setup and generated conventions
 

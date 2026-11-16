@@ -20,11 +20,16 @@ export const dictateTheme = defineTheme({
     '--color-icon-secondary': ['oklch(0.48 0.015 75)', '#a2aacc'],
     '--color-border': ['oklch(0.925 0.008 75)', '#2a2d4d'],
     '--color-border-emphasized': ['oklch(0.48 0.015 75)', '#7a80a6'],
-    '--color-accent': ['#a84114', 'oklch(0.68 0.18 40)'],
-    '--color-on-accent': ['#ffffff', '#0a0b1e'],
-    '--color-accent-muted': ['#f9e3d7', 'color-mix(in srgb, oklch(0.68 0.18 40) 22%, #11132a)'],
-    '--color-text-accent': ['#a84114', 'oklch(0.72 0.16 40)'],
-    '--color-icon-accent': ['#a84114', 'oklch(0.72 0.16 40)'],
-    '--focus-outline-color': ['#a84114', 'oklch(0.72 0.16 40)'],
+    '--color-accent': ['oklch(0.22 0.006 75)', '#d2daf6'],
+    '--color-on-accent': ['oklch(0.985 0.003 75)', '#0a0b1e'],
+    '--color-accent-muted': ['oklch(0.925 0.008 75)', '#1f223f'],
+    '--color-text-accent': ['oklch(0.22 0.006 75)', '#d2daf6'],
+    '--color-icon-accent': ['oklch(0.22 0.006 75)', '#d2daf6'],
+    '--focus-outline-color': ['oklch(0.22 0.006 75)', '#a99cf5'],
+  },
+  components: {
+    button: {
+      base: { borderRadius: 'var(--radius-pill, 9999px)' },
+    },
   },
 });

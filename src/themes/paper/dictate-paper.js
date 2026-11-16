@@ -120,7 +120,7 @@ export const dictatePaperTheme = {
     "--color-background-popover": "light-dark(oklch(0.998 0.001 75), #2a2d4d)",
     "--color-background-muted": "light-dark(oklch(0.965 0.005 75), #0a0b1e)",
     "--color-accent": "light-dark(oklch(0.22 0.006 75), #d2daf6)",
-    "--color-accent-muted": "light-dark(oklch(0.925 0.008 75), #2a2d4d)",
+    "--color-accent-muted": "light-dark(oklch(0.925 0.008 75), #1f223f)",
     "--color-neutral": "light-dark(oklch(0.95 0.006 75), #2a2d4d)",
     "--color-overlay": "light-dark(#00000080, #000000CC)",
     "--color-overlay-hover": "light-dark(#0000000d, #ffffff0d)",
@@ -344,6 +344,9 @@ export const dictatePaperTheme = {
       "variant:destructive": {
         "backgroundColor": "var(--color-error-muted)",
         "color": "var(--color-on-error-muted)"
+      },
+      "base": {
+        "borderRadius": "var(--radius-pill, 9999px)"
       }
     },
     "badge": {

@@ -1,5 +1,5 @@
 import type { KeyboardEvent } from "react";
-import { Button, type ControlSize } from "./Button";
+import type { ControlSize } from "./Button";
 
 const keyLabels: Record<string, string> = {
   CommandOrControl: "⌘",
@@ -77,11 +77,10 @@ export function ShortcutRecorder({
     onCommit([...modifiers, event.code].join("+"));
   }
   return (
-    <Button
+    <button
       {...props}
-      size={size}
-      variant="ghost"
-      className={`ui-shortcut ${recording ? "ui-capturing" : ""}`}
+      type="button"
+      className={`ui-button ui-size-${size} ui-button-ghost ui-shortcut ${recording ? "ui-capturing" : ""}`}
       onClick={(event) => {
         event.currentTarget.focus();
         if (!recording) onStart();
@@ -98,6 +97,6 @@ export function ShortcutRecorder({
       ) : (
         <KeyboardShortcut value={value} size={size} />
       )}
-    </Button>
+    </button>
   );
 }

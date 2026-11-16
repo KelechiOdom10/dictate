@@ -119,8 +119,8 @@ export const dictateTheme = {
     "--color-background-card": "light-dark(oklch(0.998 0.001 75), #171a34)",
     "--color-background-popover": "light-dark(oklch(0.998 0.001 75), #2a2d4d)",
     "--color-background-muted": "light-dark(oklch(0.965 0.005 75), #0a0b1e)",
-    "--color-accent": "light-dark(#a84114, oklch(0.68 0.18 40))",
-    "--color-accent-muted": "light-dark(#f9e3d7, color-mix(in srgb, oklch(0.68 0.18 40) 22%, #11132a))",
+    "--color-accent": "light-dark(oklch(0.22 0.006 75), #d2daf6)",
+    "--color-accent-muted": "light-dark(oklch(0.925 0.008 75), #1f223f)",
     "--color-neutral": "light-dark(oklch(0.95 0.006 75), #2a2d4d)",
     "--color-overlay": "light-dark(#00000080, #000000CC)",
     "--color-overlay-hover": "light-dark(#0000000d, #ffffff0d)",
@@ -128,10 +128,10 @@ export const dictateTheme = {
     "--color-text-primary": "light-dark(oklch(0.22 0.006 75), #d2daf6)",
     "--color-text-secondary": "light-dark(oklch(0.48 0.015 75), #a2aacc)",
     "--color-text-disabled": "light-dark(#868ba5, #4d5164)",
-    "--color-text-accent": "light-dark(#a84114, oklch(0.72 0.16 40))",
+    "--color-text-accent": "light-dark(oklch(0.22 0.006 75), #d2daf6)",
     "--color-on-dark": "#ffffff",
     "--color-on-light": "#111111",
-    "--color-on-accent": "light-dark(#ffffff, #0a0b1e)",
+    "--color-on-accent": "light-dark(oklch(0.985 0.003 75), #0a0b1e)",
     "--color-on-success": "light-dark(#ffffff, #111111)",
     "--color-on-error": "light-dark(#ffffff, #111111)",
     "--color-on-warning": "#111111",
@@ -146,7 +146,7 @@ export const dictateTheme = {
     "--color-on-success-muted": "light-dark(#00490b, #90ca90)",
     "--color-on-warning-muted": "light-dark(#4b3900, #eec448)",
     "--color-on-error-muted": "light-dark(#76000c, #ffaea7)",
-    "--color-icon-accent": "light-dark(#a84114, oklch(0.72 0.16 40))",
+    "--color-icon-accent": "light-dark(oklch(0.22 0.006 75), #d2daf6)",
     "--color-icon-primary": "light-dark(oklch(0.22 0.006 75), #d2daf6)",
     "--color-icon-secondary": "light-dark(oklch(0.48 0.015 75), #a2aacc)",
     "--color-icon-disabled": "light-dark(#868ba5, #4d5164)",
@@ -215,7 +215,7 @@ export const dictateTheme = {
     "--shadow-inset-success": "inset 0px 0px 0px 2px #2f7d334D",
     "--shadow-inset-warning": "inset 0px 0px 0px 2px #f8d36a4D",
     "--shadow-inset-error": "inset 0px 0px 0px 2px #de47454D",
-    "--focus-outline-color": "light-dark(#a84114, oklch(0.72 0.16 40))"
+    "--focus-outline-color": "light-dark(oklch(0.22 0.006 75), #a99cf5)"
   },
   localTokens: {
     "--astryx-theme-neutral-color-status-fill-accent": "light-dark(#0074e2, #6d9cfe)"
@@ -344,6 +344,9 @@ export const dictateTheme = {
       "variant:destructive": {
         "backgroundColor": "var(--color-error-muted)",
         "color": "var(--color-on-error-muted)"
+      },
+      "base": {
+        "borderRadius": "var(--radius-pill, 9999px)"
       }
     },
     "badge": {
