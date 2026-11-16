@@ -438,8 +438,12 @@ export const HistoryCopy: Story = {
     const c = within(canvasElement);
     await userEvent.click(await c.findByRole("button", { name: /Bakery/i }));
     const copy = c.getByRole("button", { name: "Copy text" });
+    const detail = c.getByRole("region", { name: "Dictation" });
+    // The actions sit in the detail's own header, so the pane must not need a
+    // horizontal scroll to reach them.
+    await expect(detail.scrollWidth).toBeLessThanOrEqual(detail.clientWidth);
     const parts = () => [
-      c.getByRole("region", { name: "Dictation" }),
+      detail,
       c.getByRole("button", { name: "Delete dictation" }),
       c.getByRole("button", { name: /Bakery/i }),
     ];
