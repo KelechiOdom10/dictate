@@ -596,28 +596,17 @@ test("the two appearances keep their own theme", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await openSettings(page);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  const side = (name: "Light theme" | "Dark theme") =>
-    page
-      .getByRole("radiogroup", { name: "Theme for" })
-      .getByRole("radio", { name });
-  const list = (name: "light" | "dark") =>
-    page.getByRole("radiogroup", { name: `Theme for ${name}` });
-  await list("light")
-    .getByRole("radio", { name: /^Paper/ })
-    .click();
+  const half = (side: "light" | "dark", theme: string) =>
+    page.getByRole("radio", { name: `Set ${side} theme to ${theme}` });
+  await half("light", "Paper").click();
+  await expect(half("light", "Paper")).toBeChecked();
+  // The other half of the same card is a different choice, and untouched.
+  await expect(half("dark", "Paper")).not.toBeChecked();
+  await half("dark", "Capy").click();
+  await expect(half("dark", "Capy")).toBeChecked();
+  await expect(half("light", "Capy")).not.toBeChecked();
   await expect(
-    list("light").getByRole("radio", { name: /^Paper/ }),
-  ).toBeChecked();
-  // The other side kept its own choice while the first was being edited, and
-  // the switch names both so neither is hidden.
-  await side("Dark theme").click();
-  await expect(
-    list("dark").getByRole("radio", { name: /^Ember/ }),
-  ).toBeChecked();
-  await list("dark").getByRole("radio", { name: /^Capy/ }).click();
-  // Both choices stay on screen even though one list edits them.
-  await expect(
-    page.getByText("Light uses Paper · Dark uses Capy"),
+    page.getByText("Light uses Paper · Dark uses Capy", { exact: true }),
   ).toBeVisible();
   // System shows the theme that belongs to the Mac's side.
   await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
@@ -628,40 +617,72 @@ test("the two appearances keep their own theme", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
+  await expect(half("light", "Paper")).toBeChecked();
+  await expect(half("dark", "Capy")).toBeChecked();
 });
 
-test("the theme list edits one appearance at a time and previews it", async ({
+test("picking the same theme twice reads as one theme", async ({ page }) => {
+  await openSettings(page);
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  const half = (side: "light" | "dark", theme: string) =>
+    page.getByRole("radio", { name: `Set ${side} theme to ${theme}` });
+  await half("light", "Neutral").click();
+  await half("dark", "Neutral").click();
+  await expect(
+    page.getByText("Neutral in both", { exact: true }),
+  ).toBeVisible();
+});
+
+test("every card shows both sides and marks the half in use", async ({
   page,
 }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openSettings(page);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  const previewed = (column: ReturnType<typeof page.getByRole>) =>
-    column.evaluate((group) => [
-      ...new Set(
-        [...group.querySelectorAll("[data-theme]")].map((el) =>
-          el.getAttribute("data-theme"),
-        ),
-      ),
-    ]);
-  // It starts on the appearance that is on screen, and says so.
-  const dark = page.getByRole("radiogroup", { name: "Theme for dark" });
-  expect(await previewed(dark)).toEqual(["dark"]);
-  expect(await page.getByText("In use now").count()).toBe(1);
-  // Switching sides re-previews every row in that appearance and drops the
-  // marker, because the side being edited is no longer the one on screen.
   await page
-    .getByRole("radiogroup", { name: "Theme for" })
-    .getByRole("radio", { name: "Light theme" })
-    .click();
-  const light = page.getByRole("radiogroup", { name: "Theme for light" });
-  expect(await previewed(light)).toEqual(["light"]);
-  expect(await page.getByText("In use now").count()).toBe(0);
-  await page
-    .getByRole("radiogroup", { name: "Theme for" })
-    .getByRole("radio", { name: "Dark theme" })
-    .click();
-  expect(await page.getByText("In use now").count()).toBe(1);
+    .getByRole("radio", { name: /^Set light theme to/ })
+    .first()
+    .waitFor();
+  // Ten halves, three mode tiles: the halves are the ones that name a side.
+  const all = await page.evaluate(() =>
+    [...document.querySelectorAll("label.ui-choice")].map((label) => {
+      const input = label.querySelector("input")!;
+      return {
+        name: input.getAttribute("aria-label"),
+        preview:
+          label.querySelector("[data-theme]")?.getAttribute("data-theme") ??
+          null,
+        selected: label.hasAttribute("data-selected"),
+      };
+    }),
+  );
+  const halves = all.filter((half) => half.name?.startsWith("Set "));
+  expect(halves).toHaveLength(10);
+  expect(all.filter((tile) => !tile.name?.startsWith("Set "))).toHaveLength(3);
+  for (const half of halves)
+    expect(half.preview).toBe(
+      half.name!.startsWith("Set light") ? "light" : "dark",
+    );
+  // One chosen half per side, and the mode tile that is picked.
+  expect(
+    all
+      .filter((choice) => choice.selected)
+      .map((choice) => choice.name)
+      .sort(),
+  ).toEqual(["Set dark theme to Ember", "Set light theme to Ember", "System"]);
+  // Exactly one half is the theme on screen: the dark one, while the Mac is.
+  const inUse = () =>
+    page.evaluate(() => {
+      const dot = document
+        .querySelector('[aria-label="Current appearance"]')!
+        .closest("label");
+      return dot?.querySelector("input")!.getAttribute("aria-label") ?? null;
+    });
+  expect(await page.getByLabel("Current appearance").count()).toBe(1);
+  expect(await inUse()).toBe("Set dark theme to Ember");
+  await page.getByRole("radio", { name: "Light", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
+  expect(await inUse()).toBe("Set light theme to Ember");
 });
 
 const themeCases = [
@@ -681,9 +702,9 @@ for (const theme of themeCases) {
     await expect(
       page.getByRole("heading", { name: "Appearance", level: 1 }),
     ).toBeVisible();
-    const radio = page
-      .getByRole("radiogroup", { name: "Theme for light" })
-      .getByRole("radio", { name: new RegExp(`^${theme.name}`) });
+    const radio = page.getByRole("radio", {
+      name: `Set light theme to ${theme.name}`,
+    });
     await radio.click();
     await expect(radio).toBeChecked();
     await expect(page.locator("html")).toHaveAttribute(
@@ -703,12 +724,7 @@ for (const theme of themeCases) {
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
     await page.getByRole("button", { name: "About", exact: true }).click();
     await page.getByRole("button", { name: "Appearance", exact: true }).click();
-    // Coming back, the list opens on the appearance that is on screen; the
-    // choice made for the other side is still there when you switch to it.
-    await page
-      .getByRole("radiogroup", { name: "Theme for" })
-      .getByRole("radio", { name: "Light theme" })
-      .click();
+    // Coming back, the choice is still the one in the card.
     await expect(radio).toBeChecked();
     await expect(
       page.getByRole("radio", { name: "System", exact: true }),
@@ -1089,6 +1105,14 @@ for (const exit of ["tab", "window-blur", "navigation"]) {
     const recorder = page.getByRole("button", {
       name: /^Shortcut,/,
     });
+    // This test hung twice in full runs before it ever clicked, with the shell
+    // painted and the settings panel still waiting on its data. Waiting for the
+    // row by name fails here with that reason instead of surfacing as a bare
+    // click timeout somewhere else.
+    await expect(
+      recorder,
+      "the settings panel never rendered the Shortcut row",
+    ).toBeVisible();
     await recorder.click();
     await expect(recorder).toHaveAccessibleName(/Press shortcut Esc to cancel/);
     if (exit === "tab") await page.keyboard.press("Tab");
@@ -1479,7 +1503,7 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     "About",
   ]);
   await expect(
-    page.getByRole("radiogroup", { name: /^Theme for / }),
+    page.getByRole("radio", { name: /^Set light theme to/ }),
   ).toHaveCount(0);
   const tops = await nav.evaluateAll((items) =>
     items.map((item) => item.getBoundingClientRect()),
@@ -1519,7 +1543,7 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     .toBe(true);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await expect(
-    page.getByRole("radiogroup", { name: "Theme for light" }),
+    page.getByRole("radio", { name: "Set light theme to Ember" }),
   ).toBeVisible();
 });
 
@@ -1617,12 +1641,14 @@ test("theme previews show the theme's own colours and no status words", async ({
   page,
 }) => {
   await openSettings(page, { pendingPage: "Appearance" });
-  const themes = page.getByRole("radiogroup", { name: /^Theme for / });
-  await expect(themes).toHaveCount(1);
-  await expect(themes.locator(".astryx-badge")).toHaveCount(0);
-  await expect(themes.getByText("Ready")).toHaveCount(0);
-  await expect(themes.getByText("Inserted")).toHaveCount(0);
-  const dots = await themes
+  const cards = page.locator("label.ui-choice");
+  await expect(
+    page.getByRole("radio", { name: /^Set .* theme to / }),
+  ).toHaveCount(10);
+  await expect(cards.locator(".astryx-badge")).toHaveCount(0);
+  await expect(cards.getByText("Ready")).toHaveCount(0);
+  await expect(cards.getByText("Inserted")).toHaveCount(0);
+  const dots = await cards
     .locator(".astryx-status-dot")
     .evaluateAll((els) => [
       ...new Set(els.map((el) => getComputedStyle(el).backgroundColor)),

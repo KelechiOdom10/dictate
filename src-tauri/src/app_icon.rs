@@ -131,11 +131,7 @@ pub fn pixmap(theme: Theme, dark: bool) -> Option<Pixmap> {
         Transform::identity(),
         None,
     );
-    for (bar, (center, half_height)) in BAR_CENTERS
-        .iter()
-        .zip(BAR_HALF_HEIGHTS)
-        .enumerate()
-    {
+    for (bar, (center, half_height)) in BAR_CENTERS.iter().zip(BAR_HALF_HEIGHTS).enumerate() {
         let colour = if bar == LIVE_BAR {
             palette.accent
         } else {
@@ -201,10 +197,14 @@ pub fn sync_with(theme: Theme, dark: bool, set: impl FnOnce(&[u8])) -> bool {
 /// Re-draws the app icon for the current settings, on the main thread because
 /// AppKit only takes a new application icon there.
 pub fn sync(app: &tauri::AppHandle, settings: &Settings) {
-    let theme = settings.theme;
-    let mode = settings.appearance_mode;
+    // Each appearance has its own theme, and only the main thread can ask
+    // AppKit which appearance is in effect, so the side is resolved there and
+    // the icon follows whichever theme is actually on screen.
+    let settings = settings.clone();
     if let Err(error) = app.run_on_main_thread(move || {
-        if !sync_with(theme, is_dark(mode), set_application_icon) {
+        let dark = is_dark(settings.appearance_mode);
+        let theme = settings.theme_for(dark);
+        if !sync_with(theme, dark, set_application_icon) {
             log::warn!("[icon] could not draw the {theme:?} icon");
         }
     }) {
@@ -254,7 +254,7 @@ fn set_application_icon(png: &[u8]) {
 #[cfg(target_os = "macos")]
 fn current_appearance_is_dark() -> bool {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSAppearanceNameDarkAqua};
+    use objc2_app_kit::{NSAppearanceNameDarkAqua, NSApplication};
 
     let Some(mtm) = MainThreadMarker::new() else {
         return false;
@@ -291,7 +291,11 @@ mod tests {
         .into_iter()
         .map(|theme| palette(theme, false).accent)
         .collect();
-        assert_eq!(light[0], [223, 88, 34], "ember stays ember, not its brown ring");
+        assert_eq!(
+            light[0],
+            [223, 88, 34],
+            "ember stays ember, not its brown ring"
+        );
         assert_eq!(light[2], [131, 114, 211], "capy is lavender");
         assert_eq!(light[3], [150, 109, 195], "rose pine is iris");
         for (index, colour) in light.iter().enumerate() {

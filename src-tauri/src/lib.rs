@@ -781,7 +781,15 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
     let previous = runtime.settings.clone();
     let shortcut_changed = runtime.save_settings(settings.clone(), &app)?;
     drop(runtime);
-    if (previous.theme, previous.appearance_mode) != (settings.theme, settings.appearance_mode) {
+    if (
+        previous.theme_light,
+        previous.theme_dark,
+        previous.appearance_mode,
+    ) != (
+        settings.theme_light,
+        settings.theme_dark,
+        settings.appearance_mode,
+    ) {
         app_icon::sync(&app, &settings);
     }
     if previous.speech_model != settings.speech_model {

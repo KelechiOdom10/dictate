@@ -1,16 +1,12 @@
-import { useState } from "react";
 import { Card } from "@astryxdesign/core/Card";
+import { Grid } from "@astryxdesign/core/Grid";
 import { HStack } from "@astryxdesign/core/HStack";
-import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
-import {
-  SegmentedControl,
-  SegmentedControlItem,
-} from "@astryxdesign/core/SegmentedControl";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
 import { Theme } from "@astryxdesign/core/theme";
 import { VStack } from "@astryxdesign/core/VStack";
 import { settingsSchema, type Settings } from "./settings";
+import { Choice } from "./ui/Choice";
 import {
   THEMES,
   shownDark,
@@ -25,19 +21,24 @@ type Side = "light" | "dark";
 const nameOf = (id: ThemeId) =>
   THEMES.find((theme) => theme.id === id)?.name ?? "Ember";
 
-function Preview({ id, mode }: { id: ThemeId; mode: Side }) {
+/** The theme's own colours, so a tile shows what it will look like. */
+function Swatch({
+  id,
+  mode,
+  compact = false,
+}: {
+  id: ThemeId;
+  mode: Side;
+  compact?: boolean;
+}) {
   return (
     <Theme theme={themeFor(id)} mode={mode}>
-      <Card padding={1} width={112}>
+      <Card padding={compact ? 1 : 2} width="100%">
         <VStack gap={1}>
+          <Text type="label">Aa</Text>
           <HStack gap={1} vAlign="center">
-            <Text type="label">Aa</Text>
             <StatusDot variant="accent" label="Accent" />
-          </HStack>
-          <HStack gap={1} vAlign="center">
             <StatusDot variant="success" label="Positive" />
-            <StatusDot variant="warning" label="Caution" />
-            <Text type="supporting">Body</Text>
           </HStack>
         </VStack>
       </Card>
@@ -59,79 +60,124 @@ export function AppearancePicker({
   onChange: (patch: Partial<Settings>) => void;
 }) {
   const dark = shownDark(mode, useSystemDark());
-  // The side being edited starts as the one on screen and then stays put, so
-  // the Mac flipping its appearance never moves the list under your hands.
-  const [side, setSide] = useState<Side>(() => (dark ? "dark" : "light"));
-  const theme = side === "dark" ? themeDark : themeLight;
+  const setMode = (value: string) =>
+    onChange({
+      appearanceMode: settingsSchema.shape.appearanceMode.parse(value),
+    });
+  const setTheme = (side: Side) => (value: string) => {
+    const id = settingsSchema.shape.themeLight.parse(value);
+    onChange(side === "dark" ? { themeDark: id } : { themeLight: id });
+  };
   return (
     <Card>
       <VStack gap={6}>
-        <HStack gap={4} hAlign="between" vAlign="center">
-          <VStack gap={1}>
-            <Text weight="medium">Mode</Text>
-            <Text type="supporting">Follow your Mac, or choose a look.</Text>
-          </VStack>
-          <SegmentedControl
-            label="Mode"
-            value={mode}
-            isDisabled={disabled}
-            onChange={(value) =>
-              onChange({
-                appearanceMode:
-                  settingsSchema.shape.appearanceMode.parse(value),
-              })
-            }
-          >
-            <SegmentedControlItem value="system" label="System" />
-            <SegmentedControlItem value="light" label="Light" />
-            <SegmentedControlItem value="dark" label="Dark" />
-          </SegmentedControl>
-        </HStack>
-        <VStack gap={3}>
-          <VStack gap={2}>
-            <HStack gap={2} vAlign="center">
-              <Text weight="medium">Theme</Text>
-              {(side === "dark") === dark && (
-                <HStack gap={1} vAlign="center">
-                  <StatusDot variant="accent" label="Current appearance" />
-                  <Text type="supporting">In use now</Text>
-                </HStack>
-              )}
-            </HStack>
-            <Text type="supporting">
-              Light uses {nameOf(themeLight)} · Dark uses {nameOf(themeDark)}
-            </Text>
-            <SegmentedControl
-              label="Theme for"
-              value={side}
-              isDisabled={disabled}
-              onChange={(value) => setSide(value as Side)}
+        <VStack gap={2}>
+          <Text weight="medium">Mode</Text>
+          <Text type="supporting">Follow your Mac, or choose a look.</Text>
+          <HStack gap={2} role="radiogroup" aria-label="Mode">
+            <Choice
+              name="appearance-mode"
+              value="system"
+              label="System"
+              checked={mode === "system"}
+              disabled={disabled}
+              onChange={() => setMode("system")}
             >
-              <SegmentedControlItem value="light" label="Light theme" />
-              <SegmentedControlItem value="dark" label="Dark theme" />
-            </SegmentedControl>
-          </VStack>
-          <RadioList
-            label={`Theme for ${side}`}
-            value={theme}
-            isDisabled={disabled}
-            onChange={(value) => {
-              const id = settingsSchema.shape.themeLight.parse(value);
-              onChange(
-                side === "dark" ? { themeDark: id } : { themeLight: id },
-              );
-            }}
-          >
+              <HStack gap={1} aria-hidden="true">
+                <Swatch id={themeLight} mode="light" compact />
+                <Swatch id={themeDark} mode="dark" compact />
+              </HStack>
+              <Text type="supporting">System</Text>
+            </Choice>
+            <Choice
+              name="appearance-mode"
+              value="light"
+              label="Light"
+              checked={mode === "light"}
+              disabled={disabled}
+              onChange={() => setMode("light")}
+            >
+              <Swatch id={themeLight} mode="light" compact />
+              <Text type="supporting">Light</Text>
+            </Choice>
+            <Choice
+              name="appearance-mode"
+              value="dark"
+              label="Dark"
+              checked={mode === "dark"}
+              disabled={disabled}
+              onChange={() => setMode("dark")}
+            >
+              <Swatch id={themeDark} mode="dark" compact />
+              <Text type="supporting">Dark</Text>
+            </Choice>
+          </HStack>
+        </VStack>
+        <VStack gap={2}>
+          <Text weight="medium">Theme</Text>
+          <Text type="supporting">
+            Pick the light side and the dark side of each theme.
+          </Text>
+          <Grid columns={{ minWidth: 190, max: 2 }} gap={2}>
             {THEMES.map((option) => (
-              <RadioListItem
-                key={option.id}
-                value={option.id}
-                label={option.name}
-                description={option.description}
-                endContent={<Preview id={option.id} mode={side} />}
-              />
+              <Card key={option.id} padding={2}>
+                <VStack gap={2}>
+                  <HStack gap={1}>
+                    <Choice
+                      name="theme-light"
+                      value={option.id}
+                      label={`Set light theme to ${option.name}`}
+                      checked={themeLight === option.id}
+                      disabled={disabled}
+                      onChange={() => setTheme("light")(option.id)}
+                    >
+                      <VStack gap={1}>
+                        <Swatch id={option.id} mode="light" />
+                        <HStack gap={1} vAlign="center">
+                          <Text type="supporting">Light</Text>
+                          {!dark && themeLight === option.id && (
+                            <StatusDot
+                              variant="accent"
+                              label="Current appearance"
+                              tooltip="In use now"
+                            />
+                          )}
+                        </HStack>
+                      </VStack>
+                    </Choice>
+                    <Choice
+                      name="theme-dark"
+                      value={option.id}
+                      label={`Set dark theme to ${option.name}`}
+                      checked={themeDark === option.id}
+                      disabled={disabled}
+                      onChange={() => setTheme("dark")(option.id)}
+                    >
+                      <VStack gap={1}>
+                        <Swatch id={option.id} mode="dark" />
+                        <HStack gap={1} vAlign="center">
+                          <Text type="supporting">Dark</Text>
+                          {dark && themeDark === option.id && (
+                            <StatusDot
+                              variant="accent"
+                              label="Current appearance"
+                              tooltip="In use now"
+                            />
+                          )}
+                        </HStack>
+                      </VStack>
+                    </Choice>
+                  </HStack>
+                  <Text weight="medium">{option.name}</Text>
+                </VStack>
+              </Card>
             ))}
-          </RadioList>
+          </Grid>
+          <Text type="supporting">
+            {themeLight === themeDark
+              ? `${nameOf(themeLight)} in both`
+              : `Light uses ${nameOf(themeLight)} · Dark uses ${nameOf(themeDark)}`}
+          </Text>
         </VStack>
       </VStack>
     </Card>

@@ -953,32 +953,42 @@ export const About: Story = {
 export const Appearance: Story = {
   beforeEach: mockSettings,
   render: () => <GeneralPage page="Appearance" />,
-  play: async ({ canvasElement, globals }) => {
+  play: async ({ canvasElement }) => {
     const c = within(canvasElement);
-    // The list opens on the appearance that is on screen, which each project
-    // fixes at load.
-    const side = globals.mode === "dark" ? "dark" : "light";
-    const list = await c.findByRole("radiogroup", {
-      name: `Theme for ${side}`,
+    // Five cards, each split into a light half and a dark half, so ten choices
+    // that are still two groups.
+    const halves = await c.findAllByRole("radio", {
+      name: /^Set (light|dark) theme to /,
     });
-    const column = within(list);
-    expect(column.getAllByRole("radio")).toHaveLength(5);
-    for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
+    expect(halves).toHaveLength(10);
+    for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"]) {
       expect(
-        column.getByRole("radio", { name: new RegExp(name) }),
+        c.getByRole("radio", { name: `Set light theme to ${name}` }),
       ).toBeInTheDocument();
-    expect(list.querySelectorAll(".astryx-badge")).toHaveLength(0);
-    expect(column.queryByText("Ready")).toBeNull();
-    expect(column.queryByText("Inserted")).toBeNull();
-    // Each row is previewed in the appearance the list edits.
-    const seen = [...list.querySelectorAll("[data-theme]")].map((el) =>
-      el.getAttribute("data-theme"),
+      expect(
+        c.getByRole("radio", { name: `Set dark theme to ${name}` }),
+      ).toBeInTheDocument();
+    }
+    // Each half is previewed in the appearance it sets.
+    const previews = halves.map((half) => [
+      half.getAttribute("aria-label")!.startsWith("Set light")
+        ? "light"
+        : "dark",
+      half
+        .closest("label")!
+        .querySelector("[data-theme]")!
+        .getAttribute("data-theme"),
+    ]);
+    for (const [side, preview] of previews) expect(preview).toBe(side);
+    // Mode is three tiles, and the project's own mode is the picked one.
+    const modes = ["System", "Light", "Dark"].map((name) =>
+      c.getByRole("radio", { name }),
     );
-    expect(seen.length).toBeGreaterThan(0);
-    expect(new Set(seen)).toEqual(new Set([side]));
     expect(
-      canvasElement.querySelectorAll(".astryx-status-dot").length,
-    ).toBeGreaterThan(5);
+      modes.filter((tile) => (tile as HTMLInputElement).checked),
+    ).toHaveLength(1);
+    // One caption built from what is chosen: both sides, or one theme twice.
+    expect(c.getByText(/in both$|^Light uses /)).toBeInTheDocument();
     // Glass is opt-in and starts off.
     expect(
       c.getByRole("switch", { name: "Translucent window" }),
