@@ -8,6 +8,7 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import SettingsWindow from "./SettingsWindow";
+import { AnnotateBarWindow, InkWindow } from "./AnnotateWindows";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings, settingsSchema } from "./settings";
 import { RecordingCapsule, KeyboardShortcut } from "./ui";
@@ -15,6 +16,14 @@ import { problem, type Problem } from "./problem";
 import "./App.css";
 
 const OVERLAY_MAX_WIDTH = 420;
+// A notice describes the take or session in progress, so it must not carry
+// over to the done, copied or skipped pill that follows.
+const NOTICE_PHASES = new Set([
+  "recording",
+  "transcribing",
+  "annotating",
+  "packaging",
+]);
 
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -123,7 +132,7 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
                               : { kind: "ready", message: "Ready" }
           }
           notice={
-            status.phase === "idle" || error
+            error || !NOTICE_PHASES.has(status.phase)
               ? undefined
               : (status.notice ?? undefined)
           }
@@ -201,13 +210,19 @@ function Appearance({
   return null;
 }
 
+const windowKind = new URLSearchParams(location.search).get("window");
+
 export default function App() {
   const [appearanceError, setAppearanceError] = useState<Problem | null>(null);
   return (
     <QueryClientProvider client={client}>
       <Appearance onError={setAppearanceError} />
-      {new URLSearchParams(location.search).get("window") === "settings" ? (
+      {windowKind === "settings" ? (
         <SettingsWindow />
+      ) : windowKind === "ink" ? (
+        <InkWindow />
+      ) : windowKind === "annotate-bar" ? (
+        <AnnotateBarWindow />
       ) : (
         <Overlay appearanceError={appearanceError} />
       )}

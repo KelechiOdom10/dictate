@@ -412,6 +412,47 @@ p {
   gap: var(--space-5);
   max-width: 640px;
 }
+.story-ink {
+  position: relative;
+  width: 640px;
+  max-width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.story-screen {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-6);
+}
+.story-screen-bar {
+  height: 20px;
+  width: 30%;
+  border-radius: var(--radius-pill);
+  background: var(--control-hover);
+}
+.story-screen-line {
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--control);
+}
+.story-ink-layer,
+.story-ink-layer > .ui-ink {
+  position: absolute;
+  inset: 0;
+}
+.story-ink-bar {
+  position: absolute;
+  inset-inline: 0;
+  bottom: var(--space-5);
+  margin-inline: auto;
+  width: 168px;
+  height: 44px;
+}
 .story-row {
   display: flex;
   gap: var(--space-3);
@@ -1096,4 +1137,34 @@ h3 {
   .ui-model-actions > .ui-progress {
     max-width: none;
   }
+}
+
+.ui-annotate-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--overlay);
+  color: var(--overlay-text);
+}
+.ui-annotate-bar .ui-timer {
+  margin-inline-end: auto;
+  padding-inline-end: var(--space-1);
+}
+.ui-annotate-bar .ui-button-ghost {
+  color: inherit;
+}
+.ui-annotate-bar .ui-button-ghost:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--overlay-text) 16%, transparent);
+}
+.ui-annotate-bar .ui-button-ghost[aria-pressed="true"] {
+  background: var(--overlay-text);
+  color: var(--overlay);
+}
+.ui-ink {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
