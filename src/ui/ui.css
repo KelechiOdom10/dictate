@@ -488,6 +488,13 @@ html[data-glass="true"] .astryx-side-nav {
 .ui-history-accordion > button[aria-expanded] {
   padding-inline-start: var(--spacing-4);
 }
+.ui-settings-row:has(:focus-visible) {
+  outline-width: 0;
+}
+.ui-history-row:has(> button:focus-visible) {
+  outline-offset: calc(-1 * var(--spacing-1));
+  border-radius: var(--radius-inner);
+}
 .ui-history-row-current,
 .ui-history-accordion-current button[aria-expanded="true"] {
   position: relative;

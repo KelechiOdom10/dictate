@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
+import { Button } from "@astryxdesign/core/Button";
 import { PathText, SettingsGroup, SettingsRow } from "./Settings";
 const meta = { title: "Components/Settings" } satisfies Meta;
 export default meta;
@@ -60,5 +61,27 @@ export const Group: Story = {
     });
     await userEvent.click(toggle);
     await expect(toggle).toBeChecked();
+  },
+};
+
+export const KeyboardFocus: Story = {
+  render: () => (
+    <SettingsGroup title="Transcription">
+      <SettingsRow label="Models">
+        <Button label="Manage models" variant="secondary" onClick={() => {}} />
+      </SettingsRow>
+    </SettingsGroup>
+  ),
+  play: async ({ canvasElement }) => {
+    const button = within(canvasElement).getByRole("button", {
+      name: "Manage models",
+    });
+    await userEvent.tab();
+    button.focus();
+    await expect(button).toHaveFocus();
+    await expect(getComputedStyle(button).outlineStyle).not.toBe("none");
+    await expect(getComputedStyle(button.closest("li")!).outlineWidth).toBe(
+      "0px",
+    );
   },
 };

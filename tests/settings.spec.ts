@@ -2396,6 +2396,187 @@ const rowBoxes = (rows: Locator) =>
     }),
   );
 
+test("General keyboard order and control actions survive the focus polish", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openSettings(page, { stored: { speechModel: "tiny.en" } });
+  const shortcut = page.getByRole("button", { name: /^Shortcut,/ });
+  const mode = page.getByRole("combobox", {
+    name: "Shortcut mode",
+    exact: true,
+  });
+  const model = page.getByRole("combobox", {
+    name: "Speech model",
+    exact: true,
+  });
+  const manage = page.getByRole("button", {
+    name: "Manage models",
+    exact: true,
+  });
+  const mic = page.getByRole("combobox", { name: "Microphone", exact: true });
+  const testMic = page.getByRole("button", {
+    name: "Test microphone",
+    exact: true,
+  });
+  const startup = page.getByRole("switch", { name: "Launch at login" });
+  await expect(shortcut).toBeVisible();
+  await page.keyboard.press("Tab");
+  await shortcut.focus();
+  for (const control of [
+    shortcut,
+    mode,
+    model,
+    manage,
+    mic,
+    testMic,
+    startup,
+  ]) {
+    await expect(control).toBeFocused();
+    await control.press("Tab");
+  }
+  await shortcut.focus();
+  await shortcut.press("Enter");
+  await expect(shortcut).toHaveAccessibleName(/Press shortcut/);
+  await shortcut.press("Escape");
+  await expect(shortcut).not.toHaveAccessibleName(/Press shortcut/);
+  for (const selector of [mode, model, mic]) {
+    await selector.focus();
+    await selector.press("Space");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await selector.press("ArrowDown");
+    await selector.press("Escape");
+    await expect(page.getByRole("listbox")).not.toBeVisible();
+    await expect(selector).toBeFocused();
+  }
+  await testMic.focus();
+  await testMic.press("Enter");
+  const stop = page.getByRole("button", { name: "Stop test", exact: true });
+  await expect(stop).toBeFocused();
+  await stop.press("Enter");
+  await expect(testMic).toBeFocused();
+  await startup.focus();
+  await startup.press("Space");
+  await expect(startup).toBeChecked();
+  await manage.focus();
+  await manage.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Models", level: 1 }),
+  ).toBeVisible();
+});
+
+for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
+  for (const mode of ["light", "dark"] as const) {
+    test(`${theme} ${mode} Settings keyboard traversal rings the control, not its passive row`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await page.emulateMedia({ colorScheme: mode, reducedMotion: "reduce" });
+      await openSettings(page, {
+        history: takes,
+        annotations: sessions,
+        stored: { themeLight: theme, themeDark: theme, appearanceMode: mode },
+      });
+      for (const name of [
+        "General",
+        "Appearance",
+        "Models",
+        "Annotate",
+        "History",
+        "Output",
+        "Advanced",
+        "About",
+      ]) {
+        await page
+          .getByRole("navigation")
+          .getByRole("button", { name, exact: true })
+          .click();
+        const main = page.getByRole("main");
+        await expect(
+          main.getByRole("heading", { name, level: 1, exact: true }),
+        ).toBeVisible();
+        const controls = main.locator(
+          'button, input, select, textarea, a[href], [tabindex="0"]',
+        );
+        await expect.poll(() => controls.count()).toBeGreaterThan(0);
+        const geometry = () =>
+          main.locator(".ui-settings-row").evaluateAll((rows) =>
+            rows.map((row) => {
+              const el = row as HTMLElement;
+              return [
+                el.offsetLeft,
+                el.offsetTop,
+                el.offsetWidth,
+                el.offsetHeight,
+              ];
+            }),
+          );
+        const before = await geometry();
+        await page.keyboard.press("Tab");
+        await main.evaluate((root) => {
+          const first = [
+            ...root.querySelectorAll<HTMLElement>(
+              'button, input, select, textarea, a[href], [tabindex="0"]',
+            ),
+          ].find(
+            (el) =>
+              el.tabIndex >= 0 &&
+              !el.hasAttribute("disabled") &&
+              el.checkVisibility(),
+          );
+          first?.focus();
+        });
+        const visited = new Set<string>();
+        for (let step = 0; step < 60; step++) {
+          const focus = await main.evaluate((root) => {
+            const active = document.activeElement as HTMLElement;
+            if (!root.contains(active)) return null;
+            const row = active.closest(".ui-settings-row");
+            const rings = row
+              ? [...row.querySelectorAll("*")].filter((el) => {
+                  const css = getComputedStyle(el);
+                  return (
+                    el.checkVisibility({ checkOpacity: true }) &&
+                    el.getBoundingClientRect().width > 1 &&
+                    el.getBoundingClientRect().height > 1 &&
+                    ((css.outlineStyle !== "none" &&
+                      parseFloat(css.outlineWidth) > 0) ||
+                      (el.contains(active) &&
+                        css.boxShadow.includes("inset") &&
+                        css.boxShadow.includes("2px")))
+                  );
+                })
+              : [];
+            const css = row && getComputedStyle(row);
+            return {
+              key: [...root.querySelectorAll("*")].indexOf(active).toString(),
+              name: active.getAttribute("aria-label") ?? active.textContent,
+              passive: !!row,
+              rowRing: css
+                ? css.outlineStyle !== "none" &&
+                  parseFloat(css.outlineWidth) > 0
+                : false,
+              rings: rings.length,
+            };
+          });
+          if (!focus) break;
+          expect(visited.has(focus.key), name + " repeats a Tab stop").toBe(
+            false,
+          );
+          visited.add(focus.key);
+          if (focus.passive) {
+            expect(focus.rowRing, name + " / " + focus.name).toBe(false);
+            expect(focus.rings, name + " / " + focus.name).toBe(1);
+          }
+          await page.keyboard.press("Tab");
+        }
+        expect(visited.size, name).toBeGreaterThan(0);
+        expect(await geometry(), name + " row geometry").toEqual(before);
+      }
+    });
+  }
+}
+
 for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
   for (const mode of ["light", "dark"] as const) {
     test(`${theme} ${mode} History markers are inset and separate from focus`, async ({
@@ -2472,6 +2653,14 @@ for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
             });
           });
           expect(ring).toBe(true);
+          if (width === 1100) {
+            expect(
+              await focused.evaluate((row) => ({
+                offset: getComputedStyle(row).outlineOffset,
+                rounded: parseFloat(getComputedStyle(row).borderRadius) > 0,
+              })),
+            ).toEqual({ offset: "-4px", rounded: true });
+          }
           expect(
             await controls.evaluateAll((rows) =>
               rows.map((row) => row.getBoundingClientRect().toJSON()),
