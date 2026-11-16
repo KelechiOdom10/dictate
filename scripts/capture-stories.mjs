@@ -49,7 +49,10 @@ const settingsReady = {
   "pages--output": (page) =>
     page.locator("#capitalize-first:checked:enabled").waitFor(),
   "pages--output-copy-only": (page) =>
-    page.locator("#restore-clipboard:disabled").waitFor(),
+    page
+      .locator("#paste-method")
+      .filter({ has: page.locator('option:checked[value="copyOnly"]') })
+      .waitFor(),
   "pages--advanced": (page) =>
     page.locator("#mic-warm:checked:enabled").waitFor(),
   "pages--about": (page) =>

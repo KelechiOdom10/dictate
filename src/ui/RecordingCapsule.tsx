@@ -6,6 +6,8 @@ import {
   LoaderCircle,
   Mic,
   MicOff,
+  Square,
+  X,
 } from "lucide-react";
 
 export function LevelMeter({
@@ -51,17 +53,23 @@ export function RecordingCapsule({
   state,
   shortcut,
   notice,
+  onFinish,
+  onCancel,
+  onOpenSettings,
 }: {
   state: RecordingState;
   shortcut?: ReactNode;
   notice?: string;
+  onFinish?: () => void;
+  onCancel?: () => void;
+  onOpenSettings?: () => void;
 }) {
   const labels: Record<Exclude<RecordingState["kind"], "error">, string> = {
     ready: "Listening",
     recording: "Recording",
     transcribing: "Transcribing…",
     done: "Text inserted",
-    copied: "Copied to clipboard",
+    copied: "Copied — paste it anywhere",
     skipped: "No speech captured",
     annotating: "Annotating",
     packaging: "Packaging…",
@@ -85,9 +93,7 @@ export function RecordingCapsule({
         role={state.kind === "error" ? "alert" : "status"}
       >
         <span>{state.kind === "error" ? state.title : labels[state.kind]}</span>
-        {state.kind === "copied" && (
-          <span className="ui-capsule-message">Paste it with ⌘V.</span>
-        )}
+
         {state.kind === "skipped" && (
           <span className="ui-capsule-message">
             Hold the shortcut and speak a little longer.
@@ -97,7 +103,7 @@ export function RecordingCapsule({
         {state.kind === "ready" && (
           <span className="ui-capsule-message">{state.message}</span>
         )}
-        {state.kind === "error" && (
+        {state.kind === "error" && !onOpenSettings && (
           <span className="ui-capsule-message">{state.fix}</span>
         )}
       </div>
@@ -106,6 +112,33 @@ export function RecordingCapsule({
       )}
       {state.kind === "recording" && state.level !== undefined && (
         <LevelMeter level={state.level} />
+      )}
+      {state.kind === "recording" && (
+        <>
+          <button
+            className="capsule-action"
+            aria-label="Finish dictation"
+            onClick={onFinish}
+          >
+            <Square size={14} />
+          </button>
+          <button
+            className="capsule-action"
+            aria-label="Discard dictation"
+            onClick={onCancel}
+          >
+            <X size={16} />
+          </button>
+        </>
+      )}
+      {state.kind === "error" && onOpenSettings && (
+        <button
+          className="capsule-action"
+          aria-label="Open relevant settings"
+          onClick={onOpenSettings}
+        >
+          Settings
+        </button>
       )}
       {shortcut}
     </div>

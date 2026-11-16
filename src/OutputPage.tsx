@@ -17,7 +17,7 @@ export default function OutputPage() {
       >
         <Row
           id="paste-method"
-          label="After you dictate"
+          label="After dictation"
           help={
             copyOnly
               ? "Nothing is typed for you. Paste with ⌘V when you’re ready."
@@ -27,36 +27,27 @@ export default function OutputPage() {
           <Select
             id="paste-method"
             aria-describedby="paste-method-help"
-            value={settings.pasteMethod}
+            value={
+              copyOnly
+                ? "copyOnly"
+                : settings.restoreClipboard
+                  ? "paste"
+                  : "pasteKeep"
+            }
             disabled={busy}
             onChange={(e) =>
               void save({
                 pasteMethod: settingsSchema.shape.pasteMethod.parse(
-                  e.target.value,
+                  e.target.value === "pasteKeep" ? "paste" : e.target.value,
                 ),
+                restoreClipboard: e.target.value === "paste",
               })
             }
           >
-            <option value="paste">Paste into the app</option>
-            <option value="copyOnly">Copy to the clipboard</option>
+            <option value="paste">Paste</option>
+            <option value="copyOnly">Copy only</option>
+            <option value="pasteKeep">Paste and keep on clipboard</option>
           </Select>
-        </Row>
-        <Row
-          id="restore-clipboard"
-          label="Restore clipboard"
-          help={
-            copyOnly
-              ? "Off while copying only: your words stay on the clipboard."
-              : "Put back what you’d copied once your words are pasted."
-          }
-        >
-          <Toggle
-            id="restore-clipboard"
-            aria-describedby="restore-clipboard-help"
-            checked={settings.restoreClipboard && !copyOnly}
-            disabled={busy || copyOnly}
-            onChange={(e) => void save({ restoreClipboard: e.target.checked })}
-          />
         </Row>
       </SettingsGroup>
       <SettingsGroup

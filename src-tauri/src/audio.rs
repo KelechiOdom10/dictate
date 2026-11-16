@@ -727,10 +727,12 @@ impl To16k {
         let chunk = resampler.input_frames_next();
         self.pending.extend_from_slice(input);
         let mut output = Vec::new();
-        while self.pending.len() >= chunk {
-            let block: Vec<f32> = self.pending.drain(..chunk).collect();
-            self.convert(block, &mut output)?;
+        let pending = std::mem::take(&mut self.pending);
+        let mut blocks = pending.chunks_exact(chunk);
+        for block in blocks.by_ref() {
+            self.convert(block.to_vec(), &mut output)?;
         }
+        self.pending.extend_from_slice(blocks.remainder());
         self.emitted += output.len();
         Ok(output)
     }
@@ -1102,5 +1104,19 @@ mod tests {
         append_mono(&mut output, &[0_u16, u16::MAX, 32768, 32768], 2);
         assert!(output[0].abs() < 0.0001);
         assert_eq!(output[1], 0.0);
+    }
+}
+
+#[cfg(test)]
+mod stop_latency_tests {
+    #[test]
+    fn thirteen_second_take_at_96k_preserves_duration() {
+        let samples: Vec<f32> = (0..1_337_856)
+            .map(|i| (i as f32 * 0.03).sin() * 0.1)
+            .collect();
+        let started = std::time::Instant::now();
+        let converted = super::resample(samples, 96_000).unwrap();
+        eprintln!("96k stop resample: {} ms", started.elapsed().as_millis());
+        assert_eq!(converted.len(), 222_976);
     }
 }
