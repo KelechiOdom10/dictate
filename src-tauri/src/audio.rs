@@ -16,7 +16,7 @@ enum Command {
     StopMonitor,
     Level(Reply<f32>),
     RecordingLevel(Reply<f32>),
-    Stop(mpsc::Sender<Result<Vec<f32>, Problem>>),
+    Stop(mpsc::Sender<Result<Take, Problem>>),
     Frames(Reply<mpsc::Receiver<Vec<f32>>>),
     Status(mpsc::Sender<bool>),
     /// `Some(device)` keeps that microphone open between takes; `None` closes it.
@@ -55,10 +55,36 @@ struct Recording {
     stream: cpal::Stream,
     captured: Arc<Mutex<Captured>>,
     rate: usize,
+    channels: u16,
     fallback: bool,
     preference: Option<String>,
     /// The microphone the stream actually opened.
     device: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Source {
+    pub device: String,
+    pub channels: u16,
+    pub rate: u32,
+}
+
+impl Source {
+    pub fn describe(&self) -> String {
+        if self.channels <= 1 {
+            self.device.clone()
+        } else {
+            format!(
+                "{} ({} channels at {} Hz)",
+                self.device, self.channels, self.rate
+            )
+        }
+    }
+}
+
+pub struct Take {
+    pub samples: Vec<f32>,
+    pub source: Source,
 }
 
 fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
@@ -152,15 +178,20 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                                         "Recording already stopped",
                                         "Hold the shortcut and speak again.",
                                     )),
-                                    Some(active)
-                                        if warm_device.as_ref() == Some(&active.preference)
-                                            && !active.failed() =>
-                                    {
-                                        let samples = active.drain();
-                                        warm = Some(active);
-                                        samples
+                                    Some(active) => {
+                                        let source = active.source();
+                                        let samples = if warm_device.as_ref()
+                                            == Some(&active.preference)
+                                            && !active.failed()
+                                        {
+                                            let samples = active.drain();
+                                            warm = Some(active);
+                                            samples
+                                        } else {
+                                            active.finish()
+                                        };
+                                        samples.map(|samples| Take { samples, source })
                                     }
-                                    Some(active) => active.finish(),
                                 };
                                 let _ = reply.send(result);
                                 if let (None, Some(device)) = (&warm, &warm_device) {
@@ -230,6 +261,10 @@ pub fn start_device(device: Option<String>, mute: std::time::Duration) -> Result
 }
 
 pub fn stop() -> Result<Vec<f32>, Problem> {
+    stop_take().map(|take| take.samples)
+}
+
+pub fn stop_take() -> Result<Take, Problem> {
     let (reply, result) = mpsc::channel();
     send(Command::Stop(reply)).map_err(recording_failed)?;
     result
@@ -434,6 +469,7 @@ fn open_recording(name: Option<&str>, mode: Mode) -> Result<Recording, String> {
         stream,
         captured,
         rate,
+        channels: config.channels(),
         fallback,
         preference,
         device: name,
@@ -567,6 +603,14 @@ where
 }
 
 impl Recording {
+    fn source(&self) -> Source {
+        Source {
+            device: self.device.clone(),
+            channels: self.channels,
+            rate: self.rate as u32,
+        }
+    }
+
     fn serves(&self, requested: &Option<String>) -> bool {
         warm_stream_serves(
             &self.preference,
@@ -771,6 +815,21 @@ impl To16k {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_describes_the_opened_device_not_the_preference() {
+        let mut source = Source {
+            device: "MacBook Pro Microphone".into(),
+            channels: 1,
+            rate: 96_000,
+        };
+        assert_eq!(source.describe(), "MacBook Pro Microphone");
+        source.channels = 3;
+        assert_eq!(
+            source.describe(),
+            "MacBook Pro Microphone (3 channels at 96000 Hz)"
+        );
+    }
 
     #[test]
     #[ignore = "Measures real named-microphone startup; run explicitly"]
