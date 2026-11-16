@@ -90,7 +90,7 @@ fn the_endpoint_serves_a_manifest_whose_artifact_verifies_against_the_public_key
 fn serve_with_manifest(signature: &str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let routes = vec![
+    let routes = [
         ("/updates/latest.json", manifest(&base, signature)),
         ("/updates/payload.txt", fixture("payload.txt")),
     ];
