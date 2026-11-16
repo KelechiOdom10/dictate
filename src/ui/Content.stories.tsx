@@ -1,10 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Button } from "./Button";
+import { useState } from "react";
+import { Copy, Trash2 } from "lucide-react";
+import { expect, userEvent, within } from "storybook/test";
+import { Button, IconButton } from "./Button";
 import {
   Card,
   ListItem,
   DetailPanel,
   ModelCard,
+  SelectList,
   ProgressBar,
   EmptyState,
   Toast,
@@ -34,20 +38,82 @@ export const Note: Story = {
       <ListItem
         date="Yesterday · 4:30 PM"
         title="A quiet moment"
+        meta="Notes"
         preview="Take the long way home."
       />
     </div>
   ),
 };
+export const Selectable: Story = {
+  name: "SelectList / pointer and arrow keys",
+  render: () => {
+    const [selected, setSelected] = useState(2);
+    return (
+      <div style={{ maxWidth: 280 }}>
+        <SelectList
+          label="Dictations"
+          items={[
+            {
+              id: 1,
+              title: "Pick up coffee on the way back",
+              meta: "Notes",
+              date: "1h ago",
+            },
+            {
+              id: 2,
+              title: "Ship the history page once the screenshots look right",
+              meta: "Slack",
+              date: "1d ago",
+            },
+            {
+              id: 3,
+              title: "No speech detected",
+              meta: "Notes · Skipped",
+              date: "4d ago",
+            },
+          ]}
+          value={selected}
+          onChange={setSelected}
+        />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const first = c.getByRole("button", { name: /Pick up coffee/ });
+    const second = c.getByRole("button", { name: /Ship the history page/ });
+    const third = c.getByRole("button", { name: /No speech detected/ });
+    await expect(second).toHaveAttribute("tabindex", "0");
+    await expect(first).toHaveAttribute("tabindex", "-1");
+    await userEvent.click(first);
+    await expect(first).toHaveAttribute("aria-current", "true");
+    await userEvent.keyboard("{End}");
+    await expect(third).toHaveFocus();
+    await expect(third).toHaveAttribute("aria-current", "true");
+    await userEvent.keyboard("{ArrowUp}");
+    await expect(second).toHaveFocus();
+  },
+};
 export const Detail: Story = {
   name: "DetailPanel",
   render: () => (
     <DetailPanel
-      title="A thought for later"
+      title="Dictation"
+      subtitle="1h ago · 14 Nov 2026, 2:57 PM"
+      actions={
+        <>
+          <IconButton variant="ghost" label="Copy text">
+            <Copy size={16} aria-hidden="true" />
+          </IconButton>
+          <IconButton variant="ghost" label="Delete dictation">
+            <Trash2 size={16} aria-hidden="true" />
+          </IconButton>
+        </>
+      }
       metadata={[
-        { label: "Recorded", value: "Today, 9:41 AM" },
-        { label: "Duration", value: "33 seconds" },
-        { label: "Model", value: "Base English" },
+        { label: "Application", value: "Notes" },
+        { label: "Speech model", value: "Whisper base.en" },
+        { label: "Latency", value: "4.2 s audio · 310 ms transcription" },
       ]}
     >
       <p>Make space for the things that matter. Start with one small thing.</p>

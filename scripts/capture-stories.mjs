@@ -4,6 +4,28 @@ import path from "node:path";
 
 const output = path.resolve("target/design-system");
 await mkdir(output, { recursive: true });
+const historyReady = {
+  "pages--history": (page) =>
+    page.locator(".ui-detail", { hasText: "bakery" }).waitFor(),
+  "pages--history-empty": (page) =>
+    page.getByRole("heading", { name: "Nothing here yet" }).waitFor(),
+  "pages--history-search": (page) =>
+    page
+      .locator(".ui-list-item-button", { hasText: "Slack" })
+      .and(page.locator(".ui-list-item-button").last())
+      .and(page.locator(".ui-list-item-button").first())
+      .waitFor(),
+  "pages--history-retention": (page) =>
+    page
+      .getByRole("group", { name: "Delete dictations older than 1 day?" })
+      .waitFor(),
+  "pages--history-delete": (page) =>
+    page
+      .locator(".ui-detail", { hasText: "Then hand it to review." })
+      .waitFor(),
+  "pages--history-no-matches": (page) =>
+    page.getByRole("heading", { name: "No matches for “zebra”" }).waitFor(),
+};
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({
@@ -48,10 +70,15 @@ try {
         await page.setViewportSize({
           width: entry.id.includes("controls-side-by-side")
             ? 1440
-            : entry.id === "pages--general"
+            : entry.id === "pages--general" || entry.id in historyReady
               ? 820
               : 1000,
-          height: entry.id === "pages--general" ? 1060 : 820,
+          height:
+            entry.id === "pages--general"
+              ? 1060
+              : entry.id in historyReady
+                ? 680
+                : 820,
         });
         await page.goto(
           `http://localhost:6007/iframe.html?id=${entry.id}&viewMode=story&globals=theme:${theme};mode:${mode}`,
@@ -66,6 +93,7 @@ try {
           !entry.id.includes("error")
         )
           await page.locator("#login").waitFor();
+        if (entry.id in historyReady) await historyReady[entry.id](page);
         await page.evaluate(async () => {
           await document.fonts.ready;
           for (const weight of [400, 500, 600]) {

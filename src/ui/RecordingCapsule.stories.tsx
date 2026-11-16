@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { RecordingCapsule, LevelMeter } from "./RecordingCapsule";
 import { KeyboardShortcut } from "./ShortcutRecorder";
+import { expect, within } from "storybook/test";
+import problems from "../problems.fixture.json";
 const meta = {
   title: "Components/RecordingCapsule",
   component: RecordingCapsule,
@@ -19,8 +21,34 @@ export const Error: Story = {
   args: {
     state: {
       kind: "error",
-      message: "Allow Microphone access in System Settings, then retry.",
+      title: problems.accessibility.title,
+      fix: problems.accessibility.fix,
     },
+  },
+};
+export const RealErrors: Story = {
+  name: "Error / real pipeline messages",
+  args: { state: { kind: "done" } },
+  render: () => (
+    <div className="story-stack" style={{ maxWidth: 420 }}>
+      {Object.values(problems).map(({ title, fix }) => (
+        <RecordingCapsule key={title} state={{ kind: "error", title, fix }} />
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const alerts = within(canvasElement).getAllByRole("alert");
+    await expect(alerts).toHaveLength(Object.keys(problems).length);
+    for (const [index, { title, fix }] of Object.values(problems).entries()) {
+      await expect(alerts[index]).toHaveTextContent(`${title}${fix}`, {
+        normalizeWhitespace: false,
+      });
+      await expect(alerts[index]).not.toHaveTextContent(
+        /Open Settings to retry/,
+      );
+      for (const line of alerts[index].querySelectorAll("span"))
+        await expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth);
+    }
   },
 };
 export const Ready: Story = {
@@ -42,7 +70,8 @@ export const AllStates: Story = {
       <RecordingCapsule
         state={{
           kind: "error",
-          message: "Allow Microphone access in System Settings, then retry.",
+          title: problems.noSamples.title,
+          fix: problems.noSamples.fix,
         }}
       />
     </div>
@@ -64,8 +93,8 @@ export const StartupRecovery: Story = {
   args: {
     state: {
       kind: "error",
-      message:
-        "Settings could not be read. Using defaults. Open Settings for details.",
+      title: "Settings couldn’t be read",
+      fix: "Using defaults. Your old file is saved beside them.",
     },
   },
 };

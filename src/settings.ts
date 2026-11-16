@@ -13,6 +13,7 @@ export const settingsSchema = z
     theme: z.enum(["ember", "paper"]),
     overlayPosition: z.enum(["top", "bottom"]),
     appearanceMode: z.enum(["system", "light", "dark"]),
+    historyRetention: z.enum(["day", "week", "month", "forever"]),
   })
   .strict() satisfies z.ZodType<Settings>;
 

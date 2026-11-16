@@ -12,9 +12,12 @@ and updates the meter. Its elapsed timer resets for each take; timer updates are
 outside the status announcement so screen readers do not announce every second.
 
 After transcription and paste succeed, Rust emits `done` for 900 ms. Empty,
-short or quiet takes emit `skipped` for 1800 ms without pasting. Errors retain
-the full detail in Settings and the tray, with a short recovery message in the
-capsule. A take id prevents an older completion timer or level worker from
+short or quiet takes emit `skipped` for 1800 ms without pasting. Each error
+source builds a `Problem` (`src-tauri/src/problem.rs`): a short title and its own
+fix line, shown as written in the capsule and Settings, plus a `detail` cause for
+logs and history. `src/problems.fixture.json` holds the real Accessibility,
+settings-refresh, no-samples and missing-model problems; a Rust test keeps it in
+step and the "Error / real pipeline messages" story renders it. A take id prevents an older completion timer or level worker from
 interfering with a newer take. The recording and transcription states still
 preserve the secondary microphone-fallback notice.
 
@@ -22,8 +25,10 @@ preserve the secondary microphone-fallback notice.
 and survives settings saves. It has no settings control yet. Placement reads the
 focused app's window rectangle through Accessibility, selects the screen with
 its centre, and places the capsule 24 logical pixels inside that screen's work
-area. If Accessibility or the focused-window rectangle is unavailable, placement
-falls back to the primary screen. Resizing preserves the selected edge and
+area. Each Accessibility call times out after 0.1 s, so a hung app cannot stall
+the hotkey, and the lookup runs after the `Runtime` lock is released. If
+Accessibility, the focused-window rectangle or the timeout fails, placement falls
+back to the primary screen. Resizing preserves the selected edge and
 horizontal centre. The webview measures an invisible intrinsic-size copy so a
 small previous state cannot constrain the next state; only dimensions cross IPC.
 

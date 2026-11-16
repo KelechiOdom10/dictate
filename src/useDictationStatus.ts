@@ -2,11 +2,18 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { z } from "zod";
+import { problem, problemSchema } from "./problem";
 
 const statusSchema = z.object({
   phase: z.enum(["idle", "recording", "transcribing", "done", "skipped"]),
-  error: z.string().nullable(),
+  error: problemSchema.nullable(),
   notice: z.string().nullable().default(null),
+});
+
+const unreadable = (cause: unknown) => ({
+  phase: "idle" as const,
+  error: problem("Couldn’t read dictation status", "Restart dictate.", cause),
+  notice: null,
 });
 
 export function useDictationStatus() {
@@ -23,8 +30,7 @@ export function useDictationStatus() {
         const result = statusSchema.parse(await invoke("pipeline_status"));
         if (!disposed) setStatus(result);
       } catch (error) {
-        if (!disposed)
-          setStatus({ phase: "idle", error: String(error), notice: null });
+        if (!disposed) setStatus(unreadable(error));
       }
     };
     void (async () => {
@@ -36,8 +42,7 @@ export function useDictationStatus() {
         }
         await refresh();
       } catch (error) {
-        if (!disposed)
-          setStatus({ phase: "idle", error: String(error), notice: null });
+        if (!disposed) setStatus(unreadable(error));
       }
     })();
     return () => {

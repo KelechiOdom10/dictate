@@ -1,3 +1,4 @@
+use crate::problem::Problem;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 use tauri_plugin_global_shortcut::Shortcut;
@@ -36,6 +37,27 @@ pub enum OverlayPosition {
     Bottom,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryRetention {
+    Day,
+    #[default]
+    Week,
+    Month,
+    Forever,
+}
+
+impl HistoryRetention {
+    pub fn days(self) -> Option<i64> {
+        match self {
+            Self::Day => Some(1),
+            Self::Week => Some(7),
+            Self::Month => Some(30),
+            Self::Forever => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -55,6 +77,8 @@ pub struct Settings {
     pub appearance_mode: AppearanceMode,
     #[serde(default)]
     pub overlay_position: OverlayPosition,
+    #[serde(default)]
+    pub history_retention: HistoryRetention,
 }
 
 const CURRENT_VERSION: u32 = 1;
@@ -74,6 +98,7 @@ impl Default for Settings {
             theme: Theme::Ember,
             appearance_mode: AppearanceMode::System,
             overlay_position: OverlayPosition::Bottom,
+            history_retention: HistoryRetention::Week,
         }
     }
 }
@@ -136,7 +161,7 @@ fn migrate(settings: &mut Settings) {
     }
 }
 
-pub fn load_or_default(path: &Path) -> (Settings, Option<String>) {
+pub fn load_or_default(path: &Path) -> (Settings, Option<Problem>) {
     match load(path) {
         Ok(settings) => (settings, None),
         Err(error) => {
@@ -145,13 +170,19 @@ pub fn load_or_default(path: &Path) -> (Settings, Option<String>) {
                 .unwrap_or_default()
                 .as_nanos();
             let backup = path.with_file_name(format!("settings.json.bad-{timestamp}"));
-            let detail = match fs::rename(path, &backup) {
-                Ok(()) => format!("Original saved to {}", backup.display()),
-                Err(error) => format!("Could not back up original: {error}"),
+            let (fix, detail) = match fs::rename(path, &backup) {
+                Ok(()) => (
+                    "Using defaults. Your old file is saved beside them.",
+                    format!("{error}; original saved to {}", backup.display()),
+                ),
+                Err(backup_error) => (
+                    "Using defaults. Choose your preferences again in Settings.",
+                    format!("{error}; could not back up original: {backup_error}"),
+                ),
             };
             (
                 Settings::default(),
-                Some(format!("{error}. Using default settings. {detail}")),
+                Some(Problem::new("Settings couldn’t be read", fix).because(detail)),
             )
         }
     }
@@ -202,11 +233,12 @@ mod tests {
     #[test]
     fn typescript_contract_matches_rust_settings() {
         let contract = format!(
-            "export {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
+            "export {}\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
             ShortcutMode::decl(),
             Theme::decl(),
             AppearanceMode::decl(),
             OverlayPosition::decl(),
+            HistoryRetention::decl(),
             Settings::decl()
         );
         let checked_in = include_str!("../../src/settings.generated.ts");
@@ -231,6 +263,7 @@ mod tests {
             theme: Theme::Paper,
             appearance_mode: AppearanceMode::Dark,
             overlay_position: OverlayPosition::Top,
+            history_retention: HistoryRetention::Forever,
             ..Settings::default()
         };
         save(&path, &settings).unwrap();
@@ -253,6 +286,7 @@ mod tests {
         assert_eq!(settings.theme, Theme::Ember);
         assert_eq!(settings.appearance_mode, AppearanceMode::System);
         assert_eq!(settings.overlay_position, OverlayPosition::Bottom);
+        assert_eq!(settings.history_retention, HistoryRetention::Week);
         fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.version, 2);
@@ -276,7 +310,9 @@ mod tests {
             fs::write(&path, original).unwrap();
             let (settings, error) = load_or_default(&path);
             assert_eq!(settings, Settings::default());
-            assert!(error.unwrap().contains("Using default settings"));
+            let problem = error.unwrap();
+            assert_eq!(problem.title, "Settings couldn’t be read");
+            assert!(problem.fix.starts_with("Using defaults."));
             assert!(!path.exists());
             assert!(fs::read_dir(dir.path()).unwrap().any(|entry| {
                 let entry = entry.unwrap();

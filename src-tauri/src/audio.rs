@@ -1,3 +1,4 @@
+use crate::problem::Problem;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rubato::{FftFixedInOut, Resampler};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -11,7 +12,7 @@ enum Command {
     StopMonitor,
     Level(Reply<f32>),
     RecordingLevel(Reply<f32>),
-    Stop(Reply<Vec<f32>>),
+    Stop(mpsc::Sender<Result<Vec<f32>, Problem>>),
     Status(mpsc::Sender<bool>),
 }
 
@@ -83,7 +84,12 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                             Command::Stop(reply) => {
                                 let result = recording
                                     .take()
-                                    .ok_or_else(|| "Microphone is not recording".into())
+                                    .ok_or_else(|| {
+                                        Problem::new(
+                                            "Recording already stopped",
+                                            "Hold the shortcut and speak again.",
+                                        )
+                                    })
                                     .and_then(Recording::finish);
                                 let _ = reply.send(result);
                             }
@@ -117,24 +123,45 @@ pub fn is_recording() -> bool {
     send(Command::Status(reply)).is_ok() && result.recv().unwrap_or(false)
 }
 
-pub fn start() -> Result<(), String> {
+pub fn start() -> Result<(), Problem> {
     start_device(None).map(|_| ())
 }
 
-pub fn start_device(device: Option<String>) -> Result<bool, String> {
+pub fn start_device(device: Option<String>) -> Result<bool, Problem> {
     let (reply, result) = mpsc::channel();
-    send(Command::Start(device, reply))?;
-    result
-        .recv()
-        .map_err(|e| format!("Audio start reply: {e}"))?
+    send(Command::Start(device, reply))
+        .and_then(|()| {
+            result
+                .recv()
+                .map_err(|e| format!("Audio start reply: {e}"))?
+        })
+        .map_err(|cause| {
+            Problem::new(
+                "Microphone unavailable",
+                "Choose another microphone in Settings, then try again.",
+            )
+            .because(cause)
+        })
 }
 
-pub fn stop() -> Result<Vec<f32>, String> {
+pub fn stop() -> Result<Vec<f32>, Problem> {
     let (reply, result) = mpsc::channel();
-    send(Command::Stop(reply))?;
+    send(Command::Stop(reply)).map_err(recording_failed)?;
     result
         .recv()
-        .map_err(|e| format!("Audio stop reply: {e}"))?
+        .map_err(|e| recording_failed(format!("Audio stop reply: {e}")))?
+}
+
+pub fn no_samples() -> Problem {
+    Problem::new(
+        "No sound from the microphone",
+        "Check it in Settings → General → Test microphone.",
+    )
+    .because("Microphone delivered no samples")
+}
+
+fn recording_failed(cause: String) -> Problem {
+    Problem::new("Recording failed", "Hold the shortcut and try again.").because(cause)
 }
 
 type Devices = Vec<(String, cpal::Device)>;
@@ -327,17 +354,24 @@ where
 }
 
 impl Recording {
-    fn finish(self) -> Result<Vec<f32>, String> {
+    fn finish(self) -> Result<Vec<f32>, Problem> {
         drop(self.stream);
-        let mut captured = self.captured.lock().map_err(|e| e.to_string())?;
+        let mut captured = self
+            .captured
+            .lock()
+            .map_err(|e| recording_failed(e.to_string()))?;
         if let Some(error) = captured.error.take() {
-            return Err(error);
+            return Err(Problem::new(
+                "Microphone disconnected",
+                "Reconnect it or choose another microphone in Settings.",
+            )
+            .because(error));
         }
         let samples = std::mem::take(&mut captured.samples);
         if samples.is_empty() {
-            return Err("Microphone delivered no samples".into());
+            return Err(no_samples());
         }
-        let samples = resample(samples, self.rate)?;
+        let samples = resample(samples, self.rate).map_err(recording_failed)?;
         if std::env::var_os("DICTATE_DEBUG_WAV").is_some_and(|value| value == "1") {
             match dump_wav(&samples) {
                 Ok(path) => println!("[audio] debug WAV: {}", path.display()),

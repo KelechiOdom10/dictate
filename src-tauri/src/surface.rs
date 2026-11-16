@@ -1,3 +1,4 @@
+use crate::problem::Problem;
 use crate::settings::Settings;
 use tauri::{
     App, AppHandle, Emitter, Manager,
@@ -12,7 +13,7 @@ use std::sync::Mutex;
 #[derive(Clone, Default, Serialize)]
 pub struct Status {
     pub phase: String,
-    pub error: Option<String>,
+    pub error: Option<Problem>,
     pub notice: Option<String>,
 }
 
@@ -36,11 +37,11 @@ pub fn set_notice(app: &AppHandle, notice: Option<String>) {
         .notice = notice;
 }
 
-pub fn set_error(app: &AppHandle, error: &str) {
+pub fn set_error(app: &AppHandle, error: &Problem) {
     app.state::<Mutex<Status>>()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .error = Some(error.into());
+        .error = Some(error.clone());
     refresh_tray(app);
 }
 
@@ -88,7 +89,7 @@ fn refresh_tray(app: &AppHandle) {
         }
         let tooltip = status.error.map_or_else(
             || format!("dictate · {phase}"),
-            |error| format!("dictate · {error}"),
+            |error| format!("dictate · {}", error.title),
         );
         if let Err(error) = tray.set_tooltip(Some(tooltip)) {
             eprintln!("[tray] {error}");

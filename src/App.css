@@ -100,6 +100,60 @@ meter {
 .notice button {
   margin-top: var(--space-3);
 }
+.history {
+  display: grid;
+  gap: var(--space-4);
+  container-type: inline-size;
+}
+.history-toolbar {
+  display: flex;
+  gap: var(--space-3);
+}
+.history-toolbar .ui-search {
+  flex: 1;
+  min-width: 0;
+}
+.history .error {
+  margin: 0;
+}
+.history-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-panel);
+  background: var(--warning-surface);
+  white-space: normal;
+}
+.history-confirm-question {
+  font-weight: var(--weight-medium);
+}
+.ui-detail .history-confirm {
+  margin-bottom: var(--space-4);
+}
+.history-split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.history .ui-detail {
+  position: sticky;
+  top: 0;
+}
+@container (max-width: 520px) {
+  .history-toolbar {
+    flex-wrap: wrap;
+  }
+  .history-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .history .ui-detail {
+    position: static;
+  }
+}
 .overlay {
   height: 100%;
   display: grid;
@@ -158,7 +212,7 @@ html.overlay-window,
 }
 .overlay-capsule {
   width: max-content;
-  max-width: min(420px, calc(100vw - 16px));
+  max-width: min(var(--overlay-max-width), calc(100vw - 16px));
   justify-self: center;
 }
 .overlay .ui-capsule {

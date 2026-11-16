@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { listen } from "@tauri-apps/api/event";
@@ -11,13 +11,16 @@ import SettingsWindow from "./SettingsWindow";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings, settingsSchema } from "./settings";
 import { RecordingCapsule, KeyboardShortcut } from "./ui";
+import { problem, type Problem } from "./problem";
 import "./App.css";
+
+const OVERLAY_MAX_WIDTH = 420;
 
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });
 
-function Overlay({ appearanceError }: { appearanceError: string | null }) {
+function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
   const status = useDictationStatus();
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   const [seconds, setSeconds] = useState(0);
@@ -35,7 +38,7 @@ function Overlay({ appearanceError }: { appearanceError: string | null }) {
         position: "fixed",
         visibility: "hidden",
         width: "max-content",
-        maxWidth: "420px",
+        maxWidth: `${OVERLAY_MAX_WIDTH}px`,
       });
       measurement.setAttribute("aria-hidden", "true");
       document.body.append(measurement);
@@ -77,20 +80,26 @@ function Overlay({ appearanceError }: { appearanceError: string | null }) {
   const error =
     appearanceError ??
     status.error ??
-    (settings.error ? String(settings.error) : null);
+    (settings.error
+      ? problem(
+          "Settings couldn’t load",
+          "Open Settings to try again.",
+          settings.error,
+        )
+      : null);
   return (
     <main className="overlay">
-      <div ref={capsule} className="overlay-capsule">
+      <div
+        ref={capsule}
+        className="overlay-capsule"
+        style={
+          { "--overlay-max-width": `${OVERLAY_MAX_WIDTH}px` } as CSSProperties
+        }
+      >
         <RecordingCapsule
           state={
             error
-              ? {
-                  kind: "error",
-                  message:
-                    error.length <= 90
-                      ? `${error} Open Settings to retry.`
-                      : "Open dictate Settings for details, then retry.",
-                }
+              ? { kind: "error", title: error.title, fix: error.fix }
               : status.phase === "recording"
                 ? {
                     kind: "recording",
@@ -124,7 +133,7 @@ function Overlay({ appearanceError }: { appearanceError: string | null }) {
 function Appearance({
   onError,
 }: {
-  onError: (message: string | null) => void;
+  onError: (problem: Problem | null) => void;
 }) {
   const query = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   useEffect(() => {
@@ -136,7 +145,13 @@ function Appearance({
         client.setQueryData(["settings"], result.data);
         onError(null);
       } else {
-        onError("Settings could not refresh. Open Settings and save again.");
+        onError(
+          problem(
+            "Settings couldn’t refresh",
+            "Open Settings and save again.",
+            result.error,
+          ),
+        );
         void invoke("report_settings_refresh_error").catch(console.error);
       }
     });
@@ -179,7 +194,7 @@ function Appearance({
 }
 
 export default function App() {
-  const [appearanceError, setAppearanceError] = useState<string | null>(null);
+  const [appearanceError, setAppearanceError] = useState<Problem | null>(null);
   return (
     <QueryClientProvider client={client}>
       <Appearance onError={setAppearanceError} />
