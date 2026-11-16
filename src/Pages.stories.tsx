@@ -185,7 +185,8 @@ function mockApp(
     shortcutMode: "hold",
     microphone: null,
     launchAtLogin: false,
-    theme: settingsSchema.shape.theme.parse(globals.theme),
+    themeLight: settingsSchema.shape.themeLight.parse(globals.theme),
+    themeDark: settingsSchema.shape.themeLight.parse(globals.theme),
     overlayPosition: "bottom",
     historyRetention: "week",
     appearanceMode: globals.mode === "dark" ? "dark" : "light",
@@ -200,6 +201,7 @@ function mockApp(
     annotateShortcut: "Alt+Shift+KeyS",
     annotateEnabled: true,
     annotateShowInRecordings: false,
+    glass: false,
     ...overrides,
   };
   mockWindows("settings");
@@ -1008,21 +1010,48 @@ export const Appearance: Story = {
   render: () => <GeneralPage page="Appearance" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
-    const themes = await c.findByRole("radiogroup", { name: "Theme" });
-    const scoped = within(themes);
-    expect(themes.querySelectorAll(".astryx-badge")).toHaveLength(0);
-    expect(scoped.queryByText("Ready")).toBeNull();
-    expect(scoped.queryByText("Inserted")).toBeNull();
-    expect(scoped.getAllByRole("radio")).toHaveLength(5);
+    // Two groups: the mode, then the theme for the side that mode shows.
+    const mode = await c.findByRole("radiogroup", { name: "Mode" });
+    for (const name of ["System", "Light", "Dark"])
+      expect(within(mode).getByRole("radio", { name })).toBeInTheDocument();
+    const themes = c.getByRole("radiogroup", { name: /^(Light|Dark) theme$/ });
     for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
-      expect(
-        scoped.getByRole("radio", { name: new RegExp(name) }),
-      ).toBeInTheDocument();
+      expect(within(themes).getByRole("radio", { name })).toBeInTheDocument();
     expect(
-      themes.querySelectorAll(".astryx-status-dot").length,
-    ).toBeGreaterThan(5);
+      within(mode)
+        .getAllByRole("radio")
+        .filter((radio) => (radio as HTMLInputElement).checked),
+    ).toHaveLength(1);
+    // Every theme is a picture of its light and dark side, nothing else.
+    expect(themes.querySelectorAll("svg")).toHaveLength(5);
+    expect(themes.querySelectorAll(".astryx-status-dot")).toHaveLength(0);
+    // Glass is opt-in and starts off.
+    expect(
+      c.getByRole("switch", { name: "Translucent window" }),
+    ).not.toBeChecked();
   },
 };
+
+export const AppearanceGlass: Story = {
+  name: "Appearance / translucent window on",
+  beforeEach: ({ globals }) => mockApp(globals, [], undefined, { glass: true }),
+  render: () => <GeneralPage page="Appearance" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const toggle = await c.findByRole("switch", {
+      name: "Translucent window",
+    });
+    expect(toggle).toBeChecked();
+    expect(
+      c.getByText(/Lets what is behind the window show through/),
+    ).toBeInTheDocument();
+    await userEvent.click(toggle);
+    await expect(
+      c.getByRole("switch", { name: "Translucent window" }),
+    ).not.toBeChecked();
+  },
+};
+
 export const Overlay: Story = {
   render: () => (
     <main

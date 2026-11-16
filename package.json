@@ -22,7 +22,8 @@
     "update:key": "bash scripts/update-key.sh",
     "sign:mac": "bash scripts/sign-macos.sh",
     "dmg": "bash scripts/make-dmg.sh",
-    "check:icon-colours": "node scripts/check-icon-colours.mjs"
+    "check:icon-colours": "node scripts/check-icon-colours.mjs",
+    "check:release-paths": "bash scripts/check-release-paths.sh"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.16",

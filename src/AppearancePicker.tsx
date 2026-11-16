@@ -1,80 +1,198 @@
-import { useSyncExternalStore } from "react";
+import { useId } from "react";
 import { Card } from "@astryxdesign/core/Card";
-import { HStack } from "@astryxdesign/core/HStack";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
-import {
-  SegmentedControl,
-  SegmentedControlItem,
-} from "@astryxdesign/core/SegmentedControl";
-import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
-import { Theme } from "@astryxdesign/core/theme";
+import { resolveThemeTokens } from "@astryxdesign/core/theme";
 import { VStack } from "@astryxdesign/core/VStack";
 import { settingsSchema, type Settings } from "./settings";
 import {
   THEMES,
+  shownDark,
   themeFor,
+  useSystemDark,
   type AppearanceMode,
   type ThemeId,
 } from "./ui/SettingsTheme";
 
-const darkQuery = "(prefers-color-scheme: dark)";
-function useSystemDark() {
-  return useSyncExternalStore(
-    (change) => {
-      const query = matchMedia(darkQuery);
-      query.addEventListener("change", change);
-      return () => query.removeEventListener("change", change);
-    },
-    () => matchMedia(darkQuery).matches,
+type Side = "light" | "dark";
+
+const nameOf = (id: ThemeId) =>
+  THEMES.find((theme) => theme.id === id)?.name ?? "Ember";
+
+const grid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: "var(--spacing-2)",
+};
+
+function Window({ id, side }: { id: ThemeId; side: Side }) {
+  const color = resolveThemeTokens(themeFor(id), { mode: side });
+  return (
+    <>
+      <rect
+        x="0.5"
+        y="0.5"
+        width="119"
+        height="71"
+        rx="6"
+        fill={color["--color-background-body"]}
+        stroke={color["--color-border"]}
+      />
+      <rect
+        x="1"
+        y="1"
+        width="34"
+        height="70"
+        rx="5.5"
+        fill={color["--color-background-muted"]}
+      />
+      <rect
+        x="6"
+        y="10"
+        width="24"
+        height="7"
+        rx="2"
+        fill={color["--color-accent-muted"]}
+      />
+      <rect
+        x="6"
+        y="22"
+        width="18"
+        height="3"
+        rx="1.5"
+        fill={color["--color-text-secondary"]}
+      />
+      <rect
+        x="6"
+        y="30"
+        width="21"
+        height="3"
+        rx="1.5"
+        fill={color["--color-text-secondary"]}
+      />
+      <rect
+        x="42"
+        y="9"
+        width="70"
+        height="54"
+        rx="4"
+        fill={color["--color-background-card"]}
+        stroke={color["--color-border"]}
+      />
+      <rect
+        x="49"
+        y="17"
+        width="38"
+        height="4"
+        rx="2"
+        fill={color["--color-text-primary"]}
+      />
+      <rect
+        x="49"
+        y="26"
+        width="52"
+        height="3"
+        rx="1.5"
+        fill={color["--color-text-secondary"]}
+      />
+      <rect
+        x="49"
+        y="32"
+        width="44"
+        height="3"
+        rx="1.5"
+        fill={color["--color-text-secondary"]}
+      />
+      <rect
+        x="49"
+        y="48"
+        width="24"
+        height="8"
+        rx="4"
+        fill={color["--color-accent"]}
+      />
+    </>
   );
 }
 
-function Preview({ id, mode }: { id: ThemeId; mode: "light" | "dark" }) {
+/** A small picture of the window, split down the middle when it shows two sides. */
+function Preview({ light, dark }: { light?: ThemeId; dark?: ThemeId }) {
+  const clip = useId();
   return (
-    <Theme theme={themeFor(id)} mode={mode}>
-      <Card padding={2} width={112}>
+    <svg viewBox="0 0 120 72" width="100%" aria-hidden="true" display="block">
+      {light && <Window id={light} side="light" />}
+      {dark && (
+        <>
+          <clipPath id={clip}>
+            <rect x={light ? 60 : 0} y="0" width="120" height="72" />
+          </clipPath>
+          <g clipPath={`url(#${clip})`}>
+            <Window id={dark} side="dark" />
+          </g>
+        </>
+      )}
+    </svg>
+  );
+}
+
+function Tile({
+  value,
+  name,
+  light,
+  dark,
+}: {
+  value: string;
+  name: string;
+  light?: ThemeId;
+  dark?: ThemeId;
+}) {
+  return (
+    <RadioListItem
+      value={value}
+      align="start"
+      label={
         <VStack gap={1}>
-          <HStack gap={1} vAlign="center">
-            <Text type="label">Aa</Text>
-            <StatusDot variant="accent" label="Accent" />
-          </HStack>
-          <HStack gap={1} vAlign="center">
-            <StatusDot variant="success" label="Positive" />
-            <StatusDot variant="warning" label="Caution" />
-            <Text type="supporting">Body text</Text>
-          </HStack>
+          <Preview light={light} dark={dark} />
+          <Text type="supporting">{name}</Text>
         </VStack>
-      </Card>
-    </Theme>
+      }
+    />
   );
 }
 
 export function AppearancePicker({
-  theme,
+  themeLight,
+  themeDark,
   mode,
   disabled,
   onChange,
 }: {
-  theme: ThemeId;
+  themeLight: ThemeId;
+  themeDark: ThemeId;
   mode: AppearanceMode;
   disabled: boolean;
   onChange: (patch: Partial<Settings>) => void;
 }) {
   const systemDark = useSystemDark();
-  const shown = mode === "system" ? (systemDark ? "dark" : "light") : mode;
+  const editing: Side = shownDark(mode, systemDark) ? "dark" : "light";
+  const other: Side = editing === "dark" ? "light" : "dark";
+  const themes = { light: themeLight, dark: themeDark };
+  const sideName = { light: "Light", dark: "Dark" };
   return (
     <Card>
-      <VStack gap={4}>
-        <HStack gap={4} hAlign="between" vAlign="center">
+      <VStack gap={6}>
+        <VStack gap={2}>
           <VStack gap={1}>
             <Text weight="medium">Mode</Text>
-            <Text type="supporting">Follow your Mac, or choose a look.</Text>
+            <Text type="supporting">Choose a mode, then its theme below.</Text>
           </VStack>
-          <SegmentedControl
+          <RadioList
             label="Mode"
+            isLabelHidden
+            orientation="horizontal"
             value={mode}
             isDisabled={disabled}
+            controlStyle={grid}
             onChange={(value) =>
               onChange({
                 appearanceMode:
@@ -82,29 +200,49 @@ export function AppearancePicker({
               })
             }
           >
-            <SegmentedControlItem value="system" label="System" />
-            <SegmentedControlItem value="light" label="Light" />
-            <SegmentedControlItem value="dark" label="Dark" />
-          </SegmentedControl>
-        </HStack>
-        <RadioList
-          label="Theme"
-          value={theme}
-          isDisabled={disabled}
-          onChange={(value) =>
-            onChange({ theme: settingsSchema.shape.theme.parse(value) })
-          }
-        >
-          {THEMES.map((option) => (
-            <RadioListItem
-              key={option.id}
-              value={option.id}
-              label={option.name}
-              description={option.description}
-              endContent={<Preview id={option.id} mode={shown} />}
+            <Tile
+              value="system"
+              name="System"
+              light={themeLight}
+              dark={themeDark}
             />
-          ))}
-        </RadioList>
+            <Tile value="light" name="Light" light={themeLight} />
+            <Tile value="dark" name="Dark" dark={themeDark} />
+          </RadioList>
+        </VStack>
+        <VStack gap={2}>
+          <VStack gap={1}>
+            <Text weight="medium">{sideName[editing]} theme</Text>
+            <Text type="supporting">
+              {mode === "system" ? `Your Mac is ${editing} now. ` : ""}
+              {sideName[other]} uses {nameOf(themes[other])}.
+            </Text>
+          </VStack>
+          <RadioList
+            label={`${sideName[editing]} theme`}
+            isLabelHidden
+            orientation="horizontal"
+            value={themes[editing]}
+            isDisabled={disabled}
+            controlStyle={grid}
+            onChange={(value) => {
+              const id = settingsSchema.shape.themeLight.parse(value);
+              onChange(
+                editing === "dark" ? { themeDark: id } : { themeLight: id },
+              );
+            }}
+          >
+            {THEMES.map((theme) => (
+              <Tile
+                key={theme.id}
+                value={theme.id}
+                name={theme.name}
+                light={theme.id}
+                dark={theme.id}
+              />
+            ))}
+          </RadioList>
+        </VStack>
       </VStack>
     </Card>
   );

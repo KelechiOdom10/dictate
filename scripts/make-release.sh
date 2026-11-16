@@ -18,14 +18,25 @@ export PATH="$HOME/.nvm/versions/node/v24.22.2/bin:/opt/homebrew/bin:$PATH"
 # shellcheck disable=SC1091
 [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
 
-APP="$ROOT/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/dictate.app"
+# shellcheck source=target-dir.sh
+source "$ROOT/scripts/target-dir.sh"
+
+# Never assume src-tauri/target: CARGO_TARGET_DIR moves it, and a build that
+# succeeds into a shared cache used to leave this script looking in the wrong
+# place. Ask cargo, then check the answer is real.
+TARGET_DIR="$(dictate_target_dir)" || {
+  echo "error: cargo metadata could not report a target directory" >&2
+  exit 1
+}
+APP="$TARGET_DIR/aarch64-apple-darwin/release/bundle/macos/dictate.app"
+echo "==> target directory: $TARGET_DIR"
 
 # cmake caches the first deployment target it sees, so a cache built when the
 # minimum was lower keeps passing -mmacosx-version-min=10.13 and the ggml build
 # fails with "'path' is unavailable". Drop only the caches whose target
 # disagrees with tauri.conf.json; a matching cache is worth its minutes.
 MINIMUM="$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['bundle']['macOS']['minimumSystemVersion'])")"
-for cache in "$ROOT"/src-tauri/target/*/release/build/transcribe-cpp-sys-*/CMakeCache.txt; do
+for cache in "$TARGET_DIR"/*/release/build/transcribe-cpp-sys-*/CMakeCache.txt; do
   [[ -e "$cache" ]] || continue
   cached="$(sed -n 's/^CMAKE_OSX_DEPLOYMENT_TARGET:[A-Z]*=//p' "$cache")"
   if [[ "$cached" != "$MINIMUM" ]]; then
@@ -42,6 +53,8 @@ node "$ROOT/scripts/check-icon-colours.mjs"
 echo "==> building arm64 release"
 # CI=true skips the Finder AppleScript that lays out the DMG window.
 CI=true pnpm tauri build --target aarch64-apple-darwin --bundles app
+
+require_app "$APP"
 
 echo
 echo "==> binary"

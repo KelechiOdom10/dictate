@@ -17,13 +17,14 @@ export PATH="$HOME/.nvm/versions/node/v24.22.2/bin:/opt/homebrew/bin:$PATH"
 # shellcheck disable=SC1091
 [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
 
-APP="${1:-$ROOT/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/dictate.app}"
+source "$ROOT/scripts/target-dir.sh"
+APP="${1:-$(dictate_app_path)}"
 KEY="${DICTATE_UPDATE_KEY:-$HOME/.config/dictate/update.key}"
 BASE_URL="${DICTATE_UPDATES_URL:-https://dictate.kellycooks.dev/updates}"
 OUT="$ROOT/release/updates"
 die() { echo "error: $*" >&2; exit 1; }
 
-[[ -d "$APP" ]] || die "no app bundle at $APP; run pnpm release:mac first"
+require_app "$APP" || exit 1
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 TAG="$(git describe --exact-match --tags HEAD 2>/dev/null || true)"
 [[ "$TAG" == "v$VERSION" ]] || die "HEAD is on tag '${TAG:-none}', but the app is $VERSION. Updates publish from tag v$VERSION only."

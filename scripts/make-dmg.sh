@@ -11,14 +11,26 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="${1:-$ROOT/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/dictate.app}"
-OUT_DIR="$ROOT/release"
+OUT_DIR="${DICTATE_RELEASE_DIR:-$ROOT/release}"
 
-if [[ ! -d "$APP" ]]; then
-  echo "error: no app bundle at $APP" >&2
+# shellcheck source=target-dir.sh
+source "$ROOT/scripts/target-dir.sh"
+
+# An explicit path wins; otherwise ask cargo where the build went rather than
+# assuming src-tauri/target, because CARGO_TARGET_DIR moves it.
+if [[ $# -gt 0 ]]; then
+  APP="$1"
+else
+  APP="$(dictate_app_path)" || {
+    echo "error: cargo could not report a target directory" >&2
+    exit 1
+  }
+fi
+
+require_app "$APP" || {
   echo "       build it first: pnpm release:mac" >&2
   exit 1
-fi
+}
 
 NAME="$(basename "$APP" .app)"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"

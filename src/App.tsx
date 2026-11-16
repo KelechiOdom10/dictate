@@ -232,10 +232,16 @@ function Appearance({
     const update = () => {
       cancelAnimationFrame(frame);
       root.classList.add("appearance-changing");
-      document.documentElement.dataset.palette = query.data?.theme ?? "ember";
-      const mode = query.data?.appearanceMode ?? "system";
-      document.documentElement.dataset.mode =
-        mode === "system" ? (system.matches ? "dark" : "light") : mode;
+      const settings = query.data;
+      const mode = settings?.appearanceMode ?? "system";
+      const dark = mode === "system" ? system.matches : mode === "dark";
+      // Each appearance has its own theme, so the palette follows whichever
+      // one the mode resolves to. The overlay reads these two attributes.
+      document.documentElement.dataset.palette =
+        (dark ? settings?.themeDark : settings?.themeLight) ?? "ember";
+      document.documentElement.dataset.mode = dark ? "dark" : "light";
+      if (settings?.glass) document.documentElement.dataset.glass = "true";
+      else delete document.documentElement.dataset.glass;
       root.getBoundingClientRect();
       frame = requestAnimationFrame(() =>
         root.classList.remove("appearance-changing"),
@@ -248,7 +254,13 @@ function Appearance({
       cancelAnimationFrame(frame);
       root.classList.remove("appearance-changing");
     };
-  }, [query.data?.theme, query.data?.appearanceMode, query.isFetched]);
+  }, [
+    query.data?.themeLight,
+    query.data?.themeDark,
+    query.data?.appearanceMode,
+    query.data?.glass,
+    query.isFetched,
+  ]);
   return null;
 }
 

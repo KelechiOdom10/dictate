@@ -10,11 +10,12 @@ type Story = StoryObj<typeof meta>;
 
 function Picker({ disabled = false }: { disabled?: boolean }) {
   const [value, setValue] = useState<
-    Pick<Settings, "theme" | "appearanceMode">
-  >({ theme: "ember", appearanceMode: "system" });
+    Pick<Settings, "themeLight" | "themeDark" | "appearanceMode">
+  >({ themeLight: "ember", themeDark: "ember", appearanceMode: "light" });
   return (
     <AppearancePicker
-      theme={value.theme}
+      themeLight={value.themeLight}
+      themeDark={value.themeDark}
       mode={value.appearanceMode}
       disabled={disabled}
       onChange={(patch) => setValue((current) => ({ ...current, ...patch }))}
@@ -23,23 +24,39 @@ function Picker({ disabled = false }: { disabled?: boolean }) {
 }
 
 export const EveryTheme: Story = {
-  name: "AppearancePicker / every theme, mode set separately",
+  name: "AppearancePicker / a theme for each appearance",
   render: () => <Picker />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("radio", { name: /Ember/ })).toBeChecked();
-    for (const name of ["Paper", "Capy", "Rosé Pine", "Neutral"]) {
-      const radio = canvas.getByRole("radio", { name: new RegExp(name) });
-      await userEvent.click(radio);
-      await expect(radio).toBeChecked();
-    }
-    const dark = canvas.getByRole("radio", { name: "Dark" });
-    await userEvent.click(dark);
-    await expect(dark).toBeChecked();
-    await expect(canvas.getByRole("radio", { name: /Neutral/ })).toBeChecked();
+    const mode = (name: string) =>
+      within(canvas.getByRole("radiogroup", { name: "Mode" })).getByRole(
+        "radio",
+        { name },
+      );
+    const theme = (side: "Light" | "Dark", name: string) =>
+      within(
+        canvas.getByRole("radiogroup", { name: `${side} theme` }),
+      ).getByRole("radio", { name });
+    await expect(mode("Light")).toBeChecked();
+    await userEvent.click(theme("Light", "Paper"));
+    await expect(theme("Light", "Paper")).toBeChecked();
+    await expect(canvas.getByText("Dark uses Ember.")).toBeInTheDocument();
+    // Picking the Dark tile turns the same grid to the dark theme.
+    await userEvent.click(mode("Dark"));
+    await expect(theme("Dark", "Ember")).toBeChecked();
+    await userEvent.click(theme("Dark", "Capy"));
+    await expect(canvas.getByText("Light uses Paper.")).toBeInTheDocument();
+    await userEvent.click(mode("Light"));
+    await expect(theme("Light", "Paper")).toBeChecked();
+    await expect(canvas.getByText("Dark uses Capy.")).toBeInTheDocument();
   },
 };
 export const Disabled: Story = {
   name: "AppearancePicker / while saving",
   render: () => <Picker disabled />,
+  play: async ({ canvasElement }) => {
+    const radios = within(canvasElement).getAllByRole("radio");
+    await expect(radios).toHaveLength(8);
+    for (const radio of radios) await expect(radio).toBeDisabled();
+  },
 };
