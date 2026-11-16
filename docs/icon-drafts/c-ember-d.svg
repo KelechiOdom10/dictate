@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>dictate icon draft C: Ember d</title>
+  <defs>
+    <linearGradient id="char" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2E2B26"/>
+      <stop offset="1" stop-color="#1A1816"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#F67D51"/>
+      <stop offset=".7" stop-color="#DF5822"/>
+      <stop offset="1" stop-color="#C24A1B"/>
+    </radialGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#char)"/>
+  <!-- Lowercase d: the bowl is the ember record dot, the stem a pen stroke -->
+  <circle cx="478" cy="600" r="150" fill="url(#glow)"/>
+  <path d="M640 268 C 646 420, 642 600, 648 776" fill="none" stroke="#F1EEEA" stroke-width="72" stroke-linecap="round"/>
+</svg>
