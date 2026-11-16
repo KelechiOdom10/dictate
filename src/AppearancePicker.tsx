@@ -1,5 +1,5 @@
+import { useState } from "react";
 import { Card } from "@astryxdesign/core/Card";
-import { Grid } from "@astryxdesign/core/Grid";
 import { HStack } from "@astryxdesign/core/HStack";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import {
@@ -22,10 +22,13 @@ import {
 
 type Side = "light" | "dark";
 
+const nameOf = (id: ThemeId) =>
+  THEMES.find((theme) => theme.id === id)?.name ?? "Ember";
+
 function Preview({ id, mode }: { id: ThemeId; mode: Side }) {
   return (
     <Theme theme={themeFor(id)} mode={mode}>
-      <Card padding={1} width={72}>
+      <Card padding={1} width={112}>
         <VStack gap={1}>
           <HStack gap={1} vAlign="center">
             <Text type="label">Aa</Text>
@@ -34,63 +37,11 @@ function Preview({ id, mode }: { id: ThemeId; mode: Side }) {
           <HStack gap={1} vAlign="center">
             <StatusDot variant="success" label="Positive" />
             <StatusDot variant="warning" label="Caution" />
+            <Text type="supporting">Body</Text>
           </HStack>
         </VStack>
       </Card>
     </Theme>
-  );
-}
-
-function ThemeColumn({
-  side,
-  theme,
-  disabled,
-  isShown,
-  onChange,
-}: {
-  side: Side;
-  theme: ThemeId;
-  disabled: boolean;
-  isShown: boolean;
-  onChange: (theme: ThemeId) => void;
-}) {
-  const name = side === "light" ? "Light" : "Dark";
-  return (
-    <VStack gap={2}>
-      <VStack gap={1}>
-        <HStack gap={2} vAlign="center">
-          <Text weight="medium">{name}</Text>
-          {isShown && (
-            <HStack gap={1} vAlign="center">
-              <StatusDot variant="accent" label="Current appearance" />
-              <Text type="supporting">In use now</Text>
-            </HStack>
-          )}
-        </HStack>
-        <Text type="supporting">
-          {side === "light"
-            ? "Used when the window is light."
-            : "Used when the window is dark."}
-        </Text>
-      </VStack>
-      <RadioList
-        label={`Theme in ${side}`}
-        value={theme}
-        isDisabled={disabled}
-        onChange={(value) =>
-          onChange(settingsSchema.shape.themeLight.parse(value))
-        }
-      >
-        {THEMES.map((option) => (
-          <RadioListItem
-            key={option.id}
-            value={option.id}
-            label={option.name}
-            endContent={<Preview id={option.id} mode={side} />}
-          />
-        ))}
-      </RadioList>
-    </VStack>
   );
 }
 
@@ -108,9 +59,13 @@ export function AppearancePicker({
   onChange: (patch: Partial<Settings>) => void;
 }) {
   const dark = shownDark(mode, useSystemDark());
+  // The side being edited starts as the one on screen and then stays put, so
+  // the Mac flipping its appearance never moves the list under your hands.
+  const [side, setSide] = useState<Side>(() => (dark ? "dark" : "light"));
+  const theme = side === "dark" ? themeDark : themeLight;
   return (
     <Card>
-      <VStack gap={4}>
+      <VStack gap={6}>
         <HStack gap={4} hAlign="between" vAlign="center">
           <VStack gap={1}>
             <Text weight="medium">Mode</Text>
@@ -132,22 +87,52 @@ export function AppearancePicker({
             <SegmentedControlItem value="dark" label="Dark" />
           </SegmentedControl>
         </HStack>
-        <Grid columns={{ minWidth: 200, max: 2 }} gap={4}>
-          <ThemeColumn
-            side="light"
-            theme={themeLight}
-            disabled={disabled}
-            isShown={!dark}
-            onChange={(theme) => onChange({ themeLight: theme })}
-          />
-          <ThemeColumn
-            side="dark"
-            theme={themeDark}
-            disabled={disabled}
-            isShown={dark}
-            onChange={(theme) => onChange({ themeDark: theme })}
-          />
-        </Grid>
+        <VStack gap={3}>
+          <VStack gap={2}>
+            <HStack gap={2} vAlign="center">
+              <Text weight="medium">Theme</Text>
+              {(side === "dark") === dark && (
+                <HStack gap={1} vAlign="center">
+                  <StatusDot variant="accent" label="Current appearance" />
+                  <Text type="supporting">In use now</Text>
+                </HStack>
+              )}
+            </HStack>
+            <Text type="supporting">
+              Light uses {nameOf(themeLight)} · Dark uses {nameOf(themeDark)}
+            </Text>
+            <SegmentedControl
+              label="Theme for"
+              value={side}
+              isDisabled={disabled}
+              onChange={(value) => setSide(value as Side)}
+            >
+              <SegmentedControlItem value="light" label="Light theme" />
+              <SegmentedControlItem value="dark" label="Dark theme" />
+            </SegmentedControl>
+          </VStack>
+          <RadioList
+            label={`Theme for ${side}`}
+            value={theme}
+            isDisabled={disabled}
+            onChange={(value) => {
+              const id = settingsSchema.shape.themeLight.parse(value);
+              onChange(
+                side === "dark" ? { themeDark: id } : { themeLight: id },
+              );
+            }}
+          >
+            {THEMES.map((option) => (
+              <RadioListItem
+                key={option.id}
+                value={option.id}
+                label={option.name}
+                description={option.description}
+                endContent={<Preview id={option.id} mode={side} />}
+              />
+            ))}
+          </RadioList>
+        </VStack>
       </VStack>
     </Card>
   );

@@ -23,7 +23,7 @@ export default function AppearancePage() {
       >
         <Row
           label="Translucent window"
-          help="Lets what is behind the window show through. Falls back to solid where macOS can’t do it."
+          help="Lets what is behind the window show through."
         >
           <Switch
             label="Translucent window"

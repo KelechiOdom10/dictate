@@ -28,28 +28,44 @@ export const EveryTheme: Story = {
   render: () => <Picker />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    const side = (name: "Light theme" | "Dark theme") =>
+      within(canvas.getByRole("radiogroup", { name: "Theme for" })).getByRole(
+        "radio",
+        { name },
+      );
+    // The list edits the appearance on screen at first.
+    await expect(
+      canvas.getByRole("radiogroup", { name: "Theme for light" }),
+    ).toBeInTheDocument();
+    // The side on screen is the one being edited, and it says so.
+    await expect(canvas.getAllByText("In use now")).toHaveLength(1);
     const light = within(
-      canvas.getByRole("radiogroup", { name: "Theme in light" }),
+      canvas.getByRole("radiogroup", { name: "Theme for light" }),
     );
+    await userEvent.click(light.getByRole("radio", { name: /^Paper/ }));
+    await expect(light.getByRole("radio", { name: /^Paper/ })).toBeChecked();
+    // Switching the side shows the other choice, untouched.
+    await userEvent.click(side("Dark theme"));
     const dark = within(
-      canvas.getByRole("radiogroup", { name: "Theme in dark" }),
+      canvas.getByRole("radiogroup", { name: "Theme for dark" }),
     );
-    await expect(light.getByRole("radio", { name: /Ember/ })).toBeChecked();
-    await expect(dark.getByRole("radio", { name: /Ember/ })).toBeChecked();
-    await userEvent.click(light.getByRole("radio", { name: /Paper/ }));
-    await expect(light.getByRole("radio", { name: /Paper/ })).toBeChecked();
-    // Picking in one column leaves the other alone.
-    await expect(dark.getByRole("radio", { name: /Ember/ })).toBeChecked();
-    await userEvent.click(dark.getByRole("radio", { name: /Capy/ }));
-    await expect(dark.getByRole("radio", { name: /Capy/ })).toBeChecked();
-    await expect(light.getByRole("radio", { name: /Paper/ })).toBeChecked();
-    // Exactly one column says it is the one on screen, whatever the mode.
+    await expect(dark.getByRole("radio", { name: /^Ember/ })).toBeChecked();
+    await userEvent.click(dark.getByRole("radio", { name: /^Capy/ }));
+    await expect(dark.getByRole("radio", { name: /^Capy/ })).toBeChecked();
+    // Both choices stay on screen while one list edits them.
+    await expect(
+      canvas.getByText("Light uses Paper · Dark uses Capy"),
+    ).toBeInTheDocument();
+    // Editing the side that is not on screen drops the marker, and going back
+    // brings it with the choice you made.
+    await expect(canvas.queryAllByText("In use now")).toHaveLength(0);
+    await userEvent.click(side("Light theme"));
     await expect(canvas.getAllByText("In use now")).toHaveLength(1);
-    const modeDark = canvas.getByRole("radio", { name: "Dark" });
-    await userEvent.click(modeDark);
-    await expect(modeDark).toBeChecked();
-    await expect(dark.getByRole("radio", { name: /Capy/ })).toBeChecked();
-    await expect(canvas.getAllByText("In use now")).toHaveLength(1);
+    await expect(
+      within(
+        canvas.getByRole("radiogroup", { name: "Theme for light" }),
+      ).getByRole("radio", { name: /^Paper/ }),
+    ).toBeChecked();
   },
 };
 export const Disabled: Story = {

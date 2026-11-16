@@ -953,38 +953,31 @@ export const About: Story = {
 export const Appearance: Story = {
   beforeEach: mockSettings,
   render: () => <GeneralPage page="Appearance" />,
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, globals }) => {
     const c = within(canvasElement);
-    const lightGroup = await c.findByRole("radiogroup", {
-      name: "Theme in light",
+    // The list opens on the appearance that is on screen, which each project
+    // fixes at load.
+    const side = globals.mode === "dark" ? "dark" : "light";
+    const list = await c.findByRole("radiogroup", {
+      name: `Theme for ${side}`,
     });
-    const darkGroup = c.getByRole("radiogroup", { name: "Theme in dark" });
-    for (const group of [lightGroup, darkGroup]) {
-      const column = within(group);
-      expect(column.getAllByRole("radio")).toHaveLength(5);
-      for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
-        expect(
-          column.getByRole("radio", { name: new RegExp(name) }),
-        ).toBeInTheDocument();
-      expect(group.querySelectorAll(".astryx-badge")).toHaveLength(0);
-      expect(column.queryByText("Ready")).toBeNull();
-      expect(column.queryByText("Inserted")).toBeNull();
-    }
-    // Each list is previewed in the appearance it stands for, so a dark theme
-    // never shows its light side in the Dark column.
-    for (const [group, mode] of [
-      [lightGroup, "light"],
-      [darkGroup, "dark"],
-    ] as const) {
-      const seen = [...group.querySelectorAll("[data-theme]")].map((el) =>
-        el.getAttribute("data-theme"),
-      );
-      expect(seen.length).toBeGreaterThan(0);
-      expect(new Set(seen)).toEqual(new Set([mode]));
-    }
+    const column = within(list);
+    expect(column.getAllByRole("radio")).toHaveLength(5);
+    for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
+      expect(
+        column.getByRole("radio", { name: new RegExp(name) }),
+      ).toBeInTheDocument();
+    expect(list.querySelectorAll(".astryx-badge")).toHaveLength(0);
+    expect(column.queryByText("Ready")).toBeNull();
+    expect(column.queryByText("Inserted")).toBeNull();
+    // Each row is previewed in the appearance the list edits.
+    const seen = [...list.querySelectorAll("[data-theme]")].map((el) =>
+      el.getAttribute("data-theme"),
+    );
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set([side]));
     expect(
-      canvasElement.querySelectorAll("[role=radiogroup] .astryx-status-dot")
-        .length,
+      canvasElement.querySelectorAll(".astryx-status-dot").length,
     ).toBeGreaterThan(5);
     // Glass is opt-in and starts off.
     expect(
@@ -992,6 +985,7 @@ export const Appearance: Story = {
     ).not.toBeChecked();
   },
 };
+
 export const AppearanceGlass: Story = {
   name: "Appearance / translucent window on",
   beforeEach: ({ globals }) => mockApp(globals, [], undefined, { glass: true }),

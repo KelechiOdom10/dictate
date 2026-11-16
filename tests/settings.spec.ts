@@ -592,18 +592,33 @@ test("each appearance uses the theme stored for it", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
 });
 
-test("the light and dark columns choose their themes independently", async ({
-  page,
-}) => {
+test("the two appearances keep their own theme", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await openSettings(page);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  const light = page.getByRole("radiogroup", { name: "Theme in light" });
-  const dark = page.getByRole("radiogroup", { name: "Theme in dark" });
-  await light.getByRole("radio", { name: /^Paper/ }).click();
-  await dark.getByRole("radio", { name: /^Capy/ }).click();
-  await expect(light.getByRole("radio", { name: /^Paper/ })).toBeChecked();
-  await expect(dark.getByRole("radio", { name: /^Capy/ })).toBeChecked();
+  const side = (name: "Light theme" | "Dark theme") =>
+    page
+      .getByRole("radiogroup", { name: "Theme for" })
+      .getByRole("radio", { name });
+  const list = (name: "light" | "dark") =>
+    page.getByRole("radiogroup", { name: `Theme for ${name}` });
+  await list("light")
+    .getByRole("radio", { name: /^Paper/ })
+    .click();
+  await expect(
+    list("light").getByRole("radio", { name: /^Paper/ }),
+  ).toBeChecked();
+  // The other side kept its own choice while the first was being edited, and
+  // the switch names both so neither is hidden.
+  await side("Dark theme").click();
+  await expect(
+    list("dark").getByRole("radio", { name: /^Ember/ }),
+  ).toBeChecked();
+  await list("dark").getByRole("radio", { name: /^Capy/ }).click();
+  // Both choices stay on screen even though one list edits them.
+  await expect(
+    page.getByText("Light uses Paper · Dark uses Capy"),
+  ).toBeVisible();
   // System shows the theme that belongs to the Mac's side.
   await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
   await page.emulateMedia({ colorScheme: "dark" });
@@ -613,18 +628,15 @@ test("the light and dark columns choose their themes independently", async ({
   await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
-  await expect(light.getByRole("radio", { name: /^Paper/ })).toBeChecked();
 });
 
-test("each column previews its own appearance and marks the one in use", async ({
+test("the theme list edits one appearance at a time and previews it", async ({
   page,
 }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openSettings(page);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  const light = page.getByRole("radiogroup", { name: "Theme in light" });
-  const dark = page.getByRole("radiogroup", { name: "Theme in dark" });
-  const previewed = (column: typeof light) =>
+  const previewed = (column: ReturnType<typeof page.getByRole>) =>
     column.evaluate((group) => [
       ...new Set(
         [...group.querySelectorAll("[data-theme]")].map((el) =>
@@ -632,41 +644,24 @@ test("each column previews its own appearance and marks the one in use", async (
         ),
       ),
     ]);
-  expect(await previewed(light)).toEqual(["light"]);
+  // It starts on the appearance that is on screen, and says so.
+  const dark = page.getByRole("radiogroup", { name: "Theme for dark" });
   expect(await previewed(dark)).toEqual(["dark"]);
-  // Exactly one column says it is on screen. The marker sits above its own
-  // list, so counting the theme groups after it names the column: two means
-  // the light one, one the dark one.
-  const markerColumn = () =>
-    page.evaluate(() => {
-      const marker = [...document.querySelectorAll("*")].find(
-        (el) =>
-          el.childElementCount === 0 && el.textContent?.trim() === "In use now",
-      )!;
-      const groups = [...document.querySelectorAll("[role=radiogroup]")].filter(
-        (group) => {
-          const id = group.getAttribute("aria-labelledby");
-          return (
-            id &&
-            document.getElementById(id)?.textContent?.startsWith("Theme in ")
-          );
-        },
-      );
-      return groups.filter(
-        (group) =>
-          marker.compareDocumentPosition(group) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ).length;
-    });
-  await expect(page.getByText("In use now")).toHaveCount(1);
-  expect(await markerColumn()).toBe(1);
-  const modeLight = page.getByRole("radio", { name: "Light", exact: true });
-  await expect(modeLight).toBeEnabled();
-  await modeLight.click();
-  await expect(modeLight).toBeChecked();
-  await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
-  await expect(page.getByText("In use now")).toHaveCount(1);
-  expect(await markerColumn()).toBe(2);
+  expect(await page.getByText("In use now").count()).toBe(1);
+  // Switching sides re-previews every row in that appearance and drops the
+  // marker, because the side being edited is no longer the one on screen.
+  await page
+    .getByRole("radiogroup", { name: "Theme for" })
+    .getByRole("radio", { name: "Light theme" })
+    .click();
+  const light = page.getByRole("radiogroup", { name: "Theme for light" });
+  expect(await previewed(light)).toEqual(["light"]);
+  expect(await page.getByText("In use now").count()).toBe(0);
+  await page
+    .getByRole("radiogroup", { name: "Theme for" })
+    .getByRole("radio", { name: "Dark theme" })
+    .click();
+  expect(await page.getByText("In use now").count()).toBe(1);
 });
 
 const themeCases = [
@@ -687,7 +682,7 @@ for (const theme of themeCases) {
       page.getByRole("heading", { name: "Appearance", level: 1 }),
     ).toBeVisible();
     const radio = page
-      .getByRole("radiogroup", { name: "Theme in light" })
+      .getByRole("radiogroup", { name: "Theme for light" })
       .getByRole("radio", { name: new RegExp(`^${theme.name}`) });
     await radio.click();
     await expect(radio).toBeChecked();
@@ -708,6 +703,12 @@ for (const theme of themeCases) {
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
     await page.getByRole("button", { name: "About", exact: true }).click();
     await page.getByRole("button", { name: "Appearance", exact: true }).click();
+    // Coming back, the list opens on the appearance that is on screen; the
+    // choice made for the other side is still there when you switch to it.
+    await page
+      .getByRole("radiogroup", { name: "Theme for" })
+      .getByRole("radio", { name: "Light theme" })
+      .click();
     await expect(radio).toBeChecked();
     await expect(
       page.getByRole("radio", { name: "System", exact: true }),
@@ -1478,7 +1479,7 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     "About",
   ]);
   await expect(
-    page.getByRole("radiogroup", { name: /^Theme in / }),
+    page.getByRole("radiogroup", { name: /^Theme for / }),
   ).toHaveCount(0);
   const tops = await nav.evaluateAll((items) =>
     items.map((item) => item.getBoundingClientRect()),
@@ -1518,10 +1519,7 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     .toBe(true);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await expect(
-    page.getByRole("radiogroup", { name: "Theme in light" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("radiogroup", { name: "Theme in dark" }),
+    page.getByRole("radiogroup", { name: "Theme for light" }),
   ).toBeVisible();
 });
 
@@ -1619,8 +1617,8 @@ test("theme previews show the theme's own colours and no status words", async ({
   page,
 }) => {
   await openSettings(page, { pendingPage: "Appearance" });
-  const themes = page.getByRole("radiogroup", { name: /^Theme in / });
-  await expect(themes).toHaveCount(2);
+  const themes = page.getByRole("radiogroup", { name: /^Theme for / });
+  await expect(themes).toHaveCount(1);
   await expect(themes.locator(".astryx-badge")).toHaveCount(0);
   await expect(themes.getByText("Ready")).toHaveCount(0);
   await expect(themes.getByText("Inserted")).toHaveCount(0);
