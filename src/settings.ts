@@ -18,13 +18,3 @@ export const writeSettings = async (settings: Settings) =>
   settingsSchema.parse(await invoke("save_settings", { settings }));
 export const readDevices = async () =>
   z.array(z.string()).parse(await invoke("input_devices"));
-
-export function shortcutLabel(shortcut: string) {
-  return shortcut
-    .replace(/CommandOrControl|Super|Meta/g, "⌘")
-    .replace(/Control/g, "⌃")
-    .replace(/Alt|Option/g, "⌥")
-    .replace(/Shift/g, "⇧")
-    .replace(/Key|Digit/g, "")
-    .replace(/\+/g, " ");
-}

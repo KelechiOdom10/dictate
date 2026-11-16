@@ -92,13 +92,13 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
   await page.keyboard.press("Control+Shift+D");
   await expect(
     page.getByRole("button", { name: "Shortcut", exact: true }),
-  ).toContainText("⌃ ⇧ D");
+  ).toContainText("⌃⇧D");
   await page.getByRole("button", { name: "Shortcut", exact: true }).click();
   await page.keyboard.press("Meta+Q");
   await expect(page.getByRole("alert")).toHaveText("Shortcut unavailable");
   await expect(
     page.getByRole("button", { name: "Shortcut", exact: true }),
-  ).toContainText("⌃ ⇧ D");
+  ).toContainText("⌃⇧D");
   await page.getByRole("button", { name: "Models", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Coming soon" }),

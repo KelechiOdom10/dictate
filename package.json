@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test:ui": "pnpm build && playwright test",
-    "format:check": "prettier --check src playwright.config.ts tests"
+    "format:check": "prettier --check src .storybook scripts vitest.config.ts playwright.config.ts tests",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build --output-dir target/storybook",
+    "test:stories": "vitest run",
+    "capture:ui": "pnpm build-storybook && node scripts/capture-stories.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.107.1",
@@ -24,12 +28,19 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
+    "@storybook/addon-a11y": "10.6.7",
+    "@storybook/addon-vitest": "10.6.7",
+    "@storybook/react-vite": "10.6.7",
     "@tauri-apps/cli": "^2",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
+    "@vitest/browser-playwright": "^4.1.12",
     "prettier": "^3.10.1",
+    "storybook": "10.6.7",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^4.1.12"
   }
 }

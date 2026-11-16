@@ -31,8 +31,9 @@ The template waveform uses different shapes for idle, recording and transcribing
 
 The Voicenotes direction uses neutral surfaces, pill controls, calm system type
 and a restrained success green. Colours, type, spacing and radii live in
-`src/tokens.css`. Page-local rows, recorder and microphone-test components stay
-small; a component library and Storybook belong to the next task.
+`src/tokens.css`. Shared controls and their state stories live in `src/ui`. The recorder adapter
+and microphone-test component keep native capture and persistence outside the
+library. See [design-system.md](design-system.md) for contracts and commands.
 
 Rejected: browser storage, because Rust must read settings without a webview;
 a second store plugin, because atomic JSON covers four fields; a Dock icon,

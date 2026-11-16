@@ -10,7 +10,13 @@ import {
   writeSettings,
   type Settings,
 } from "./settings";
-import Row from "./SettingRow";
+import {
+  Button,
+  Select,
+  Toggle,
+  SettingsRow as Row,
+  SettingsGroup,
+} from "./ui";
 import ShortcutRecorder from "./ShortcutRecorder";
 import MicrophoneTest from "./MicrophoneTest";
 
@@ -81,132 +87,119 @@ export default function General() {
     return (
       <div className="notice" role="alert">
         <p>{String(query.error)}</p>
-        <button onClick={() => void query.refetch()}>Try again</button>
+        <Button onClick={() => void query.refetch()}>Try again</Button>
       </div>
     );
   const settings = query.data;
   const busy = mutation.isPending;
   return (
     <>
-      <section aria-labelledby="dictation-heading">
-        <h2 id="dictation-heading">
-          <Keyboard size={14} /> Dictation
-        </h2>
-        <div className="group">
-          <ShortcutRecorder
-            value={settings.shortcut}
-            recording={recording}
-            disabled={busy}
-            onRecordingChange={setRecording}
-            onSave={(shortcut) => save({ shortcut })}
-            onError={setError}
-          />
-          <Row
+      <SettingsGroup
+        title="Dictation"
+        icon={<Keyboard size={14} aria-hidden="true" />}
+      >
+        <ShortcutRecorder
+          value={settings.shortcut}
+          recording={recording}
+          disabled={busy}
+          onRecordingChange={setRecording}
+          onSave={(shortcut) => save({ shortcut })}
+          onError={setError}
+        />
+        <Row
+          id="mode"
+          label="Shortcut mode"
+          help={
+            settings.shortcutMode === "hold"
+              ? "Hold to record. Release to insert your words."
+              : "Tap to record. Tap again to insert your words."
+          }
+        >
+          <Select
             id="mode"
-            label="Shortcut mode"
-            help={
-              settings.shortcutMode === "hold"
-                ? "Hold to record. Release to insert your words."
-                : "Tap to record. Tap again to insert your words."
+            aria-describedby="mode-help"
+            value={settings.shortcutMode}
+            disabled={busy || recording}
+            onChange={(e) =>
+              void save({
+                shortcutMode: z.enum(["hold", "toggle"]).parse(e.target.value),
+              })
             }
           >
-            <select
-              id="mode"
-              aria-describedby="mode-help"
-              value={settings.shortcutMode}
-              disabled={busy || recording}
-              onChange={(e) =>
-                void save({
-                  shortcutMode: z
-                    .enum(["hold", "toggle"])
-                    .parse(e.target.value),
-                })
-              }
-            >
-              <option value="hold">Hold to talk</option>
-              <option value="toggle">Toggle</option>
-            </select>
-          </Row>
-        </div>
-      </section>
-      <section aria-labelledby="audio-heading">
-        <h2 id="audio-heading">
-          <Mic size={14} /> Audio input
-        </h2>
-        <div className="group">
-          <Row
+            <option value="hold">Hold to talk</option>
+            <option value="toggle">Toggle</option>
+          </Select>
+        </Row>
+      </SettingsGroup>
+      <SettingsGroup
+        title="Audio input"
+        icon={<Mic size={14} aria-hidden="true" />}
+      >
+        <Row
+          id="microphone"
+          label="Microphone"
+          help="Choose where dictate listens."
+        >
+          <Select
             id="microphone"
-            label="Microphone"
-            help="Choose where dictate listens."
+            aria-describedby="microphone-help"
+            value={settings.microphone ?? ""}
+            disabled={
+              busy ||
+              testing ||
+              recording ||
+              devices.isPending ||
+              devices.isError
+            }
+            onChange={(e) => void save({ microphone: e.target.value || null })}
+            onFocus={() => void devices.refetch()}
           >
-            <select
-              id="microphone"
-              aria-describedby="microphone-help"
-              value={settings.microphone ?? ""}
-              disabled={
-                busy ||
-                testing ||
-                recording ||
-                devices.isPending ||
-                devices.isError
-              }
-              onChange={(e) =>
-                void save({ microphone: e.target.value || null })
-              }
-              onFocus={() => void devices.refetch()}
-            >
-              <option value="">System default</option>
-              {settings.microphone &&
-                !devices.data?.includes(settings.microphone) && (
-                  <option value={settings.microphone}>
-                    {settings.microphone} (unavailable)
-                  </option>
-                )}
-              {[...new Set(devices.data ?? [])].map((name) => (
-                <option key={name}>{name}</option>
-              ))}
-            </select>
-          </Row>
-          <MicrophoneTest
-            testing={testing}
-            disabled={busy || recording}
-            onToggle={testMicrophone}
-            onError={setError}
-            onTestingChange={setTesting}
-          />
-        </div>
+            <option value="">System default</option>
+            {settings.microphone &&
+              !devices.data?.includes(settings.microphone) && (
+                <option value={settings.microphone}>
+                  {settings.microphone} (unavailable)
+                </option>
+              )}
+            {[...new Set(devices.data ?? [])].map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </Select>
+        </Row>
+        <MicrophoneTest
+          testing={testing}
+          disabled={busy || recording}
+          onToggle={testMicrophone}
+          onError={setError}
+          onTestingChange={setTesting}
+        />
         {devices.isError && (
           <p className="error" role="alert">
             {String(devices.error)}{" "}
-            <button onClick={() => void devices.refetch()}>
+            <Button onClick={() => void devices.refetch()}>
               Refresh microphones
-            </button>
+            </Button>
           </p>
         )}
-      </section>
-      <section aria-labelledby="startup-heading">
-        <h2 id="startup-heading">
-          <Power size={14} /> Startup
-        </h2>
-        <div className="group">
-          <Row
+      </SettingsGroup>
+      <SettingsGroup
+        title="Startup"
+        icon={<Power size={14} aria-hidden="true" />}
+      >
+        <Row
+          id="login"
+          label="Launch at login"
+          help="Keep dictate ready in your menu bar."
+        >
+          <Toggle
             id="login"
-            label="Launch at login"
-            help="Keep dictate ready in your menu bar."
-          >
-            <input
-              id="login"
-              className="switch"
-              type="checkbox"
-              role="switch"
-              checked={settings.launchAtLogin}
-              disabled={busy || recording}
-              aria-describedby="login-help"
-              onChange={(e) => void save({ launchAtLogin: e.target.checked })}
-            />
-          </Row>
-        </div>
-      </section>
+            checked={settings.launchAtLogin}
+            disabled={busy || recording}
+            aria-describedby="login-help"
+            onChange={(e) => void save({ launchAtLogin: e.target.checked })}
+          />
+        </Row>
+      </SettingsGroup>
       {error && (
         <p className="error" role="alert">
           {error}

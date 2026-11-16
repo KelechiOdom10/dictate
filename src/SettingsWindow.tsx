@@ -2,6 +2,7 @@ import { useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useQuery } from "@tanstack/react-query";
 import General from "./GeneralSettings";
+import { Button, EmptyState, SidebarNav } from "./ui";
 import {
   AudioLines,
   SlidersHorizontal,
@@ -31,24 +32,21 @@ export default function SettingsWindow() {
           <AudioLines size={22} strokeWidth={2} />
           <span>dictate</span>
         </div>
-        <nav aria-label="Settings">
-          {pages.map(({ name, icon: Icon }) => (
-            <button
-              key={name}
-              aria-current={page === name ? "page" : undefined}
-              className={page === name ? "selected" : ""}
-              onClick={() => setPage(name)}
-            >
-              <Icon size={17} strokeWidth={1.7} />
-              {name}
-            </button>
-          ))}
-        </nav>
+        <SidebarNav
+          label="Settings"
+          items={pages.map(({ name, icon: Icon }) => ({
+            value: name,
+            label: name,
+            icon: <Icon size={17} strokeWidth={1.7} aria-hidden="true" />,
+          }))}
+          value={page}
+          onChange={setPage}
+        />
         <footer>
           <span>Version {version.data ?? "…"}</span>
-          <button disabled title="Updates are coming in a later release">
+          <Button disabled title="Updates are coming in a later release">
             Check for updates
-          </button>
+          </Button>
         </footer>
       </aside>
       <main className="settings-content">
@@ -63,16 +61,16 @@ export default function SettingsWindow() {
         {page === "General" ? (
           <General />
         ) : (
-          <div className="empty">
-            <div className="empty-icon">
-              <AudioLines size={26} />
-            </div>
-            <h2>Coming soon</h2>
-            <p>{page} will be available in a future release.</p>
-            <button onClick={() => setPage("General")}>
-              <ArrowLeft size={14} /> Back to General
-            </button>
-          </div>
+          <EmptyState
+            title="Coming soon"
+            action={
+              <Button onClick={() => setPage("General")}>
+                <ArrowLeft size={14} aria-hidden="true" /> Back to General
+              </Button>
+            }
+          >
+            {page} will be available in a future release.
+          </EmptyState>
         )}
       </main>
     </div>
