@@ -1783,8 +1783,8 @@ test("the translucent window steps the surfaces aside only while it is on", asyn
   // The window's own backdrop steps aside for the material macOS draws there,
   // and the page and sidebar keep most of their surface.
   expect(on.shell).toBe("rgba(0, 0, 0, 0)");
-  expect(on.main).toMatch(/\/ 0\.88\)$/);
-  expect(on.nav).toMatch(/\/ 0\.92\)$/);
+  expect(on.main).toMatch(/\/ 0\.6\)$/);
+  expect(on.nav).toMatch(/\/ 0\.72\)$/);
   // Cards stay opaque, so text keeps the contrast it was measured at.
   expect(on.card).toBe(off.card);
   await page.getByRole("button", { name: "About", exact: true }).click();
