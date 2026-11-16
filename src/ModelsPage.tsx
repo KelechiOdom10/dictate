@@ -10,6 +10,7 @@ import {
   downloadModel,
   formatBytes,
   MEASURED_CLIP_SECONDS,
+  openModelLicence,
   readModels,
   readWhisperStatus,
   speedLabel,
@@ -54,9 +55,16 @@ export default function ModelsPage() {
   });
 
   useEffect(() => {
-    const subscriptions = ["models-changed", "settings-changed"].map((event) =>
-      listen(event, () => client.invalidateQueries({ queryKey: ["models"] })),
-    );
+    // The chosen model decides whether whisper-cli is needed at all.
+    const subscriptions = [
+      listen("models-changed", () =>
+        client.invalidateQueries({ queryKey: ["models"] }),
+      ),
+      listen("settings-changed", () => {
+        void client.invalidateQueries({ queryKey: ["models"] });
+        void client.invalidateQueries({ queryKey: ["whisper"] });
+      }),
+    ];
     return () => {
       for (const subscription of subscriptions)
         void subscription.then((stop) => stop()).catch(console.error);
@@ -143,6 +151,17 @@ export default function ModelsPage() {
           description={model.description}
           size={formatBytes(model.bytes)}
           badge={model.recommended ? "Recommended" : undefined}
+          licence={
+            model.licence
+              ? {
+                  name: model.licence.name,
+                  onOpen: () =>
+                    void openModelLicence(model.id).catch((e) =>
+                      setError(String(e)),
+                    ),
+                }
+              : undefined
+          }
           disabled={busy}
           ratings={[
             {
@@ -162,8 +181,8 @@ export default function ModelsPage() {
       <p className="ui-date models-footnote">
         Speed is the median time to transcribe a{" "}
         {MEASURED_CLIP_SECONDS.toLocaleString()} s sentence, measured on an
-        Apple M4 Pro. Accuracy is an estimate from model size, not measured
-        here. Models are saved in dictate’s app data folder.
+        Apple M4 Pro. Accuracy is an estimate, not measured here. Models are
+        saved in dictate’s app data folder.
       </p>
     </div>
   );

@@ -36,6 +36,7 @@ const APP_COMMANDS: &[&str] = &[
     "download_model",
     "cancel_download",
     "delete_model",
+    "open_model_licence",
     "whisper_status",
     "app_folders",
     "open_location",

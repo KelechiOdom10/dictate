@@ -39,6 +39,8 @@ ureq = "3"
 sha2 = "0.10"
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
 tauri-plugin-notification = "2"
+# Parakeet runs in process on ggml with Metal. Building it needs CMake.
+transcribe-cpp = { version = "=0.4.2", default-features = false, features = ["metal"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -53,6 +55,9 @@ flate2 = { opt-level = 3 }
 miniz_oxide = { opt-level = 3 }
 crc32fast = { opt-level = 3 }
 adler2 = { opt-level = 3 }
+# ggml is C++ built by CMake, which follows this opt-level. At 0 it builds a
+# Debug ggml and every dev-build dictation pays for it.
+transcribe-cpp-sys = { opt-level = 3 }
 
 [profile.release]
 codegen-units = 1

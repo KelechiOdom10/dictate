@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { Copy, Trash2 } from "lucide-react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { Button, IconButton } from "./Button";
 import {
   Card,
@@ -191,6 +191,29 @@ export const Models: Story = {
       />
     </div>
   ),
+};
+const openLicence = fn();
+export const ModelLicence: Story = {
+  name: "ModelCard / with the model's licence",
+  render: () => (
+    <ModelCard
+      name="Parakeet English"
+      description="NVIDIA's dictation model. Very accurate, and stays loaded so text is ready fast."
+      ratings={ratings(1, "Best", 1, "130 ms")}
+      size="731 MB"
+      licence={{ name: "NVIDIA Open Model License", onOpen: openLicence }}
+      status={{ kind: "available", onDownload: () => {} }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    openLicence.mockClear();
+    await userEvent.click(
+      within(canvasElement).getByRole("button", {
+        name: "NVIDIA Open Model License",
+      }),
+    );
+    await expect(openLicence).toHaveBeenCalledOnce();
+  },
 };
 export const ModelPreparing: Story = {
   name: "ModelCard / preparing a model from an earlier version",

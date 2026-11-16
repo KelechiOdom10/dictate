@@ -1,5 +1,11 @@
 export type SpeechModel =
-  "tiny.en" | "base.en" | "small.en" | "medium.en" | "large-v3-turbo";
+  | "tiny.en"
+  | "base.en"
+  | "small.en"
+  | "medium.en"
+  | "large-v3-turbo"
+  | "parakeet-unified-en";
+export type Licence = { name: string; url: string };
 export type ModelState =
   | { kind: "available" }
   | {
@@ -19,6 +25,7 @@ export type ModelEntry = {
   accuracy: number;
   measuredMs: number;
   recommended: boolean;
+  licence: Licence | null;
   active: boolean;
   state: ModelState;
 };

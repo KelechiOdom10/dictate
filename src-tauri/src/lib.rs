@@ -553,6 +553,37 @@ fn active_model_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(models::path(&app.state::<Models>().dir, model))
 }
 
+/// Loads and warms the chosen model on its own thread when it runs in
+/// process, or lets go of the held one when it doesn't, so the next take
+/// doesn't wait for a load. Reads the latest choice while holding a lock, so
+/// quick switches end on the last model chosen whatever order threads run in.
+fn prepare_active_model(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        static PREPARING: Mutex<()> = Mutex::new(());
+        let _preparing = PREPARING.lock().unwrap_or_else(|e| e.into_inner());
+        match active_model_path(&app) {
+            Ok(model) => {
+                if let Err(problem) = transcribe::prepare(&model) {
+                    log::warn!("[transcribe] prepare {}: {problem}", model.display());
+                }
+            }
+            Err(error) => log::warn!("[transcribe] prepare: {error}"),
+        }
+    });
+}
+
+#[tauri::command]
+fn open_model_licence(app: AppHandle, model: SpeechModel) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let licence = models::info(model)
+        .licence
+        .ok_or_else(|| format!("{} has no licence link", models::info(model).name))?;
+    app.opener()
+        .open_url(licence.url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn list_models(app: AppHandle) -> Result<Vec<ModelEntry>, String> {
     let active = app
@@ -604,6 +635,9 @@ fn download_model(app: AppHandle, model: SpeechModel) -> Result<(), String> {
         if let Ok(mut downloads) = app.state::<Models>().downloads.lock() {
             downloads.finish(model, &result);
         }
+        if result.is_ok() {
+            prepare_active_model(&app);
+        }
         models_changed(&app);
     });
     Ok(())
@@ -654,6 +688,7 @@ fn adopt_legacy_model(app: &AppHandle, pending: SpeechModel, dir: &Path, candida
             });
         match saved {
             Ok(Some(mut settings)) => {
+                prepare_active_model(app);
                 settings.launch_at_login = app.autolaunch().is_enabled().unwrap_or(false);
                 if let Err(error) = app.emit("settings-changed", &settings) {
                     log::warn!("[models] emit adopted model: {error}");
@@ -699,11 +734,13 @@ fn delete_model(app: AppHandle, model: SpeechModel) -> Result<(), String> {
     Ok(())
 }
 
-/// `None` when whisper-cli was found; otherwise the problem, with the
-/// install command in its fix.
+/// `None` when whisper-cli was found or the chosen model doesn't need it;
+/// otherwise the problem, with the install command in its fix.
 #[tauri::command]
-fn whisper_status() -> Option<Problem> {
-    transcribe::whisper_cli().err()
+fn whisper_status(app: AppHandle) -> Option<Problem> {
+    let needs_cli =
+        active_model_path(&app).map_or(true, |model| transcribe::needs_whisper_cli(&model));
+    needs_cli.then(transcribe::whisper_cli)?.err()
 }
 
 #[tauri::command]
@@ -721,6 +758,9 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
     let previous = runtime.settings.clone();
     let shortcut_changed = runtime.save_settings(settings.clone(), &app)?;
     drop(runtime);
+    if previous.speech_model != settings.speech_model {
+        prepare_active_model(&app);
+    }
     if (previous.mic_mode, &previous.microphone) != (settings.mic_mode, &settings.microphone) {
         let app = app.clone();
         // Opening the microphone takes 60–80 ms; keep the save responsive.
@@ -1000,6 +1040,15 @@ fn hotkey(
                         text: output_text(&t.text, &settings),
                         ..t
                     });
+                    if let Ok(t) = &transcript {
+                        log::info!(
+                            "[dictate] release_to_text_ms={} inference_ms={:?} audio_ms={} model={}",
+                            released.elapsed().as_millis(),
+                            t.inference_ms,
+                            samples.len() / 16,
+                            transcribe::model_name(&model)
+                        );
+                    }
                     let result = transcript.as_ref().map_err(Clone::clone).and_then(|t| {
                         if !t.text.is_empty() {
                             insert::paste(&app, &t.text, delivery)?;
@@ -1628,6 +1677,7 @@ pub fn run() {
                     }),
                 ])
                 .level(log::LevelFilter::Info)
+                .level_for("transcribe_cpp", log::LevelFilter::Warn)
                 .max_file_size(2_000_000)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .build(),
@@ -1678,6 +1728,7 @@ pub fn run() {
             download_model,
             cancel_download,
             delete_model,
+            open_model_licence,
             whisper_status,
             app_folders,
             open_location
@@ -1785,6 +1836,7 @@ pub fn run() {
                 );
             }
             app.manage(Mutex::new(settings.overlay_position));
+            prepare_active_model(app.handle());
             if settings.mic_mode == MicMode::Warm
                 && let Err(problem) = apply_mic_mode(&settings)
             {

@@ -7,6 +7,7 @@
     "accuracy": 1,
     "measuredMs": 188,
     "recommended": false,
+    "licence": null,
     "active": false,
     "state": {
       "kind": "available"
@@ -20,6 +21,7 @@
     "accuracy": 2,
     "measuredMs": 232,
     "recommended": false,
+    "licence": null,
     "active": true,
     "state": {
       "kind": "available"
@@ -33,6 +35,7 @@
     "accuracy": 3,
     "measuredMs": 437,
     "recommended": true,
+    "licence": null,
     "active": false,
     "state": {
       "kind": "available"
@@ -46,6 +49,7 @@
     "accuracy": 4,
     "measuredMs": 1037,
     "recommended": false,
+    "licence": null,
     "active": false,
     "state": {
       "kind": "available"
@@ -59,6 +63,24 @@
     "accuracy": 5,
     "measuredMs": 1084,
     "recommended": false,
+    "licence": null,
+    "active": false,
+    "state": {
+      "kind": "available"
+    }
+  },
+  {
+    "id": "parakeet-unified-en",
+    "name": "Parakeet English",
+    "description": "NVIDIA's dictation model. Very accurate, and stays loaded so text is ready fast.",
+    "bytes": 731357568,
+    "accuracy": 5,
+    "measuredMs": 134,
+    "recommended": false,
+    "licence": {
+      "name": "NVIDIA Open Model License",
+      "url": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/"
+    },
     "active": false,
     "state": {
       "kind": "available"

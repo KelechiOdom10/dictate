@@ -39,6 +39,7 @@
     "allow-download-model",
     "allow-cancel-download",
     "allow-delete-model",
+    "allow-open-model-licence",
     "allow-whisper-status",
     "allow-app-folders",
     "allow-open-location"
