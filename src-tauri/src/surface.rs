@@ -56,12 +56,23 @@ pub fn clear_error(app: &AppHandle) {
     }
 }
 
+/// The artwork a phase shows. Phases that share artwork share a key, so the
+/// tray only installs a new image when the key changes.
+fn artwork(phase: &str) -> &'static str {
+    match phase {
+        "error" => "error",
+        "recording" | "annotating" => "recording",
+        "transcribing" | "packaging" => "transcribing",
+        _ => "idle",
+    }
+}
+
 fn icon(phase: &str) -> Image<'static> {
     let mut pixels = vec![0; 22 * 22 * 4];
-    let heights = match phase {
+    let heights = match artwork(phase) {
         "error" => [20, 4, 20, 4, 20],
-        "recording" | "annotating" => [6, 14, 20, 12, 6],
-        "transcribing" | "packaging" => [12, 6, 12, 6, 12],
+        "recording" => [6, 14, 20, 12, 6],
+        "transcribing" => [12, 6, 12, 6, 12],
         _ => [4, 8, 12, 8, 4],
     };
     for (bar, height) in heights.into_iter().enumerate() {
@@ -87,6 +98,32 @@ fn tray_presentation(status: &Status) -> (&str, String) {
     (phase, tooltip)
 }
 
+/// What the tray shows now: artwork key and tooltip.
+#[derive(Clone, Debug, PartialEq)]
+struct Shown {
+    artwork: &'static str,
+    tooltip: String,
+}
+
+/// The tray's current artwork and tooltip, read and written on the main thread.
+struct TrayShown(Mutex<Shown>);
+
+/// The changes a refresh must make: a new image only when the artwork changes,
+/// a new tooltip only when the text changes.
+fn tray_changes(shown: &mut Shown, status: &Status) -> (Option<&'static str>, Option<String>) {
+    let (phase, tooltip) = tray_presentation(status);
+    let artwork = artwork(phase);
+    let icon = (shown.artwork != artwork).then(|| {
+        shown.artwork = artwork;
+        artwork
+    });
+    let tooltip = (shown.tooltip != tooltip).then(|| {
+        shown.tooltip = tooltip.clone();
+        tooltip
+    });
+    (icon, tooltip)
+}
+
 fn dispatch_tray_refresh(
     dispatch: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
     read: impl FnOnce() -> Status + Send + 'static,
@@ -105,18 +142,30 @@ fn refresh_tray(app: &AppHandle) {
         },
         move || status(&reading),
         move |status| {
-            let (phase, tooltip) = tray_presentation(&status);
             if let Some(tray) = applying.tray_by_id("dictate") {
-                if let Err(error) = tray.set_icon_with_as_template(Some(icon(phase)), true) {
+                let (artwork, tooltip) = tray_changes(
+                    &mut applying
+                        .state::<TrayShown>()
+                        .0
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()),
+                    &status,
+                );
+                if let Some(artwork) = artwork
+                    && let Err(error) = tray.set_icon_with_as_template(Some(icon(artwork)), true)
+                {
                     log::warn!("[tray] icon: {error}");
                 }
-                if let Err(error) = tray.set_tooltip(Some(tooltip)) {
+                if let Some(tooltip) = tooltip
+                    && let Err(error) = tray.set_tooltip(Some(tooltip))
+                {
                     log::warn!("[tray] tooltip: {error}");
                 }
                 log::info!(
-                    "[tray] refresh phase={} error={}",
+                    "[tray] refresh phase={} error={} icon={}",
                     status.phase,
-                    status.error.is_some()
+                    status.error.is_some(),
+                    artwork.unwrap_or("unchanged")
                 );
             } else {
                 log::warn!("[tray] icon unavailable");
@@ -294,6 +343,10 @@ pub fn setup(app: &App, _settings: &Settings) -> tauri::Result<()> {
         error: None,
         notice: None,
     }));
+    app.manage(TrayShown(Mutex::new(Shown {
+        artwork: "idle",
+        tooltip: "dictate · idle".into(),
+    })));
     let menu = menu(app.handle())?;
     TrayIconBuilder::with_id("dictate")
         .icon(icon("idle"))
@@ -469,5 +522,63 @@ mod tests {
             assert_eq!(icon(selected).rgba(), icon("error").rgba());
             assert_eq!(tooltip, "dictate · Permission needed");
         }
+    }
+
+    #[test]
+    fn a_phase_transition_never_installs_the_same_icon_twice() {
+        let mut shown = Shown {
+            artwork: "idle",
+            tooltip: "dictate · idle".into(),
+        };
+        let mut installed = Vec::new();
+        let mut tooltips = 0;
+        let mut status = Status::default();
+        let steps: [(&str, Option<Problem>); 11] = [
+            ("idle", None),
+            ("recording", None),
+            ("recording", None),
+            ("transcribing", None),
+            ("copied", None),
+            ("idle", None),
+            ("annotating", None),
+            ("packaging", None),
+            (
+                "idle",
+                Some(Problem::new("Permission needed", "Open Settings.")),
+            ),
+            (
+                "recording",
+                Some(Problem::new("Permission needed", "Open Settings.")),
+            ),
+            ("idle", None),
+        ];
+        for (phase, error) in steps {
+            status.phase = phase.into();
+            status.error = error;
+            let (icon, tooltip) = tray_changes(&mut shown, &status);
+            installed.extend(icon);
+            tooltips += usize::from(tooltip.is_some());
+        }
+        assert_eq!(
+            installed,
+            [
+                "recording",
+                "transcribing",
+                "idle",
+                "recording",
+                "transcribing",
+                "error",
+                "idle"
+            ]
+        );
+        assert!(installed.windows(2).all(|pair| pair[0] != pair[1]));
+        assert_eq!(tooltips, 8);
+        assert_eq!(
+            shown,
+            Shown {
+                artwork: "idle",
+                tooltip: "dictate · idle".into(),
+            }
+        );
     }
 }
