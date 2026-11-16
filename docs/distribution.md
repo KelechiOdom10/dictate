@@ -4,10 +4,14 @@ The question: what it takes to give dictate to a non-developer on another Mac,
 so she can install it, grant its permissions once, and keep using it through
 updates. Researched on 15 Nov 2026 against `fix/qa-round-2-polish` at
 `e8deeb7`, on this machine (macOS 27.0.1, Apple Silicon, Command Line Tools
-only, no Xcode, no signing identities in the keychain).
+only, no Xcode, no signing identities in the keychain). The first-run and
+signing sections were re-checked on 16 Nov against the current `main`,
+`39721e6`, after the QA and Parakeet rounds changed the defaults.
 
 Each claim is marked **verified** (ran here, output quoted) or **inferred**
-(from docs or reasoning, not run here).
+(from docs or reasoning, not run here). Nothing here is a release claim: the
+documented build, signing and updater steps have not been shipped, and the one
+end-to-end permission check is an acceptance step in §6.3, not a result.
 
 ## Answer
 
@@ -15,12 +19,20 @@ Each claim is marked **verified** (ran here, output quoted) or **inferred**
    `bundle.macOS.minimumSystemVersion` to `"15.0"`. With that, it builds a
    17 MB Apple Silicon `.app` and a 6.8 MB DMG.
 2. Her permissions are the deciding factor, more than Gatekeeper. The default
-   build is ad-hoc signed. macOS records a permission against the app's
-   *designated requirement*, and an ad-hoc requirement is the hash of that exact
-   build. So **every update makes her grant Microphone and Accessibility
-   again**. The two signings that keep permissions across updates are a
-   self-signed certificate (free, but she has to use "Open Anyway" once per
-   install) and a Developer ID with notarization ($99 a year, no warnings).
+   build is ad-hoc signed, and an ad-hoc signature's designated requirement —
+   the thing macOS matches a permission grant against — is that build's own
+   code hash, so a new build is a different app to macOS's privacy database.
+   The expected consequence is that **every update makes her grant Microphone
+   and Accessibility again**. Apple's guidance is exactly this: sign with a
+   stable identity, not ad hoc. But **the end-to-end effect was not measured
+   here** — no build was installed over a running one with live grants — so
+   "she is asked again" is a documented mechanism, not an observation. The two
+   signings meant to avoid it are a self-signed certificate (free, but she has
+   to use "Open Anyway" once per install) and a Developer ID with notarization
+   ($99 a year, no warnings). For both, what was verified is the property a
+   grant is matched against, and only that: the designated requirement is
+   identical across two builds with different contents (§2). Whether a real
+   grant then survives an install is the manual check in §6.3.
 3. For delivery, the recommendation is a DMG now and the Tauri updater later,
    hosted somewhere public, because a private GitHub repo can't serve updates
    without putting a token in the app.
@@ -87,12 +99,16 @@ The DR of each signing option, from `codesign -d -r-` on the real build
 
 The self-signed row was tested with a throwaway certificate in a temporary
 keychain, deleted afterwards. The test signed two builds with different
-contents and both gave the same DR.
+contents and both gave the same DR. That is the whole experiment: it shows the
+DR does not move between builds, and nothing about what macOS does with a grant
+when a new build appears. The manual check in §6.3 is what closes that gap.
 
 What each option means for her:
 
 **(a) Developer ID + notarization ($99 a year).** Double-click, then a single
-"downloaded from the internet" confirmation. Permissions survive every update.
+"downloaded from the internet" confirmation. The DR names the certificate and
+the Team ID, so it should not change between builds, and permissions should
+survive every update — expected, not observed here.
 Notarization requires the hardened runtime, and under the hardened runtime the
 microphone needs the `com.apple.security.device.audio-input` entitlement, or
 access is silently denied ([Apple][audio-ent]). That means adding an
@@ -107,19 +123,22 @@ The build log confirms it: "skipping app notarization, no APPLE_ID…".
 `rejected` (verified). **Right-click › Open no longer works.** Since macOS 15
 she has to try to open the app, then go to System Settings › Privacy &
 Security and click **Open Anyway** within about an hour ([Apple developer
-news][sequoia]). Worse, **every update resets Microphone and Accessibility**,
-because the DR is the build's hash. The old "dictate" entry stays in the
-Accessibility list, switched on but matching nothing. That is exactly the
-"I turned it on and it still says not allowed" confusion. Not acceptable for
-someone who should just use it.
+news][sequoia]). Worse, **each update is a fresh app to the privacy database**,
+because the DR is the build's hash, so Microphone and Accessibility are
+expected to be requested again. Any old "dictate" entry stays in the
+Accessibility list, switched on but matching nothing — the "I turned it on and
+it still says not allowed" confusion. Not acceptable for someone who should
+just use it, and the §6.3 manual check should confirm it before anyone quotes
+it as fact.
 
 **(c) Self-signed certificate (free, a middle ground).** Kelechi creates one
 "dictate local signing" code-signing certificate once, keeps it in his
 keychain, and signs every release with it (`bundle.macOS.signingIdentity`).
 Gatekeeper still blocks each new download, so she needs Open Anyway once per
-install. The quarantine flag comes from the browser or AirDrop. Permissions
-persist, because the DR names the certificate rather than the build (verified
-above). If the certificate is lost, she re-grants once.
+install. The quarantine flag comes from the browser or AirDrop. Permissions are
+expected to persist because the DR names the certificate rather than the build,
+and that DR was verified stable across two builds above — the unproven step is
+what §6.3 checks. If the certificate is lost, she re-grants once.
 
 **Recommendation:** use (c) now if Kelechi doesn't want to pay yet. Move to (a)
 before updates are routine. Switching from (c) to (a) changes the DR, so she
@@ -131,7 +150,7 @@ re-grants once at that switch (inferred from [TN3127][tn3127]).
 |---|---|---|
 | **DMG** (verified, 6.8 MB) | Open, drag to Applications. The familiar Mac install. | Already built by `tauri build`. |
 | zip of `.app` | Unzip, move to Applications herself. Easy to run it from Downloads by mistake, where App Translocation runs it from a random path (inferred). | None. |
-| Manual reinstall | Download each new DMG and replace the app. With (a) or (c), permissions survive. | Send her a link each time. |
+| Manual reinstall | Download each new DMG and replace the app. With (a) or (c), permissions should survive; §6.3 is the check. | Send her a link each time. |
 | **Tauri updater** | "Update available", click, relaunch. | `tauri-plugin-updater` + `-process`, a minisign key pair (`tauri signer generate`; the private key and password stay with Kelechi), `bundle.createUpdaterArtifacts: true` (adds `dictate.app.tar.gz` + `.sig`), and a `latest.json` manifest at a fixed URL ([Tauri updater][tauri-updater]). |
 
 **Can she fetch updates from the private repo? No, not without a token.**
@@ -146,8 +165,8 @@ host (R2, Pages) works the same way.
 
 The updater signature is separate from Apple signing. It protects the download
 and doesn't help with Gatekeeper or TCC. With ad-hoc signing, the updater would
-still reset her permissions on every update. **Adopt the updater only together
-with (a) or (c).**
+still turn every release into a new app for the privacy database. **Adopt the
+updater only together with (a) or (c).**
 
 ## 4. Her first run, today
 
@@ -156,22 +175,34 @@ code; the packaged app was not launched here, to avoid clashing with the dev
 instance's global shortcuts):
 
 1. Gatekeeper, as in §2.
-2. The Settings window opens (`lib.rs:1893`, shown when not `--autostart`).
-   **No model is installed.** Parakeet is the default (`settings.rs:151`), but
-   nothing downloads it. She has to find Models and start a **731 MB** download.
-3. She holds ⌥⇧Space without knowing it's the shortcut. The **Microphone**
-   prompt appears only when cpal first opens the device, in the middle of her
-   first take, so that take is lost or empty (inferred).
+2. The Settings window opens (`lib.rs:2024`, anything but `--autostart`).
+   **No model is installed.** Parakeet is the default (`settings.rs:151`) and
+   nothing downloads it, so she has to find Models and start a **731 MB**
+   download.
+3. She holds ⌥⇧Space without knowing that is the shortcut. It is the default
+   (`settings.rs:132`) and General shows it in a recorder (`GeneralSettings.tsx:119`),
+   but nothing tells her to look. The **Microphone** prompt appears only when
+   cpal first opens the device, in the middle of her first take, so that take is
+   lost or empty (inferred).
 4. If the model isn't there yet, she gets "Speech model missing — Download a
-   speech model in Settings › Models" (`transcribe.rs:685`).
-5. The first successful transcription hits `AXIsProcessTrusted()`
-   (`insert.rs:95`), which **only checks and never prompts**. She gets
-   "Accessibility access needed" and has to find the pane by hand. In a
-   signed build, dictate does appear there. The terminal-app hint is
-   dev-only (`AnnotatePage.tsx:131`).
-6. **Screen Recording** matters only for Annotate. Annotate is **on by
-   default** (`settings.rs:161`) and registers ⌥⇧S globally. For a dictation-only
-   user, that is a surprise prompt and a shortcut she didn't ask for.
+   speech model in Settings › Models" (`transcribe.rs:687`).
+5. On a finished transcript the paste path splits three ways
+   (`insert.rs:95`-`106`). If Output is set to **Copy only**, or no editable
+   text field has focus, the transcript is put on the clipboard and the overlay
+   says "Copied — paste it anywhere" (`RecordingCapsule.tsx:72`) — no
+   permission is needed for that, and nothing is lost. Otherwise it asks
+   `AXIsProcessTrusted()` (`insert.rs:102`), which **only checks and never
+   prompts**, so without the permission she gets "Accessibility access needed"
+   and has to find the pane by hand; in a signed build dictate does appear
+   there. The terminal-app hint is dev-only (`AnnotatePage.tsx:133`). The
+   defaults are paste with the previous clipboard restored
+   (`settings.rs:153`-`154`), no trailing space and no capitalisation
+   (`settings.rs:155`-`156`), so the first-run text arrives exactly as spoken.
+6. **Screen Recording** matters only for Annotate, and only when she uses it.
+   Annotate is **on by default** (`settings.rs:160`) and registers **⌥⇧A**
+   (`settings.rs:136`) globally. For a dictation-only user that is a shortcut
+   she didn't ask for, and the first Annotate attempt is where the Screen
+   Recording prompt appears.
 
 The right order, and why:
 
@@ -182,18 +213,19 @@ The right order, and why:
 3. **Accessibility**: `AXIsProcessTrustedWithOptions` with
    `kAXTrustedCheckOptionPrompt`, plus a button to the pane. Poll until it is
    trusted (a grant takes effect without a relaunch; inferred).
-4. **Try it**: hold ⌥⇧Space and say something into a text box on the page.
+4. **Try it**: hold ⌥⇧Space and say something into a text box on the page, so
+   the paste path is exercised rather than the copy fallback.
 5. Screen Recording **only** when she turns Annotate on. Keep Annotate off by
-   default for a fresh install.
+   default for a fresh install, and say what its shortcut is when it is on.
 
 Other gaps:
 
 - **No real icon.** `src-tauri/icons/` holds Tauri's template icons.
-- **The menu-bar icon is drawn at 22×22 at 1×** (`surface.rs:59`). It is a
+- **The menu-bar icon is drawn at 22×22 at 1×** (`surface.rs:96`). It is a
   template, which is correct, but it has no 44×44 @2x version, so it is likely
   soft on Retina (inferred).
-- The Settings sidebar logo is lucide's `AudioLines` (`SettingsWindow.tsx:59`).
-- "Check for updates" is a disabled placeholder (`SettingsWindow.tsx:80`).
+- The Settings sidebar logo is lucide's `AudioLines` (`SettingsWindow.tsx:87`).
+- "Check for updates" is a disabled placeholder (`SettingsWindow.tsx:114`).
 - `version` is `0.1.0` in both `tauri.conf.json` and `Cargo.toml`. The updater
   needs a version bump per release. `Cargo.toml` still says `description = "A
   Tauri App"` and `authors = ["you"]`.
