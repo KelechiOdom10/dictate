@@ -86,6 +86,7 @@ try {
             pairs.push([fg, "overlay", 4.5]);
           for (const bg of ["canvas", "surface", "control", "selected"])
             pairs.push(["accent", bg, 3]);
+          pairs.push(["recording", "overlay", 3]);
           const palette = Object.fromEntries(
             [
               "canvas",
