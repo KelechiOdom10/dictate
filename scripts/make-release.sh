@@ -34,6 +34,11 @@ for cache in "$ROOT"/src-tauri/target/*/release/build/transcribe-cpp-sys-*/CMake
   fi
 done
 
+# The icon's accent is a hand copy of each theme's focus ring; refuse to ship a
+# build whose copy has gone stale.
+echo "==> checking the icon colours match the themes"
+node "$ROOT/scripts/check-icon-colours.mjs"
+
 echo "==> building arm64 release"
 # CI=true skips the Finder AppleScript that lays out the DMG window.
 CI=true pnpm tauri build --target aarch64-apple-darwin --bundles app

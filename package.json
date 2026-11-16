@@ -19,7 +19,8 @@
     "icons:renders": "node scripts/build-icons.mjs --renders target/icon-renders",
     "release:mac": "bash scripts/make-release.sh",
     "sign:mac": "bash scripts/sign-macos.sh",
-    "dmg": "bash scripts/make-dmg.sh"
+    "dmg": "bash scripts/make-dmg.sh",
+    "check:icon-colours": "node scripts/check-icon-colours.mjs"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.16",
