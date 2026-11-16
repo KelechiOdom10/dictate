@@ -13,7 +13,9 @@ function RecorderDemo({ disabled = false }: { disabled?: boolean }) {
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState("");
   return (
-    <VStack gap={2}>
+    // An inline row, so the button sizes to its content the way it does in a
+    // settings row instead of stretching to the frame.
+    <HStack gap={2} vAlign="center">
       <ShortcutRecorder
         label="Shortcut"
         value={value}
@@ -32,10 +34,11 @@ function RecorderDemo({ disabled = false }: { disabled?: boolean }) {
         onError={setError}
       />
       {error && <Text role="alert">{error}</Text>}
-    </VStack>
+    </HStack>
   );
 }
-export const Capture: Story = {
+export const CaptureFlow: Story = {
+  name: "Capture flow",
   render: () => <RecorderDemo />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
@@ -54,7 +57,23 @@ export const Capture: Story = {
   },
 };
 export const Disabled: Story = { render: () => <RecorderDemo disabled /> };
-export const Recording: Story = {
+// The resting state and the waiting state, each held from the first frame, so
+// a screenshot of either shows what its name claims. Both are 161x32: the
+// invisible copy of the wider state reserves the size. CaptureFlow below runs
+// the whole click, error, Escape and commit sequence instead.
+export const Resting: Story = {
+  render: () => <RecorderDemo />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const button = c.getByRole("button");
+    await expect(button).toHaveTextContent(/⌥.*⇧.*SPACE/);
+    expect(
+      button.querySelector(".ui-capture-live:not(.ui-capture-ghost)"),
+    ).toBeNull();
+  },
+};
+export const CaptureWaiting: Story = {
+  name: "Capture waiting",
   render: () => (
     <ShortcutRecorder
       label="Shortcut"
@@ -66,6 +85,22 @@ export const Recording: Story = {
       onError={() => {}}
     />
   ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const button = c.getByRole("button");
+    await expect(button).toHaveTextContent(/Press shortcut/);
+    await expect(button).toHaveAccessibleName(/Esc to cancel/);
+    // Two dots live in the button: the invisible copy that reserves the width
+    // and the one that paints. This story is the painted one.
+    expect(
+      button.querySelector(
+        ".ui-capture-live:not(.ui-capture-ghost) .astryx-status-dot",
+      ),
+    ).not.toBeNull();
+    await expect(
+      button.querySelector(".ui-capture-live:not(.ui-capture-ghost) kbd"),
+    ).toHaveTextContent("Esc");
+  },
 };
 export const Keycaps: Story = {
   name: "KeyboardShortcut",
