@@ -39,6 +39,7 @@ ureq = "3"
 sha2 = "0.10"
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
 tauri-plugin-notification = "2"
+tauri-plugin-updater = "2"
 # Parakeet runs in process on ggml with Metal. Building it needs CMake.
 transcribe-cpp = { version = "=0.4.2", default-features = false, features = ["metal"] }
 
@@ -99,3 +100,8 @@ objc2-foundation = { version = "0.3", features = ["NSDate", "NSDictionary", "NSG
 # Writes the test MP4 in tests/annotate_frames.rs.
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-media", "objc2-core-video", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
+
+# Verifies the update signatures in tests/updater.rs, with the crate the updater itself uses.
+[dev-dependencies]
+base64 = "0.22"
+minisign-verify = "0.2"

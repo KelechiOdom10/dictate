@@ -47,6 +47,8 @@
     "allow-open-model-licence",
     "allow-whisper-status",
     "allow-app-folders",
+    "allow-update-status",
+    "allow-check-for-updates",
     "allow-open-location"
   ]
 }

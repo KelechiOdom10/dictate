@@ -44,6 +44,8 @@ const APP_COMMANDS: &[&str] = &[
     "open_model_licence",
     "whisper_status",
     "app_folders",
+    "update_status",
+    "check_for_updates",
     "open_location",
 ];
 

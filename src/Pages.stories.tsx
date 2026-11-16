@@ -143,6 +143,8 @@ type AnnotateMock = { entries?: AnnotationEntry[]; permission?: boolean };
 const MB = 1_000_000;
 /** Locations the About page asked the app to open, newest last. */
 const opened: string[] = [];
+/** What "Check for updates" resolves to in the About stories. */
+let updateResult: Record<string, string> = { kind: "upToDate" };
 
 async function mockSettings({ globals }: { globals: Record<string, unknown> }) {
   return mockApp(globals, [], {
@@ -221,6 +223,8 @@ function mockApp(
           data: "/Users/you/Library/Application Support/com.kelechiodom.dictate",
           logs: "/Users/you/Library/Logs/com.kelechiodom.dictate",
         };
+      if (command === "update_status") return { kind: "idle" };
+      if (command === "check_for_updates") return updateResult;
       if (command === "open_location") {
         opened.push(String(args && "location" in args ? args.location : ""));
         return null;
@@ -946,6 +950,57 @@ export const About: Story = {
       c.getByRole("button", { name: "View on GitHub, source code" }),
     );
     await expect(opened).toEqual(["data", "logs", "source"]);
+  },
+};
+const checkForUpdates = async (c: ReturnType<typeof within>) => {
+  await userEvent.click(c.getByRole("button", { name: "Check now" }));
+};
+export const AboutUpToDate: Story = {
+  beforeEach: ({ globals }) => {
+    updateResult = { kind: "upToDate" };
+    return mockApp(globals, []);
+  },
+  render: () => <GeneralPage page="About" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await checkForUpdates(c);
+    await expect(await c.findByText("dictate is up to date.")).toBeVisible();
+  },
+};
+export const AboutUpdateWaitsForIdle: Story = {
+  beforeEach: ({ globals }) => {
+    updateResult = { kind: "waiting", version: "0.2.0" };
+    return mockApp(globals, []);
+  },
+  render: () => <GeneralPage page="About" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await checkForUpdates(c);
+    await expect(
+      await c.findByText(/0\.2\.0 is downloaded\. It installs and restarts/),
+    ).toBeVisible();
+    await expect(c.getByRole("button", { name: "Check now" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  },
+};
+export const AboutUpdateFailed: Story = {
+  beforeEach: ({ globals }) => {
+    updateResult = {
+      kind: "failed",
+      message: "Couldn't check for updates: could not reach the server",
+    };
+    return mockApp(globals, []);
+  },
+  render: () => <GeneralPage page="About" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await checkForUpdates(c);
+    await expect(
+      await c.findByText(/could not reach the server/),
+    ).toBeVisible();
+    await expect(c.getByRole("button", { name: "Check now" })).toBeEnabled();
   },
 };
 export const Appearance: Story = {

@@ -18,6 +18,8 @@
     "icons": "node scripts/build-icons.mjs",
     "icons:renders": "node scripts/build-icons.mjs --renders target/icon-renders",
     "release:mac": "bash scripts/make-release.sh",
+    "release:publish": "bash scripts/release-publish.sh",
+    "update:key": "bash scripts/update-key.sh",
     "sign:mac": "bash scripts/sign-macos.sh",
     "dmg": "bash scripts/make-dmg.sh",
     "check:icon-colours": "node scripts/check-icon-colours.mjs"

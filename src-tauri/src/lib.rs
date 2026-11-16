@@ -40,6 +40,7 @@ pub mod problem;
 mod settings;
 mod sound;
 mod surface;
+mod update;
 
 use history::{HistoryList, NewTake, TakeStatus};
 use models::{ModelEntry, SpeechModel};
@@ -435,6 +436,18 @@ enum Location {
 
 const SOURCE_URL: &str = "https://github.com/KelechiOdom10/dictate";
 const RELEASES_URL: &str = "https://github.com/KelechiOdom10/dictate/releases";
+
+#[tauri::command]
+fn update_status(app: AppHandle) -> update::UpdateState {
+    update::status(&app)
+}
+
+/// A check the user asked for: unlike the launch check it reports failures.
+#[tauri::command]
+async fn check_for_updates(app: AppHandle) -> update::UpdateState {
+    update::check(app.clone(), true).await;
+    update::status(&app)
+}
 
 #[tauri::command]
 fn open_location(app: AppHandle, location: Location) -> Result<(), String> {
@@ -1866,6 +1879,7 @@ fn shortcut_transition(mode: ShortcutMode, phase: Phase, event: ShortcutState) -
 pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(SettingsVisibility::default()))
+        .manage(Mutex::new(update::UpdateState::default()))
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -1881,6 +1895,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
@@ -1934,6 +1949,8 @@ pub fn run() {
             open_model_licence,
             whisper_status,
             app_folders,
+            update_status,
+            check_for_updates,
             open_location
         ])
         .setup(|app| {
@@ -2052,6 +2069,7 @@ pub fn run() {
             }
             surface::setup(app, &settings)?;
             annotate_ui::setup(app)?;
+            update::check_on_launch(app.handle());
             if let Err(error) = overlay::setup(app) {
                 log::warn!("[overlay] capsule panel: {error}");
             }
