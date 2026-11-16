@@ -64,6 +64,7 @@ try {
             ])
               pairs.push([foreground, background, 4.5]);
           pairs.push(
+            ["text", "segment-thumb", 4.5],
             ["on-primary", "primary", 4.5],
             ["on-primary", "keycap-primary", 4.5],
             ["overlay-text", "keycap-overlay", 4.5],

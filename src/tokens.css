@@ -24,6 +24,7 @@
   --brown-400: oklch(0.84 0.013 75);
   --brown-500: oklch(0.75 0.014 75);
   --brown-600: oklch(0.48 0.015 75);
+  --brown-625: oklch(0.42 0.014 75);
   --brown-650: oklch(0.35 0.012 75);
   --brown-700: oklch(0.325 0.012 75);
   --brown-750: oklch(0.305 0.011 75);
@@ -66,6 +67,8 @@
   --keycap: var(--brown-0);
   --keycap-edge: var(--brown-300);
   --segment-thumb: var(--brown-0);
+  --segment-edge: var(--brown-300);
+  --segment-shadow: oklch(0 0 0 / 0.08);
   --card-edge: var(--brown-200);
   --primary: var(--brown-900);
   --primary-hover: var(--brown-800);
@@ -123,17 +126,17 @@
   --space-10: 40px;
   --space-16: 64px;
   --control-sm-height: 28px;
-  --control-sm-padding: 10px;
+  --control-sm-padding: 12px;
   --control-sm-font: 12px;
   --control-sm-icon: 14px;
   --control-sm-gap: 6px;
   --control-md-height: 32px;
-  --control-md-padding: 12px;
+  --control-md-padding: 14px;
   --control-md-font: 13px;
   --control-md-icon: 16px;
   --control-md-gap: 8px;
   --control-lg-height: 40px;
-  --control-lg-padding: 16px;
+  --control-lg-padding: 18px;
   --control-lg-font: 14px;
   --control-lg-icon: 18px;
   --control-lg-gap: 10px;
@@ -152,7 +155,9 @@
   --selected: var(--brown-800);
   --keycap: var(--brown-750);
   --keycap-edge: var(--brown-650);
-  --segment-thumb: var(--brown-650);
+  --segment-thumb: var(--brown-625);
+  --segment-edge: var(--brown-600);
+  --segment-shadow: oklch(0 0 0 / 0.35);
   --card-edge: transparent;
   --primary: var(--brown-100);
   --primary-hover: var(--brown-300);

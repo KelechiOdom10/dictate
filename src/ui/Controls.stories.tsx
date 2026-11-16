@@ -231,9 +231,9 @@ export const ControlsSideBySide: Story = {
   },
   play: async ({ canvasElement }) => {
     for (const [size, height, font, padding, gap] of [
-      ["sm", 28, 12, 10, 6],
-      ["md", 32, 13, 12, 8],
-      ["lg", 40, 14, 16, 10],
+      ["sm", 28, 12, 12, 6],
+      ["md", 32, 13, 14, 8],
+      ["lg", 40, 14, 18, 10],
     ] as const) {
       const section = canvasElement
         .querySelector(`.ui-button.ui-size-${size}`)
