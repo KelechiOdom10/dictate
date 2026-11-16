@@ -596,93 +596,100 @@ test("the two appearances keep their own theme", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await openSettings(page);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  const half = (side: "light" | "dark", theme: string) =>
-    page.getByRole("radio", { name: `Set ${side} theme to ${theme}` });
-  await half("light", "Paper").click();
-  await expect(half("light", "Paper")).toBeChecked();
-  // The other half of the same card is a different choice, and untouched.
-  await expect(half("dark", "Paper")).not.toBeChecked();
-  await half("dark", "Capy").click();
-  await expect(half("dark", "Capy")).toBeChecked();
-  await expect(half("light", "Capy")).not.toBeChecked();
+  const html = page.locator("html");
+  const mode = (name: string) =>
+    page
+      .getByRole("radiogroup", { name: "Mode" })
+      .getByRole("radio", { name, exact: true });
+  const theme = (side: "Light" | "Dark", name: string) =>
+    page
+      .getByRole("radiogroup", { name: `${side} theme` })
+      .getByRole("radio", { name, exact: true });
+  // System on a light Mac edits the light theme, and the window follows at once.
+  await theme("Light", "Paper").click();
+  await expect(html).toHaveAttribute("data-palette", "paper");
   await expect(
-    page.getByText("Light uses Paper · Dark uses Capy", { exact: true }),
+    page.getByText("Your Mac is light now. Dark uses Ember."),
   ).toBeVisible();
-  // System shows the theme that belongs to the Mac's side.
-  await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
+  // Picking Dark switches what the grid edits; the light choice stays put.
+  await mode("Dark").click();
+  await expect(theme("Dark", "Ember")).toBeChecked();
+  await theme("Dark", "Capy").click();
+  await expect(html).toHaveAttribute("data-palette", "capy");
+  await expect(
+    page.getByText("Light uses Paper.", { exact: true }),
+  ).toBeVisible();
+  await mode("Light").click();
+  await expect(theme("Light", "Paper")).toBeChecked();
+  await expect(html).toHaveAttribute("data-palette", "paper");
+  await expect(
+    page.getByText("Dark uses Capy.", { exact: true }),
+  ).toBeVisible();
+  // Back on System, the Mac decides which of the two is shown and edited.
+  await mode("System").click();
   await page.emulateMedia({ colorScheme: "dark" });
-  await expect(page.locator("html")).toHaveAttribute("data-palette", "capy");
-  // Pinning a side overrides the Mac without touching either choice.
-  await page.getByRole("radio", { name: "Light", exact: true }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
-  await page.emulateMedia({ colorScheme: "dark" });
-  await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
-  await expect(half("light", "Paper")).toBeChecked();
-  await expect(half("dark", "Capy")).toBeChecked();
-});
-
-test("picking the same theme twice reads as one theme", async ({ page }) => {
-  await openSettings(page);
+  await expect(theme("Dark", "Capy")).toBeChecked();
+  await expect(html).toHaveAttribute("data-palette", "capy");
+  await page.getByRole("button", { name: "About", exact: true }).click();
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  const half = (side: "light" | "dark", theme: string) =>
-    page.getByRole("radio", { name: `Set ${side} theme to ${theme}` });
-  await half("light", "Neutral").click();
-  await half("dark", "Neutral").click();
-  await expect(
-    page.getByText("Neutral in both", { exact: true }),
-  ).toBeVisible();
+  await expect(theme("Dark", "Capy")).toBeChecked();
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(theme("Light", "Paper")).toBeChecked();
 });
 
-test("every card shows both sides and marks the half in use", async ({
+test("the picker is two radio groups that the keyboard walks and that never move", async ({
   page,
 }) => {
-  await page.emulateMedia({ colorScheme: "dark" });
-  await openSettings(page);
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  await page
-    .getByRole("radio", { name: /^Set light theme to/ })
-    .first()
-    .waitFor();
-  // Ten halves, three mode tiles: the halves are the ones that name a side.
-  const all = await page.evaluate(() =>
-    [...document.querySelectorAll("label.ui-choice")].map((label) => {
-      const input = label.querySelector("input")!;
-      return {
-        name: input.getAttribute("aria-label"),
-        preview:
-          label.querySelector("[data-theme]")?.getAttribute("data-theme") ??
-          null,
-        selected: label.hasAttribute("data-selected"),
-      };
-    }),
-  );
-  const halves = all.filter((half) => half.name?.startsWith("Set "));
-  expect(halves).toHaveLength(10);
-  expect(all.filter((tile) => !tile.name?.startsWith("Set "))).toHaveLength(3);
-  for (const half of halves)
-    expect(half.preview).toBe(
-      half.name!.startsWith("Set light") ? "light" : "dark",
-    );
-  // One chosen half per side, and the mode tile that is picked.
-  expect(
-    all
-      .filter((choice) => choice.selected)
-      .map((choice) => choice.name)
-      .sort(),
-  ).toEqual(["Set dark theme to Ember", "Set light theme to Ember", "System"]);
-  // Exactly one half is the theme on screen: the dark one, while the Mac is.
-  const inUse = () =>
-    page.evaluate(() => {
-      const dot = document
-        .querySelector('[aria-label="Current appearance"]')!
-        .closest("label");
-      return dot?.querySelector("input")!.getAttribute("aria-label") ?? null;
-    });
-  expect(await page.getByLabel("Current appearance").count()).toBe(1);
-  expect(await inUse()).toBe("Set dark theme to Ember");
-  await page.getByRole("radio", { name: "Light", exact: true }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
-  expect(await inUse()).toBe("Set light theme to Ember");
+  await page.emulateMedia({ colorScheme: "light" });
+  for (const width of [720, 640]) {
+    await page.setViewportSize({ width, height: 580 });
+    await openSettings(page, { pendingPage: "Appearance" });
+    const groups = page.getByRole("radiogroup");
+    await expect(groups).toHaveCount(2);
+    const mode = page.getByRole("radiogroup", { name: "Mode" });
+    for (const name of ["System", "Light", "Dark"])
+      await expect(mode.getByRole("radio", { name, exact: true })).toHaveCount(
+        1,
+      );
+    const themes = page.getByRole("radiogroup", { name: "Light theme" });
+    await expect(themes.getByRole("radio")).toHaveCount(5);
+    const layout = () =>
+      page.evaluate(() => {
+        const main = document.querySelector("[role=main]")!;
+        const boxes = [
+          ...main.querySelectorAll(".astryx-radio-list-item, svg, label"),
+        ].map((element) => {
+          const box = element.getBoundingClientRect();
+          return [box.x, box.y, box.width, box.height]
+            .map(Math.round)
+            .join(",");
+        });
+        const clipped = [
+          ...main.querySelectorAll(".astryx-radio-list-item"),
+        ].filter((item) => item.scrollWidth > item.clientWidth + 1).length;
+        return {
+          boxes,
+          clipped,
+          overflow: document.documentElement.scrollWidth > innerWidth,
+        };
+      });
+    const before = await layout();
+    expect(before.clipped).toBe(0);
+    expect(before.overflow).toBe(false);
+    await themes.getByRole("radio", { name: "Ember", exact: true }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(
+      themes.getByRole("radio", { name: "Paper", exact: true }),
+    ).toBeChecked();
+    await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
+    await mode.getByRole("radio", { name: "Dark", exact: true }).click();
+    await expect(
+      page.getByRole("radiogroup", { name: "Dark theme" }),
+    ).toBeVisible();
+    expect(await layout()).toEqual(before);
+    await mode.getByRole("radio", { name: "System", exact: true }).click();
+    expect(await layout()).toEqual(before);
+  }
 });
 
 const themeCases = [
@@ -702,9 +709,9 @@ for (const theme of themeCases) {
     await expect(
       page.getByRole("heading", { name: "Appearance", level: 1 }),
     ).toBeVisible();
-    const radio = page.getByRole("radio", {
-      name: `Set light theme to ${theme.name}`,
-    });
+    const radio = page
+      .getByRole("radiogroup", { name: "Light theme" })
+      .getByRole("radio", { name: theme.name, exact: true });
     await radio.click();
     await expect(radio).toBeChecked();
     await expect(page.locator("html")).toHaveAttribute(
@@ -722,6 +729,7 @@ for (const theme of themeCases) {
     await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+    await page.emulateMedia({ colorScheme: "light" });
     await page.getByRole("button", { name: "About", exact: true }).click();
     await page.getByRole("button", { name: "Appearance", exact: true }).click();
     // Coming back, the choice is still the one in the card.
@@ -1105,10 +1113,6 @@ for (const exit of ["tab", "window-blur", "navigation"]) {
     const recorder = page.getByRole("button", {
       name: /^Shortcut,/,
     });
-    // This test hung twice in full runs before it ever clicked, with the shell
-    // painted and the settings panel still waiting on its data. Waiting for the
-    // row by name fails here with that reason instead of surfacing as a bare
-    // click timeout somewhere else.
     await expect(
       recorder,
       "the settings panel never rendered the Shortcut row",
@@ -1125,8 +1129,8 @@ for (const exit of ["tab", "window-blur", "navigation"]) {
           "*",
         ),
       );
-    // Navigating away unmounts General, so the recorder is only there to read
-    // once the page is back. Reading it mid-transition raced the unmount.
+    // Navigating away unmounts General. Reading the recorder before coming back
+    // only passed while the view transition still held the old page.
     if (exit === "navigation")
       await page.getByRole("button", { name: "General", exact: true }).click();
     await expect(recorder).toBeVisible();
@@ -1502,9 +1506,7 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     "Advanced",
     "About",
   ]);
-  await expect(
-    page.getByRole("radio", { name: /^Set light theme to/ }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("radiogroup", { name: "Mode" })).toHaveCount(0);
   const tops = await nav.evaluateAll((items) =>
     items.map((item) => item.getBoundingClientRect()),
   );
@@ -1543,7 +1545,9 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     .toBe(true);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await expect(
-    page.getByRole("radio", { name: "Set light theme to Ember" }),
+    page
+      .getByRole("radiogroup", { name: "Light theme" })
+      .getByRole("radio", { name: "Ember", exact: true }),
   ).toBeVisible();
 });
 
@@ -1637,23 +1641,27 @@ test("cards rest on a hairline and controls stay borderless until hover", async 
   }
 });
 
-test("theme previews show the theme's own colours and no status words", async ({
+test("theme previews are pictures of each theme's own two sides", async ({
   page,
 }) => {
   await openSettings(page, { pendingPage: "Appearance" });
-  const cards = page.locator("label.ui-choice");
-  await expect(
-    page.getByRole("radio", { name: /^Set .* theme to / }),
-  ).toHaveCount(10);
-  await expect(cards.locator(".astryx-badge")).toHaveCount(0);
-  await expect(cards.getByText("Ready")).toHaveCount(0);
-  await expect(cards.getByText("Inserted")).toHaveCount(0);
-  const dots = await cards
-    .locator(".astryx-status-dot")
-    .evaluateAll((els) => [
-      ...new Set(els.map((el) => getComputedStyle(el).backgroundColor)),
-    ]);
-  expect(dots.length).toBeGreaterThan(1);
+  const themes = page.getByRole("radiogroup", { name: "Light theme" });
+  await expect(themes.getByRole("radio")).toHaveCount(5);
+  await expect(themes.locator(".astryx-status-dot, .astryx-badge")).toHaveCount(
+    0,
+  );
+  await expect(themes.getByText("Aa")).toHaveCount(0);
+  const sides = await themes
+    .locator("svg")
+    .evaluateAll((previews) =>
+      previews.map((svg) => [
+        svg.querySelector(":scope > rect")!.getAttribute("fill"),
+        svg.querySelector(":scope > g > rect")!.getAttribute("fill"),
+      ]),
+    );
+  expect(sides).toHaveLength(5);
+  for (const [light, dark] of sides) expect(light).not.toBe(dark);
+  expect(new Set(sides.map((pair) => pair.join())).size).toBe(5);
 });
 
 test("the sidebar sits a step behind the page in every theme and mode", async ({

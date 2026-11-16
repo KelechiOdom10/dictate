@@ -955,40 +955,21 @@ export const Appearance: Story = {
   render: () => <GeneralPage page="Appearance" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
-    // Five cards, each split into a light half and a dark half, so ten choices
-    // that are still two groups.
-    const halves = await c.findAllByRole("radio", {
-      name: /^Set (light|dark) theme to /,
-    });
-    expect(halves).toHaveLength(10);
-    for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"]) {
-      expect(
-        c.getByRole("radio", { name: `Set light theme to ${name}` }),
-      ).toBeInTheDocument();
-      expect(
-        c.getByRole("radio", { name: `Set dark theme to ${name}` }),
-      ).toBeInTheDocument();
-    }
-    // Each half is previewed in the appearance it sets.
-    const previews = halves.map((half) => [
-      half.getAttribute("aria-label")!.startsWith("Set light")
-        ? "light"
-        : "dark",
-      half
-        .closest("label")!
-        .querySelector("[data-theme]")!
-        .getAttribute("data-theme"),
-    ]);
-    for (const [side, preview] of previews) expect(preview).toBe(side);
-    // Mode is three tiles, and the project's own mode is the picked one.
-    const modes = ["System", "Light", "Dark"].map((name) =>
-      c.getByRole("radio", { name }),
-    );
+    // Two groups: the mode, then the theme for the side that mode shows.
+    const mode = await c.findByRole("radiogroup", { name: "Mode" });
+    for (const name of ["System", "Light", "Dark"])
+      expect(within(mode).getByRole("radio", { name })).toBeInTheDocument();
+    const themes = c.getByRole("radiogroup", { name: /^(Light|Dark) theme$/ });
+    for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
+      expect(within(themes).getByRole("radio", { name })).toBeInTheDocument();
     expect(
-      modes.filter((tile) => (tile as HTMLInputElement).checked),
+      within(mode)
+        .getAllByRole("radio")
+        .filter((radio) => (radio as HTMLInputElement).checked),
     ).toHaveLength(1);
-    // One caption built from what is chosen: both sides, or one theme twice.
-    expect(c.getByText(/in both$|^Light uses /)).toBeInTheDocument();
+    // Every theme is a picture of its light and dark side, nothing else.
+    expect(themes.querySelectorAll("svg")).toHaveLength(5);
+    expect(themes.querySelectorAll(".astryx-status-dot")).toHaveLength(0);
     // Glass is opt-in and starts off.
     expect(
       c.getByRole("switch", { name: "Translucent window" }),
