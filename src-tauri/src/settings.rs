@@ -28,6 +28,14 @@ pub enum AppearanceMode {
     Dark,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum OverlayPosition {
+    Top,
+    #[default]
+    Bottom,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -45,6 +53,8 @@ pub struct Settings {
     pub theme: Theme,
     #[serde(default)]
     pub appearance_mode: AppearanceMode,
+    #[serde(default)]
+    pub overlay_position: OverlayPosition,
 }
 
 const CURRENT_VERSION: u32 = 1;
@@ -63,6 +73,7 @@ impl Default for Settings {
             launch_at_login: false,
             theme: Theme::Ember,
             appearance_mode: AppearanceMode::System,
+            overlay_position: OverlayPosition::Bottom,
         }
     }
 }
@@ -191,10 +202,11 @@ mod tests {
     #[test]
     fn typescript_contract_matches_rust_settings() {
         let contract = format!(
-            "export {}\nexport {}\nexport {}\nexport {}\n",
+            "export {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
             ShortcutMode::decl(),
             Theme::decl(),
             AppearanceMode::decl(),
+            OverlayPosition::decl(),
             Settings::decl()
         );
         let checked_in = include_str!("../../src/settings.generated.ts");
@@ -218,6 +230,7 @@ mod tests {
             launch_at_login: true,
             theme: Theme::Paper,
             appearance_mode: AppearanceMode::Dark,
+            overlay_position: OverlayPosition::Top,
             ..Settings::default()
         };
         save(&path, &settings).unwrap();
@@ -239,6 +252,7 @@ mod tests {
         assert!(!settings.launch_at_login);
         assert_eq!(settings.theme, Theme::Ember);
         assert_eq!(settings.appearance_mode, AppearanceMode::System);
+        assert_eq!(settings.overlay_position, OverlayPosition::Bottom);
         fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.version, 2);

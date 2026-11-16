@@ -12,12 +12,13 @@
 //!
 //! Audio never crosses the IPC boundary. Ten seconds at 16 kHz is 160 000
 //! floats, which serialises to megabytes of JSON for no benefit; the frontend
-//! only ever needs text.
+//! receives status and small scalar levels, never raw samples.
 
 mod audio;
 mod insert;
 mod transcribe;
 
+mod overlay;
 mod settings;
 mod surface;
 
@@ -37,6 +38,7 @@ enum Phase {
 struct Runtime {
     settings: Settings,
     phase: Phase,
+    take_id: u64,
     capturing_shortcut: bool,
     shortcut_registered: bool,
 }
@@ -248,6 +250,9 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
     if runtime.save_settings(settings.clone(), &app)? {
         surface::clear_error(&app);
     }
+    *app.state::<Mutex<settings::OverlayPosition>>()
+        .lock()
+        .map_err(|e| e.to_string())? = settings.overlay_position;
     surface::update_shortcut(&app, &settings.shortcut);
     if let Err(error) = app.emit("settings-changed", &settings) {
         report_error(
@@ -313,12 +318,23 @@ fn microphone_notice(fallback: bool) -> Option<String> {
     fallback.then(|| "Using the default microphone".into())
 }
 
+#[tauri::command]
+fn report_settings_refresh_error(app: AppHandle) {
+    report_error(
+        &app,
+        "Settings could not refresh. Open Settings and save again.",
+    );
+}
+
+#[tauri::command]
+fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    overlay::resize(&app, width, height)
+}
+
 fn report_error(app: &AppHandle, error: &str) {
     eprintln!("[dictate] {error}");
     surface::set_error(app, error);
-    if let Some(window) = app.get_webview_window("main")
-        && let Err(error) = window.show()
-    {
+    if let Err(error) = overlay::show(app) {
         eprintln!("[dictate] show error: {error}");
     }
     if let Err(error) = app.emit("dictation-error", error) {
@@ -343,6 +359,7 @@ fn hotkey(
         return;
     }
     if next == Phase::Recording {
+        runtime.take_id += 1;
         surface::clear_error(app);
         let result = audio::start_device(runtime.settings.microphone.clone()).map(|fallback| {
             surface::set_notice(app, microphone_notice(fallback));
@@ -353,34 +370,71 @@ fn hotkey(
         }
         runtime.phase = Phase::Recording;
         surface::set_phase(app, "recording");
-        if let Some(window) = app.get_webview_window("main")
-            && let Err(error) = window.show()
-        {
-            report_error(app, &error.to_string());
+        if let Err(error) = overlay::show(app) {
+            report_error(app, &error);
         }
+        let meter_app = app.clone();
+        let take_id = runtime.take_id;
+        tauri::async_runtime::spawn_blocking(move || {
+            while meter_app
+                .state::<Mutex<Runtime>>()
+                .lock()
+                .is_ok_and(|runtime| {
+                    runtime.take_id == take_id && runtime.phase == Phase::Recording
+                })
+            {
+                if let Ok(level) = audio::recording_level() {
+                    let _ = meter_app.emit("recording-level", level);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+        });
     } else {
         let released = Instant::now();
         match audio::stop() {
             Ok(samples) => {
                 runtime.phase = Phase::Transcribing;
                 surface::set_phase(app, "transcribing");
+                let take_id = runtime.take_id;
                 let app = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     let result = dictation_text(&samples).and_then(|text| {
                         if !text.is_empty() {
                             insert::paste(&app, &text)?;
                         }
-                        Ok(())
+                        Ok(!text.is_empty())
                     });
-                    if let Err(error) = result {
-                        report_error(&app, &error);
-                    }
+                    let outcome = match result {
+                        Ok(true) => "done",
+                        Ok(false) => "skipped",
+                        Err(error) => {
+                            report_error(&app, &error);
+                            "idle"
+                        }
+                    };
                     println!(
                         "[dictate] release_to_complete_ms={}",
                         released.elapsed().as_millis()
                     );
                     if let Ok(mut runtime) = app.state::<Mutex<Runtime>>().lock() {
+                        surface::set_phase(&app, outcome);
                         runtime.phase = Phase::Idle;
+                    }
+                    let completed = surface::status(&app);
+                    std::thread::sleep(std::time::Duration::from_millis(if outcome == "done" {
+                        900
+                    } else {
+                        1800
+                    }));
+                    let state = app.state::<Mutex<Runtime>>();
+                    let Ok(runtime) = state.lock() else {
+                        return;
+                    };
+                    if runtime.take_id != take_id
+                        || runtime.phase != Phase::Idle
+                        || surface::status(&app).phase != completed.phase
+                    {
+                        return;
                     }
                     surface::set_phase(&app, "idle");
                     if surface::status(&app).should_hide()
@@ -434,7 +488,9 @@ pub fn run() {
             capture_shortcut,
             input_devices,
             microphone_test,
-            microphone_level
+            microphone_level,
+            resize_overlay,
+            report_settings_refresh_error
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -461,10 +517,16 @@ pub fn run() {
             app.manage(Mutex::new(Runtime {
                 settings: settings.clone(),
                 phase: Phase::Idle,
+                take_id: 0,
                 capturing_shortcut: false,
                 shortcut_registered,
             }));
+            app.manage(Mutex::new(settings.overlay_position));
             surface::setup(app, &settings)?;
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_ignore_cursor_events(true)?;
+                window.set_focusable(false)?;
+            }
             if let Some(error) = &startup_error {
                 report_error(app.handle(), error);
             }
@@ -537,6 +599,7 @@ mod take_tests {
         Runtime {
             settings: Settings::default(),
             phase: Phase::Idle,
+            take_id: 0,
             capturing_shortcut: false,
             shortcut_registered: false,
         }

@@ -49,7 +49,7 @@ async function openSettings(
         if (data.type !== "dictate-test") return;
         if (data.event === "settings-changed")
           Object.assign(settings, data.payload);
-        else status = data.payload;
+        else if (data.event !== "recording-level") status = data.payload;
         emit(data.event, data.payload);
       });
       const settings = {
@@ -59,6 +59,7 @@ async function openSettings(
         microphone: null,
         launchAtLogin: false,
         theme: "ember",
+        overlayPosition: "bottom",
         appearanceMode: "system",
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
@@ -260,13 +261,15 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           microphone: null,
           launchAtLogin: false,
           theme: "ember",
+          overlayPosition: "bottom",
           appearanceMode: "system",
         },
       },
       "*",
     ),
   );
-  await expect(page.locator("kbd")).toHaveText(["⌃", "D"]);
+  await expect(page.getByRole("alert")).toContainText("Shortcut unavailable");
+  await expect(page.locator("kbd")).toHaveCount(0);
   await page.evaluate(() =>
     window.postMessage(
       {
@@ -289,6 +292,17 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
     ),
   );
   await expect(page.getByRole("status")).toHaveText("Transcribing…");
+  await page.evaluate(() =>
+    window.postMessage(
+      {
+        type: "dictate-test",
+        event: "dictation-state",
+        payload: { phase: "idle", error: null },
+      },
+      "*",
+    ),
+  );
+  await expect(page.locator("kbd")).toHaveText(["⌃", "D"]);
   await page.evaluate(() =>
     window.postMessage(
       {
@@ -407,6 +421,7 @@ test("overlay applies appearance events live, including System changes", async (
                 microphone: null,
                 launchAtLogin: false,
                 theme,
+                overlayPosition: "bottom",
                 appearanceMode,
               },
             },
@@ -424,5 +439,151 @@ test("overlay applies appearance events live, including System changes", async (
         "data-mode",
         appearanceMode === "light" ? "light" : "dark",
       );
+    }
+});
+
+test("overlay renders live level, resets its timer and keeps terminal states distinct", async ({
+  page,
+}) => {
+  await openSettings(page, { overlay: true });
+  const phase = async (phase: string) => {
+    await page.evaluate(
+      (phase) =>
+        window.postMessage(
+          {
+            type: "dictate-test",
+            event: "dictation-state",
+            payload: { phase, error: null },
+          },
+          "*",
+        ),
+      phase,
+    );
+  };
+  await phase("recording");
+  await expect(page.locator(".ui-timer")).toHaveText("00:01");
+  await page.evaluate(() =>
+    window.postMessage(
+      { type: "dictate-test", event: "recording-level", payload: 0.04 },
+      "*",
+    ),
+  );
+  await expect(page.getByRole("meter")).toHaveAttribute("value", "0.4");
+  await phase("transcribing");
+  await expect(page.getByRole("meter")).toHaveCount(0);
+  await phase("done");
+  await expect(page.getByRole("status")).toHaveText("Text inserted");
+  await phase("recording");
+  await expect(page.locator(".ui-timer")).toHaveText("00:00");
+  await phase("skipped");
+  await expect(page.getByRole("status")).toContainText("No speech captured");
+  await expect(page.getByRole("status")).toContainText("Hold the shortcut");
+});
+
+test("invalid appearance events show a recoverable overlay error", async ({
+  page,
+}) => {
+  await openSettings(page, { overlay: true });
+  await page.evaluate(() =>
+    window.postMessage(
+      {
+        type: "dictate-test",
+        event: "settings-changed",
+        payload: { theme: "invalid" },
+      },
+      "*",
+    ),
+  );
+  await expect(page.getByRole("alert")).toContainText(
+    "Settings could not refresh",
+  );
+  await expect(page.getByRole("alert")).toContainText("Open Settings");
+});
+
+test("capsule state screenshots cover every theme and fit a narrow overlay", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 436, height: 200 });
+  await openSettings(page, { overlay: true });
+  for (const theme of ["ember", "paper"])
+    for (const appearanceMode of ["light", "dark"]) {
+      await page.evaluate(
+        ({ theme, appearanceMode }) =>
+          window.postMessage(
+            {
+              type: "dictate-test",
+              event: "settings-changed",
+              payload: {
+                version: 1,
+                shortcut: "Alt+Shift+Space",
+                shortcutMode: "hold",
+                microphone: null,
+                launchAtLogin: false,
+                theme,
+                appearanceMode,
+                overlayPosition: "bottom",
+              },
+            },
+            "*",
+          ),
+        { theme, appearanceMode },
+      );
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-mode",
+        appearanceMode,
+      );
+      for (const phase of [
+        "recording",
+        "transcribing",
+        "done",
+        "skipped",
+        "error",
+      ]) {
+        await page.evaluate(
+          (phase) =>
+            window.postMessage(
+              {
+                type: "dictate-test",
+                event: "dictation-state",
+                payload: {
+                  phase: phase === "error" ? "idle" : phase,
+                  error: phase === "error" ? "Microphone access denied." : null,
+                },
+              },
+              "*",
+            ),
+          phase,
+        );
+        await expect(page.locator(`.ui-capsule-${phase}`)).toBeVisible();
+        if (phase === "error") await expect(page.locator("kbd")).toHaveCount(0);
+        if (phase === "recording")
+          await expect(page.locator(".ui-level-bars span").first()).toHaveCSS(
+            "transition-duration",
+            "0s",
+          );
+        if (phase === "recording") {
+          await page.evaluate(() =>
+            window.postMessage(
+              { type: "dictate-test", event: "recording-level", payload: 0.04 },
+              "*",
+            ),
+          );
+          await expect(page.getByRole("meter")).toHaveAttribute("value", "0.4");
+        }
+        await page.evaluate(() => document.fonts.ready);
+        await page.locator(".ui-capsule").screenshot({
+          path: `target/overlay/${theme}-${appearanceMode}-${phase}.png`,
+          omitBackground: true,
+        });
+        await page.setViewportSize({ width: 320, height: 240 });
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+        ).toBe(true);
+        await page.setViewportSize({ width: 436, height: 200 });
+      }
     }
 });

@@ -13,9 +13,15 @@ export const Recording: Story = {
 export const Transcribing: Story = {
   args: { state: { kind: "transcribing" } },
 };
+export const Skipped: Story = { args: { state: { kind: "skipped" } } };
 export const Done: Story = { args: { state: { kind: "done" } } };
 export const Error: Story = {
-  args: { state: { kind: "error", message: "Microphone access is required." } },
+  args: {
+    state: {
+      kind: "error",
+      message: "Allow Microphone access in System Settings, then retry.",
+    },
+  },
 };
 export const Ready: Story = {
   args: {
@@ -32,8 +38,12 @@ export const AllStates: Story = {
       />
       <RecordingCapsule state={{ kind: "transcribing" }} />
       <RecordingCapsule state={{ kind: "done" }} />
+      <RecordingCapsule state={{ kind: "skipped" }} />
       <RecordingCapsule
-        state={{ kind: "error", message: "Microphone access is required." }}
+        state={{
+          kind: "error",
+          message: "Allow Microphone access in System Settings, then retry.",
+        }}
       />
     </div>
   ),

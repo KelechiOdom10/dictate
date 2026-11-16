@@ -32,6 +32,7 @@ async function mockSettings({ globals }: { globals: Record<string, unknown> }) {
     microphone: null,
     launchAtLogin: false,
     theme: globals.theme === "paper" ? "paper" : "ember",
+    overlayPosition: "bottom",
     appearanceMode: globals.mode === "dark" ? "dark" : "light",
   };
   mockWindows("settings");

@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { z } from "zod";
 
 const statusSchema = z.object({
-  phase: z.enum(["idle", "recording", "transcribing"]),
+  phase: z.enum(["idle", "recording", "transcribing", "done", "skipped"]),
   error: z.string().nullable(),
   notice: z.string().nullable().default(null),
 });

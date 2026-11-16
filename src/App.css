@@ -30,7 +30,7 @@ footer {
   padding: var(--space-6) var(--space-3) var(--space-0);
   display: grid;
   gap: var(--space-1);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -42,7 +42,7 @@ footer .ui-button {
   justify-content: flex-start;
   width: fit-content;
   text-align: start;
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
 }
 .settings-content {
   padding: var(--space-8);
@@ -72,7 +72,7 @@ section + section {
   display: grid;
   gap: var(--space-1);
   color: var(--muted);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
 }
 meter {
   width: 120px;
@@ -88,7 +88,7 @@ meter {
 }
 .save-status {
   color: var(--muted);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   margin: var(--space-4) var(--space-1);
 }
 .loading,
@@ -139,7 +139,7 @@ meter {
   .ui-sidebar-nav button {
     padding: var(--space-2);
     gap: var(--space-1);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   footer {
     display: none;
@@ -149,4 +149,18 @@ meter {
 .settings-content > .ui-toast {
   margin-bottom: var(--space-6);
   overflow-wrap: anywhere;
+}
+
+html.overlay-window,
+.overlay-window body {
+  background: transparent;
+  overflow: hidden;
+}
+.overlay-capsule {
+  width: max-content;
+  max-width: min(420px, calc(100vw - 16px));
+  justify-self: center;
+}
+.overlay .ui-capsule {
+  width: 100%;
 }

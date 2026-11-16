@@ -169,7 +169,7 @@ p {
 }
 .ui-date {
   color: var(--muted);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   font-variant-numeric: tabular-nums;
 }
 .ui-list-item h2 {
@@ -230,7 +230,7 @@ p {
   grid-template-columns: minmax(60px, auto) 1fr auto;
   align-items: center;
   gap: var(--space-3);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
 }
 .ui-model-heading {
   display: flex;
@@ -290,7 +290,7 @@ p {
   justify-content: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-5);
-  min-height: 56px;
+  min-height: 48px;
   border-radius: var(--radius-pill);
   background: var(--overlay);
   color: var(--overlay-text);
@@ -299,6 +299,7 @@ p {
 .ui-capsule-copy {
   display: grid;
   min-width: 0;
+  line-height: 1.5;
   gap: var(--space-1);
 }
 .ui-record-dot {
@@ -331,6 +332,9 @@ p {
 @media (prefers-reduced-motion: reduce) {
   .ui-spin {
     animation: none;
+  }
+  .ui-level-bars span {
+    transition: none;
   }
 }
 .story-stack {
@@ -637,7 +641,7 @@ kbd {
   padding: var(--space-1) var(--space-2);
   background: var(--success);
   border-radius: var(--radius-pill);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   color: var(--success-text);
 }
 .ui-toast-success {
@@ -681,7 +685,7 @@ kbd {
   background: var(--overlay-muted);
 }
 .ui-capsule-message {
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   color: var(--overlay-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -855,4 +859,21 @@ button:active:not(:disabled) {
 
 h3 {
   font-weight: var(--weight-semibold);
+}
+
+.ui-capsule > span:first-child {
+  flex-shrink: 0;
+  display: flex;
+}
+.ui-capsule .ui-level {
+  width: 54px;
+}
+.ui-capsule .ui-level-bars {
+  gap: 2px;
+}
+.ui-capsule .ui-level-bars span {
+  width: 3px;
+}
+.ui-capsule .ui-timer {
+  white-space: nowrap;
 }

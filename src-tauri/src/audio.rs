@@ -10,6 +10,7 @@ enum Command {
     Monitor(Option<String>, Reply<()>),
     StopMonitor,
     Level(Reply<f32>),
+    RecordingLevel(Reply<f32>),
     Stop(Reply<Vec<f32>>),
     Status(mpsc::Sender<bool>),
 }
@@ -62,8 +63,13 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                                 let _ = reply.send(result);
                             }
                             Command::StopMonitor => monitor = None,
-                            Command::Level(reply) => {
-                                let result = monitor
+                            Command::Level(ref reply) | Command::RecordingLevel(ref reply) => {
+                                let active = if matches!(command, Command::RecordingLevel(_)) {
+                                    &recording
+                                } else {
+                                    &monitor
+                                };
+                                let result = active
                                     .as_ref()
                                     .ok_or_else(|| "Microphone test is stopped".to_string())
                                     .and_then(|active| {
@@ -202,6 +208,12 @@ pub fn microphone_level() -> Result<f32, String> {
     result.recv().map_err(|e| e.to_string())?
 }
 
+pub fn recording_level() -> Result<f32, String> {
+    let (reply, result) = mpsc::channel();
+    send(Command::RecordingLevel(reply))?;
+    result.recv().map_err(|e| e.to_string())?
+}
+
 fn open_recording(name: Option<&str>, retain: bool) -> Result<Recording, String> {
     let host = cpal::default_host();
     let selected = name.map(selected_device).transpose()?.flatten();
@@ -264,24 +276,7 @@ where
             config,
             move |data: &[T], _| {
                 if let Ok(mut captured) = samples.lock() {
-                    if !captured.retain {
-                        let frames = data.chunks_exact(channels);
-                        let count = frames.len().max(1);
-                        let squares = frames
-                            .map(|frame| {
-                                let mono = frame
-                                    .iter()
-                                    .map(|s| s.to_sample::<f32>().clamp(-1.0, 1.0))
-                                    .sum::<f32>()
-                                    / channels as f32;
-                                mono * mono
-                            })
-                            .sum::<f32>();
-                        captured.level = (squares / count as f32).sqrt();
-                    }
-                    if captured.retain {
-                        append_mono(&mut captured.samples, data, channels);
-                    }
+                    capture_block(&mut captured, data, channels);
                 }
             },
             move |error| {
@@ -294,6 +289,29 @@ where
         .map_err(|e| format!("Build microphone stream: {e}"))
 }
 
+fn capture_block<T>(captured: &mut Captured, input: &[T], channels: usize)
+where
+    T: cpal::Sample,
+    f32: cpal::FromSample<T>,
+{
+    let frames = input.chunks_exact(channels);
+    let count = frames.len().max(1);
+    let mut squares = 0.0;
+    for frame in frames {
+        let mono = frame
+            .iter()
+            .map(|sample| sample.to_sample::<f32>().clamp(-1.0, 1.0))
+            .sum::<f32>()
+            / channels as f32;
+        squares += mono * mono;
+        if captured.retain {
+            captured.samples.push(mono);
+        }
+    }
+    captured.level = (squares / count as f32).sqrt();
+}
+
+#[cfg(test)]
 fn append_mono<T>(output: &mut Vec<f32>, input: &[T], channels: usize)
 where
     T: cpal::Sample,
@@ -443,6 +461,23 @@ mod tests {
             "cached_selection_n=30 median_ms={:.3} p95_ms={:.3} max_ms={:.3}",
             timings[15], timings[28], timings[29]
         );
+    }
+
+    #[test]
+    fn recording_and_monitor_report_the_same_rms_without_retaining_monitor_audio() {
+        let mut recording = Captured {
+            retain: true,
+            ..Captured::default()
+        };
+        let mut monitor = Captured::default();
+        for captured in [&mut recording, &mut monitor] {
+            capture_block(captured, &[0.5_f32, 0.5, -0.5, -0.5], 2);
+            assert_eq!(captured.level, 0.5);
+        }
+        assert_eq!(recording.samples, [0.5, -0.5]);
+        assert!(monitor.samples.is_empty());
+        capture_block(&mut recording, &[0.0_f32, 0.0], 2);
+        assert_eq!(recording.level, 0.0);
     }
 
     #[test]
