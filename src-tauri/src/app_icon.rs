@@ -42,30 +42,34 @@ pub struct Palette {
     pub accent: [u8; 3],
 }
 
-/// Ember's accent is the live input orange. Paper's live input colour is ink,
-/// so a Paper icon is monochrome by construction rather than by omission.
+/// Plate and ink are shared by every theme today; the accent is where a theme
+/// differs, and only Paper differs from the rest.
+///
+/// Values from `src/ui/palettes.generated.json`: `canvas` is the plate, `text`
+/// the ink, `live` the accent. Ember, Capy, Rose Pine and Neutral all carry the
+/// same live orange there, so they share an accent until the generated palette
+/// makes them differ. Paper's live colour is its ink, which is why a Paper icon
+/// comes out monochrome by construction rather than by omission.
 pub fn palette(theme: Theme, dark: bool) -> Palette {
-    match (theme, dark) {
-        (Theme::Ember, false) => Palette {
-            plate: [251, 250, 248],
-            bars: [28, 26, 24],
-            accent: [223, 88, 34],
-        },
-        (Theme::Ember, true) => Palette {
-            plate: [26, 24, 22],
-            bars: [241, 238, 234],
-            accent: [246, 125, 81],
-        },
-        (Theme::Paper, false) => Palette {
-            plate: [251, 250, 248],
-            bars: [28, 26, 24],
-            accent: [28, 26, 24],
-        },
-        (Theme::Paper, true) => Palette {
-            plate: [26, 24, 22],
-            bars: [241, 238, 234],
-            accent: [241, 238, 234],
-        },
+    let (plate, bars) = if dark {
+        ([26, 24, 22], [241, 238, 234])
+    } else {
+        ([251, 250, 248], [28, 26, 24])
+    };
+    let accent = match theme {
+        Theme::Paper => bars,
+        Theme::Ember | Theme::Capy | Theme::RosePine | Theme::Neutral => {
+            if dark {
+                [246, 125, 81]
+            } else {
+                [223, 88, 34]
+            }
+        }
+    };
+    Palette {
+        plate,
+        bars,
+        accent,
     }
 }
 
@@ -254,6 +258,11 @@ mod tests {
         assert_eq!(palette(Theme::Ember, true).accent, [246, 125, 81]);
         assert_eq!(palette(Theme::Paper, false).accent, palette(Theme::Paper, false).bars);
         assert_eq!(palette(Theme::Paper, true).plate, [26, 24, 22]);
+        // The four themes that share Ember's live orange share its accent.
+        for theme in [Theme::Capy, Theme::RosePine, Theme::Neutral] {
+            assert_eq!(palette(theme, false), palette(Theme::Ember, false));
+            assert_eq!(palette(theme, true), palette(Theme::Ember, true));
+        }
     }
 
     #[test]

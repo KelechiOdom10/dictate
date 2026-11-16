@@ -68,10 +68,13 @@ Swapping the shipped icon is one line: `SELECTED` in
 `src-tauri/src/app_icon.rs` draws the same artboard as draft A from the live
 palette and hands it to AppKit at launch and whenever Theme or Mode changes.
 The plate is the palette's `canvas`, the four outer bars are `text`, and the
-middle bar — the live one — is `live`: Ember light `#DF5822`, Ember dark
-`#F67D51`. Paper has no second hue, so a Paper icon is monochrome ink by
-construction. `System` resolves through `NSApp.effectiveAppearance`; an OS
-appearance switch underneath it while the app runs does not redraw the icon.
+middle bar — the live one — is `live`: `#DF5822` in a light appearance and
+`#F67D51` in a dark one. Ember, Capy, Rose Pine and Neutral currently share that
+live colour in the generated palette, so they share an accent; give each its own
+arm in `app_icon::palette` when they diverge. Paper has no second hue, so a Paper
+icon is monochrome ink by construction. `System` resolves through
+`NSApp.effectiveAppearance`; an OS appearance switch underneath it while the app
+runs does not redraw the icon.
 
 It goes through AppKit rather than Tauri because Tauri 2 has no app-level icon
 setter: `tauri::AppHandle` exposes window, webview, tray and menu icons only.
@@ -194,9 +197,9 @@ Measured on 16 Nov 2026, macOS 27.0.1, Apple Silicon, rustc 1.99.1, with
 |---|---|---|
 | `--release` compile, empty `target/` | — | 3 min 12 s |
 | rebuild after an icon or config change | — | 1 min 31 s |
-| `dictate.app` | 17.28 MiB (17,688 KiB on disk) | |
-| `Contents/MacOS/dictate` | 17.21 MiB (18,046,544 bytes) | |
-| `dictate-0.1.0-arm64.dmg` | 7.26 MiB (7,611,570 bytes) | |
+| `dictate.app` | 17.57 MiB (17,996 KiB on disk) | |
+| `Contents/MacOS/dictate` | 17.51 MiB (18,358,704 bytes) | |
+| `dictate-0.1.0-arm64.dmg` | 7.54 MiB (7,909,933 bytes) | |
 
 The app is arm64 only: `lipo -archs` prints `arm64`. Its Info.plist carries
 `com.kelechiodom.dictate`, `LSMinimumSystemVersion 15.0` and the microphone
