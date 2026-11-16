@@ -4,14 +4,40 @@
 file or a model card. Numbers come from this Mac (Apple M4 Pro). Anything
 inferred or not measured is marked **(inferred)** or **(not measured)**.
 
+## Status on `main`, 16 November 2026
+
+Read this first: the plan below has partly shipped, so parts of it describe a
+past state of the app.
+
+- **Tasks A and B are shipped.** Parakeet Unified English 0.6B Q8_0 runs in
+  process on `transcribe-cpp` with a warm session held between takes
+  (`transcribe.rs:421` `with_session`), takes stream while recording and
+  finalize on release (`transcribe.rs:163` `LiveTake`, started at
+  `lib.rs:1294` `start_live_take`), and short takes fall back to batch.
+- **Task C is shipped, minus its migration prompt.** Parakeet is the default
+  model (`settings.rs:151`), the Models page shows the NVIDIA Open Model
+  Licence and its link (`ModelsPage.tsx:158`), and the one-time prompt for
+  existing users was built and then deliberately removed: an existing profile
+  simply keeps the model it has, with no offer and no silent download.
+- **Task D is not done.** Whisper models still run through the Homebrew
+  `whisper-cli` (`transcribe.rs:350` `needs_whisper_cli`), so CMake is only
+  needed for the `transcribe-cpp` build and Homebrew is still a requirement
+  for Whisper.
+- **Everything else is the 15 November investigation as written.** Its
+  external facts (model cards, sizes, the pinned SHA, Handy's benchmark) are
+  unchanged; its description of dictate's state — "no warm model", "no
+  streaming", "your settings run `base.en`" — is what the plan replaced, and
+  the numbers in §3 stand as the measurements the plan was decided on.
+
 ## The answer in short
 
-The gap between dictate and Hex/Handy has four causes:
+On 15 November 2026 the gap between dictate and Hex/Handy had four causes:
 
-1. **Model.** Your settings run `base.en`
+1. **Model.** Your settings then ran `base.en`
    (`~/Library/Application Support/com.kelechiodom.dictate/settings.json`:
-   `"speechModel": "base.en"`). On Handy's FLEURS English benchmark, base.en
-   gets 7.6% of words wrong. Parakeet Unified gets 3.99%, about half as many.
+   `"speechModel": "base.en"`; Parakeet is the default now). On Handy's FLEURS
+   English benchmark, base.en gets 7.6% of words wrong. Parakeet Unified gets
+   3.99%, about half as many.
 2. **No warm model.** Every take starts a new `whisper-cli` process, which
    reloads the weights (`transcribe.rs` `run_whisper`). A model held in memory
    answers a short clip in 45 ms here.
@@ -212,7 +238,9 @@ Handy's catalog. Whisper ran as dictate runs it today: Homebrew `whisper-cli`
 
 ### How option A maps onto dictate's code
 
-On branch `fix/annotate-review-fixes`:
+On `main` today. The plan was written against `fix/annotate-review-fixes`,
+which is merged, and the first three bullets below are that plan implemented.
+The numbers it asks to record are in `docs/spike-results.md:528`.
 
 - **`transcribe.rs`.** Keep the public functions as they are: `transcribe`,
   `transcribe_timed`, `segments`, `model_name`, `missing_model`. That keeps the
@@ -260,7 +288,7 @@ On branch `fix/annotate-review-fixes`:
 
 ## 6. Build plan
 
-**Task A: Parakeet through transcribe-cpp, warm, batch.**
+**Task A (shipped): Parakeet through transcribe-cpp, warm, batch.**
 Add `transcribe-cpp = "0.4.2"` (Metal). Add Parakeet Unified Q8_0 to the
 `models.rs` catalog using the pin above. Route Parakeet through `transcribe` and
 `transcribe_timed` with a model held in memory and warmed at startup or
@@ -273,7 +301,7 @@ first word within ±250 ms of 3,480 ms. Switching models unloads the old one.
 Record the new numbers in `docs/spike-results.md`. *Validation:* `cargo test`,
 `pnpm build`, and one physical ⌥⇧Space dictation logging `release_to_text_ms`.
 
-**Task B: stream while recording.**
+**Task B (shipped): stream while recording.**
 Send 100 ms frames to a stream session during capture, and finalize on release.
 Use batch for takes under 4 s, and on any stream error.
 *Acceptance:* on memo, finalize after the last frame takes ≤ 150 ms and the
@@ -283,14 +311,16 @@ discards the stream. Long takes (59 s fixture) return all words.
 from 10 physical takes.
 
 **Task C: make Parakeet the default and show the licence.**
-New installs get Parakeet as Recommended. Existing users who never chose a model
-get a one-time prompt, not a silent 731 MB download. The Models page shows the
-licence name and link, and the release notes say why.
-*Acceptance:* a fresh profile shows Parakeet Recommended. A profile set to
-`base.en` stays on `base.en` until the user switches. *Validation:* UI check in
-`pnpm tauri dev`.
+New installs get Parakeet as Recommended. The Models page shows the licence name
+and link, and the release notes say why. *Shipped, with one change of mind:* a
+one-time prompt for existing users was built and then removed, because a
+migration offer on top of a working default was more ceremony than the app
+needs — an existing profile keeps whatever model it already has, and nothing is
+downloaded without a click. *Acceptance:* a fresh profile shows Parakeet
+Recommended. A profile set to `base.en` stays on `base.en` until the user
+switches. *Validation:* UI check in `pnpm tauri dev`.
 
-**Task D (optional): Whisper on GGUF, then remove whisper-cli.**
+**Task D (not started): Whisper on GGUF, then remove whisper-cli.**
 Move the catalog's Whisper entries to `handy-computer` GGUF files (pinned) on
 the same engine. Delete `whisper_cli`, `whisper_missing` and the Homebrew
 instructions.
