@@ -23,6 +23,7 @@
   --text: light-dark(oklch(0.22 0.006 75), oklch(0.95 0.006 75));
   --muted: light-dark(oklch(0.48 0.015 75), oklch(0.75 0.014 75));
   --line: light-dark(oklch(0.925 0.008 75), oklch(0.29 0.01 75));
+  --card-line: light-dark(oklch(0.925 0.008 75), oklch(0.46 0.014 75));
   --edge: light-dark(oklch(0.89 0.01 75), oklch(0.35 0.012 75));
   --dot: light-dark(oklch(0.86 0.012 75), oklch(0.33 0.011 75));
   --keycap: light-dark(oklch(0.998 0.001 75), oklch(0.305 0.011 75));
@@ -830,7 +831,7 @@ figure.shot {
   border-radius: 14px;
   background: var(--surface);
   box-shadow:
-    0 0 0 1px var(--line),
+    0 0 0 1px var(--card-line),
     0 24px 48px -24px var(--shadow);
   text-align: left;
   rotate: -1.5deg;
@@ -871,7 +872,9 @@ figure.shot {
   border-radius: 14px;
   background: oklch(0.2 0.005 75);
   color: oklch(0.92 0.006 75);
-  box-shadow: 0 30px 60px -30px oklch(0 0 0 / 0.5);
+  box-shadow:
+    0 0 0 1px light-dark(transparent, var(--card-line)),
+    0 30px 60px -30px oklch(0 0 0 / 0.5);
   text-align: left;
   overflow: hidden;
   rotate: 1.5deg;
