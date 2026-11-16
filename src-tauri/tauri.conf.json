@@ -23,6 +23,17 @@
         "focus": false,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "settings",
+        "title": "dictate Settings",
+        "url": "index.html?window=settings",
+        "width": 820,
+        "height": 680,
+        "minWidth": 640,
+        "minHeight": 480,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {
@@ -38,6 +49,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }

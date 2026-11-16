@@ -18,14 +18,26 @@ mod audio;
 mod insert;
 mod transcribe;
 
-use std::time::Instant;
-use tauri::{AppHandle, Manager};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+mod settings;
+mod surface;
 
-/// Hold-to-talk chord. Change here, not in two places.
-fn chord() -> Shortcut {
-    // Alt+Shift+Space: unused by Spotlight, Raycast and the usual suspects.
-    Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::Space)
+use settings::{Settings, ShortcutMode};
+use std::{sync::Mutex, time::Instant};
+use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_autostart::ManagerExt as AutostartExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Phase {
+    Idle,
+    Recording,
+    Transcribing,
+}
+
+struct Runtime {
+    settings: Settings,
+    phase: Phase,
+    capturing_shortcut: bool,
 }
 
 #[tauri::command]
@@ -95,86 +107,276 @@ fn dictation_text(samples: &[f32]) -> Result<String, String> {
     Ok(text.trim().to_string())
 }
 
+#[tauri::command]
+fn get_settings(app: AppHandle) -> Result<Settings, String> {
+    let state = app.state::<Mutex<Runtime>>();
+    let mut settings = state.lock().map_err(|e| e.to_string())?.settings.clone();
+    settings.launch_at_login = app.autolaunch().is_enabled().map_err(|e| e.to_string())?;
+    Ok(settings)
+}
+
+#[tauri::command]
+fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
+    let state = app.state::<Mutex<Runtime>>();
+    let mut runtime = state.lock().map_err(|e| e.to_string())?;
+    if runtime.phase != Phase::Idle || audio::is_recording() {
+        return Err("Finish dictating before changing settings".into());
+    }
+    let chord = settings.chord()?;
+    if let Some(name) = &settings.microphone
+        && !audio::input_devices()?.contains(name)
+    {
+        return Err(format!("Microphone unavailable: {name}"));
+    }
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("settings.json");
+    let was_enabled = app.autolaunch().is_enabled().map_err(|e| e.to_string())?;
+    let old_chord = runtime.settings.chord()?;
+    let changed = chord != old_chord || runtime.capturing_shortcut;
+    if changed {
+        app.global_shortcut()
+            .register(chord)
+            .map_err(|e| format!("Shortcut unavailable: {e}"))?;
+        if !runtime.capturing_shortcut
+            && let Err(error) = app.global_shortcut().unregister(old_chord)
+        {
+            app.global_shortcut()
+                .unregister(chord)
+                .map_err(|e| format!("{error}; remove new shortcut: {e}"))?;
+            return Err(error.to_string());
+        }
+    }
+    let change_login = |enabled| {
+        if enabled {
+            app.autolaunch().enable()
+        } else {
+            app.autolaunch().disable()
+        }
+    };
+    let result = (|| {
+        if settings.launch_at_login != was_enabled {
+            change_login(settings.launch_at_login).map_err(|e| e.to_string())?;
+        }
+        settings::save(&path, &settings)
+    })();
+    if let Err(error) = result {
+        let mut errors = vec![error];
+        if settings.launch_at_login != was_enabled
+            && let Err(error) = change_login(was_enabled)
+        {
+            errors.push(format!("Restore launch at login: {error}"));
+        }
+        if changed {
+            if let Err(error) = app.global_shortcut().unregister(chord) {
+                errors.push(format!("Remove new shortcut: {error}"));
+            }
+            if !runtime.capturing_shortcut
+                && let Err(error) = app.global_shortcut().register(old_chord)
+            {
+                errors.push(format!("Restore shortcut: {error}"));
+            }
+        }
+        return Err(errors.join("; "));
+    }
+    runtime.capturing_shortcut = false;
+    runtime.settings = settings.clone();
+    surface::update_shortcut(&app, &settings.shortcut);
+    Ok(settings)
+}
+
+#[tauri::command]
+fn capture_shortcut(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let state = app.state::<Mutex<Runtime>>();
+    let mut runtime = state.lock().map_err(|e| e.to_string())?;
+    if runtime.capturing_shortcut == enabled {
+        return Ok(());
+    }
+    if runtime.phase != Phase::Idle {
+        return Err("Finish dictating before recording a shortcut".into());
+    }
+    let chord = runtime.settings.chord()?;
+    if enabled {
+        app.global_shortcut().unregister(chord)
+    } else {
+        app.global_shortcut().register(chord)
+    }
+    .map_err(|e| e.to_string())?;
+    runtime.capturing_shortcut = enabled;
+    Ok(())
+}
+
+#[tauri::command]
+fn input_devices() -> Result<Vec<String>, String> {
+    audio::input_devices()
+}
+
+#[tauri::command]
+fn microphone_test(app: AppHandle, enabled: bool) -> Result<(), String> {
+    if enabled {
+        let settings = get_settings(app)?;
+        audio::monitor_start(settings.microphone)
+    } else {
+        audio::monitor_stop()
+    }
+}
+
+#[tauri::command]
+fn microphone_level() -> Result<f32, String> {
+    audio::microphone_level()
+}
+
+fn report_error(app: &AppHandle, error: &str) {
+    eprintln!("[dictate] {error}");
+    if let Err(error) = app.emit("dictation-error", error) {
+        eprintln!("[dictate] emit error: {error}");
+    }
+}
+
+fn hotkey(
+    app: &AppHandle,
+    shortcut: &tauri_plugin_global_shortcut::Shortcut,
+    event: ShortcutState,
+) {
+    let state = app.state::<Mutex<Runtime>>();
+    let Ok(mut runtime) = state.lock() else {
+        return;
+    };
+    if runtime.capturing_shortcut || runtime.settings.chord().ok().as_ref() != Some(shortcut) {
+        return;
+    }
+    let next = shortcut_transition(runtime.settings.shortcut_mode, runtime.phase, event);
+    if next == runtime.phase {
+        return;
+    }
+    if next == Phase::Recording {
+        let result = match runtime.settings.microphone.clone() {
+            Some(device) => audio::start_device(Some(device)),
+            None => audio::start(),
+        };
+        if let Err(error) = result {
+            report_error(app, &error);
+            return;
+        }
+        runtime.phase = Phase::Recording;
+        surface::set_phase(app, "recording");
+        if let Some(window) = app.get_webview_window("main")
+            && let Err(error) = window.show()
+        {
+            report_error(app, &error.to_string());
+        }
+    } else {
+        let released = Instant::now();
+        if let Some(window) = app.get_webview_window("main")
+            && let Err(error) = window.hide()
+        {
+            report_error(app, &error.to_string());
+        }
+        match audio::stop() {
+            Ok(samples) => {
+                runtime.phase = Phase::Transcribing;
+                surface::set_phase(app, "transcribing");
+                let app = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let result = dictation_text(&samples).and_then(|text| {
+                        if !text.is_empty() {
+                            insert::paste(&app, &text)?;
+                        }
+                        Ok(())
+                    });
+                    if let Err(error) = result {
+                        report_error(&app, &error);
+                    }
+                    println!(
+                        "[dictate] release_to_complete_ms={}",
+                        released.elapsed().as_millis()
+                    );
+                    if let Ok(mut runtime) = app.state::<Mutex<Runtime>>().lock() {
+                        runtime.phase = Phase::Idle;
+                    }
+                    surface::set_phase(&app, "idle");
+                });
+            }
+            Err(error) => {
+                runtime.phase = Phase::Idle;
+                surface::set_phase(app, "idle");
+                report_error(app, &error);
+            }
+        }
+    }
+}
+
+fn shortcut_transition(mode: ShortcutMode, phase: Phase, event: ShortcutState) -> Phase {
+    match (mode, phase, event) {
+        (_, Phase::Idle, ShortcutState::Pressed) => Phase::Recording,
+        (ShortcutMode::Hold, Phase::Recording, ShortcutState::Released)
+        | (ShortcutMode::Toggle, Phase::Recording, ShortcutState::Pressed) => Phase::Transcribing,
+        _ => phase,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, shortcut, event| {
-                    let state = event.state();
-                    println!("[hotkey] {shortcut:?} state={state:?}");
-
-                    if let Some(window) = app.get_webview_window("main") {
-                        // Showing and hiding is the whole session-1 experiment:
-                        // if the overlay never disappears, you are only getting
-                        // Pressed and the interaction has to be a toggle.
-                        match state {
-                            ShortcutState::Pressed => {
-                                let _ = window.show();
-                                // Surfaced, not swallowed: while the stages are
-                                // stubs this line is how you know the handler
-                                // ran at all.
-                                if let Err(error) = record_start() {
-                                    println!("[hotkey] record_start: {error}");
-                                }
-                            }
-                            ShortcutState::Released => {
-                                let released = Instant::now();
-                                let _ = window.hide();
-                                // Release drains the buffer; a later record_stop finds no recording.
-                                match audio::stop() {
-                                    Ok(samples) => {
-                                        println!(
-                                            "[hotkey] {} samples ({:.2}s @ 16 kHz)",
-                                            samples.len(),
-                                            samples.len() as f32 / 16_000.0
-                                        );
-                                        let app = app.clone();
-                                        tauri::async_runtime::spawn_blocking(move || {
-                                            match dictation_text(&samples) {
-                                                Ok(text) if text.is_empty() => {},
-                                                Ok(text) => {
-                                                    println!("[transcribe] release_to_text_ms={} text={text:?}", released.elapsed().as_millis());
-                                                    match insert::paste(&app, &text) {
-                                                    Ok(()) => println!(
-                                                        "[insert] release_to_paste_complete_ms={}",
-                                                        released.elapsed().as_millis()
-                                                    ),
-                                                    Err(error) => eprintln!("[insert] {error}"),
-                                                    }
-                                                },
-                                                Err(error) => eprintln!("[transcribe] {error}"),
-                                            }
-                                        });
-                                    }
-                                    Err(error) => eprintln!("[hotkey] audio::stop: {error}"),
-                                }
-                            }
-                        }
-                    }
-                })
+                .with_handler(|app, shortcut, event| hotkey(app, shortcut, event.state()))
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
             pipeline_status,
             record_start,
             record_stop,
-            finish_dictation
+            finish_dictation,
+            get_settings,
+            save_settings,
+            capture_shortcut,
+            input_devices,
+            microphone_test,
+            microphone_level
         ])
         .setup(|app| {
-            // Accessory keeps the process out of the Dock and prevents the app
-            // becoming active, which is the difference between text landing in
-            // the field you were typing in and landing in your own overlay.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-
-            app.global_shortcut()
-                .register(chord())
-                .expect("failed to register the dictation chord");
-
+            let settings = settings::load(&app.path().app_data_dir()?.join("settings.json"))?;
+            app.global_shortcut().register(settings.chord()?)?;
+            app.manage(Mutex::new(Runtime {
+                settings: settings.clone(),
+                phase: Phase::Idle,
+                capturing_shortcut: false,
+            }));
+            surface::setup(app, &settings)?;
+            if !std::env::args().any(|arg| arg == "--autostart")
+                && let Some(window) = app.get_webview_window("settings")
+            {
+                window.show()?;
+                window.set_focus()?;
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "settings"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
+                api.prevent_close();
+                if let Err(error) = capture_shortcut(window.app_handle().clone(), false) {
+                    eprintln!("[settings] {error}");
+                }
+                if let Err(error) = window.hide() {
+                    eprintln!("[settings] {error}");
+                }
+                if let Err(error) = audio::monitor_stop() {
+                    eprintln!("[settings] {error}");
+                }
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -183,6 +385,50 @@ pub fn run() {
 #[cfg(test)]
 mod take_tests {
     use super::*;
+
+    #[test]
+    fn toggle_ignores_release_and_processing_rejects_new_takes() {
+        assert_eq!(
+            shortcut_transition(ShortcutMode::Toggle, Phase::Idle, ShortcutState::Pressed),
+            Phase::Recording
+        );
+        assert_eq!(
+            shortcut_transition(
+                ShortcutMode::Toggle,
+                Phase::Recording,
+                ShortcutState::Released
+            ),
+            Phase::Recording
+        );
+        assert_eq!(
+            shortcut_transition(
+                ShortcutMode::Toggle,
+                Phase::Recording,
+                ShortcutState::Pressed
+            ),
+            Phase::Transcribing
+        );
+        assert_eq!(
+            shortcut_transition(ShortcutMode::Hold, Phase::Recording, ShortcutState::Pressed),
+            Phase::Recording
+        );
+        assert_eq!(
+            shortcut_transition(
+                ShortcutMode::Hold,
+                Phase::Recording,
+                ShortcutState::Released
+            ),
+            Phase::Transcribing
+        );
+        for mode in [ShortcutMode::Hold, ShortcutMode::Toggle] {
+            for event in [ShortcutState::Pressed, ShortcutState::Released] {
+                assert_eq!(
+                    shortcut_transition(mode, Phase::Transcribing, event),
+                    Phase::Transcribing
+                );
+            }
+        }
+    }
 
     #[test]
     fn silence_and_short_speech_are_skipped() {
