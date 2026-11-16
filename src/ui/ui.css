@@ -483,3 +483,22 @@ html[data-glass="true"] .astryx-side-nav {
     transparent
   );
 }
+
+/* Which History entry the detail belongs to. The library's own selected row
+   paints --color-accent-muted, which is the card's own colour in Rosé Pine dark
+   and about 1.1:1 against the card everywhere else, so a row in use read as an
+   ordinary row. A 2px accent bar on the leading edge marks it in every theme
+   without tinting the row or moving anything. */
+.ui-history-row-current,
+.ui-history-accordion-current button[aria-expanded="true"] {
+  position: relative;
+}
+.ui-history-row-current::before,
+.ui-history-accordion-current button[aria-expanded="true"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--spacing-0-5);
+  background: var(--color-accent);
+}

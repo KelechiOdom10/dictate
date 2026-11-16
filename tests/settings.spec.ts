@@ -251,6 +251,8 @@ async function openSettings(
               emit("update-state", update);
               return update;
             }
+            if (command === "storage_usage")
+              return { historyBytes: 18_432_000, annotationBytes: 3_145_728 };
             if (command === "list_history")
               return { entries: history, hasMore: false };
             if (command === "list_annotations") return annotations;
@@ -2372,3 +2374,109 @@ for (const view of ["Dictations", "Annotations"] as const)
     await expect(detail).toContainText(fourth);
     await expect(detail.getByRole("heading", { name: title })).toBeVisible();
   });
+
+/** What a History row paints before its content: the leading edge of selection. */
+const edgeMarker = (row: Locator) =>
+  row.evaluate((element) => {
+    const bar = getComputedStyle(element, "::before");
+    return { width: bar.width, colour: bar.backgroundColor };
+  });
+
+/** The History list is a List in two panes and an accordion group when narrow. */
+const historyList = (page: Page, view: string, width: number) =>
+  width >= 900
+    ? page.getByRole("list", { name: view, exact: true })
+    : page.getByRole("group", { name: view, exact: true });
+
+const rowBoxes = (rows: Locator) =>
+  rows.evaluateAll((items) =>
+    items.map((item) => {
+      const box = item.getBoundingClientRect();
+      return [box.x, box.y, box.width, box.height].map(Math.round).join();
+    }),
+  );
+
+test("the entry the detail belongs to is marked in both History layouts", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1100, height: 580 });
+  await openSettings(page, { history: takes, annotations: sessions });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  const list = historyList(page, "Dictations", 1100);
+  const rows = list.locator("li");
+  // The library's own selected row is reported, and only one row carries it.
+  await expect(rows.first()).toHaveAttribute("aria-current", "true");
+  await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
+  const picked = await edgeMarker(rows.first());
+  expect(picked.width).toBe("2px");
+  expect(picked.colour).not.toBe("rgba(0, 0, 0, 0)");
+  expect((await edgeMarker(rows.nth(2))).width).not.toBe("2px");
+  // Choosing another entry moves the marker and moves nothing else.
+  const before = await rowBoxes(rows);
+  await rows.nth(2).getByRole("button").click();
+  await expect(rows.nth(2)).toHaveAttribute("aria-current", "true");
+  await expect(rows.first()).not.toHaveAttribute("aria-current", "true");
+  expect(await rowBoxes(rows)).toEqual(before);
+  // The narrow layout marks the row it has open, and keeps the same choice.
+  await page.setViewportSize({ width: 640, height: 580 });
+  const third = page.getByRole("button", { name: /^Take 3:/ });
+  await expect(third).toHaveAttribute("aria-expanded", "true");
+  expect((await edgeMarker(third)).width).toBe("2px");
+  expect(
+    (await edgeMarker(page.getByRole("button", { name: /^Take 5:/ }))).width,
+  ).not.toBe("2px");
+  await page.getByRole("button", { name: /^Take 5:/ }).click();
+  await expect(third).toHaveAttribute("aria-expanded", "false");
+  expect((await edgeMarker(third)).width).not.toBe("2px");
+  expect(
+    (await edgeMarker(page.getByRole("button", { name: /^Take 5:/ }))).width,
+  ).toBe("2px");
+});
+
+for (const width of [640, 1100]) {
+  for (const view of ["Dictations", "Annotations"] as const) {
+    test(`at ${width}px ${view} says what it keeps on disk above the list`, async ({
+      page,
+    }) => {
+      await openHistory(page, width, view);
+      const list = historyList(page, view, width);
+      const line = page.getByText(
+        new RegExp(
+          view === "Dictations"
+            ? "^17\\.6 MB on this Mac"
+            : "^3\\.0 MB on this Mac · 14 sessions$",
+        ),
+      );
+      await expect(line).toHaveCount(1);
+      await expect(line).toBeVisible();
+      // Above the list, and on screen before anything is scrolled.
+      const [lineBox, listBox] = [
+        (await line.boundingBox())!,
+        (await list.boundingBox())!,
+      ];
+      expect(lineBox.y + lineBox.height).toBeLessThanOrEqual(listBox.y + 1);
+      expect(lineBox.y + lineBox.height).toBeLessThanOrEqual(580);
+      expect(
+        await page.evaluate(() => document.scrollingElement!.scrollTop),
+      ).toBe(0);
+      // One quiet line of type: no card, no rule, no background of its own.
+      const painted = await line.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          background: style.backgroundColor,
+          border: style.borderBottomWidth,
+          height: element.getBoundingClientRect().height,
+        };
+      });
+      expect(painted.background).toBe("rgba(0, 0, 0, 0)");
+      expect(painted.border).toBe("0px");
+      expect(painted.height).toBeLessThanOrEqual(24);
+      // The retention control lives on that line, not below the list.
+      if (view === "Dictations")
+        await expect(
+          page.getByRole("combobox", { name: "Keep history for" }),
+        ).toBeVisible();
+    });
+  }
+}

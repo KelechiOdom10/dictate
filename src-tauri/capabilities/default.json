@@ -40,6 +40,7 @@
     "allow-list-history",
     "allow-delete-annotation",
     "allow-delete-history",
+    "allow-storage-usage",
     "allow-list-models",
     "allow-download-model",
     "allow-cancel-download",

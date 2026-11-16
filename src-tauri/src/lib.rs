@@ -39,6 +39,7 @@ mod overlay;
 pub mod problem;
 mod settings;
 mod sound;
+mod storage;
 mod surface;
 mod update;
 
@@ -1800,6 +1801,22 @@ fn save_annotation(
     Ok(packaged)
 }
 
+/// What the two History tabs keep on this Mac, for the line under their
+/// toolbar. Counted on demand rather than cached: a folder deleted in Finder
+/// should stop being counted the next time the page is opened.
+#[tauri::command]
+fn storage_usage(app: AppHandle) -> Result<storage::StorageUsage, String> {
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No app data folder: {e}"))?;
+    let annotations = annotations_dir(&app)?;
+    Ok(storage::StorageUsage {
+        history_bytes: storage::bytes_in(&data.join("history.sqlite3")),
+        annotation_bytes: storage::bytes_in(&annotations),
+    })
+}
+
 fn annotations_dir(app: &AppHandle) -> Result<PathBuf, Problem> {
     Ok(app
         .path()
@@ -1987,6 +2004,7 @@ pub fn run() {
             report_settings_refresh_error,
             list_history,
             delete_history,
+            storage_usage,
             list_models,
             download_model,
             cancel_download,
