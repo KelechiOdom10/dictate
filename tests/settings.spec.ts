@@ -143,6 +143,7 @@ async function openSettings(
         annotateShortcut: "Alt+Shift+KeyA",
         annotateEnabled: true,
         annotateShowInRecordings: false,
+        glass: false,
         ...stored,
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
@@ -458,6 +459,7 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           annotateShortcut: "Alt+Shift+KeyA",
           annotateEnabled: true,
           annotateShowInRecordings: false,
+          glass: false,
         },
       },
       "*",
@@ -749,6 +751,7 @@ test("overlay applies appearance events live, including System changes", async (
                 annotateShortcut: "Alt+Shift+KeyA",
                 annotateEnabled: true,
                 annotateShowInRecordings: false,
+                glass: false,
               },
             },
             "*",
@@ -994,6 +997,7 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 annotateShortcut: "Alt+Shift+KeyA",
                 annotateEnabled: true,
                 annotateShowInRecordings: false,
+                glass: false,
               },
             },
             "*",
@@ -1664,6 +1668,52 @@ test("the sidebar sits a step behind the page in every theme and mode", async ({
       await tab.close();
     }
   }
+});
+
+test("the translucent window steps the surfaces aside only while it is on", async ({
+  page,
+}) => {
+  await openSettings(page);
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  const surfaces = () =>
+    page.evaluate(() => {
+      const pick = (selector: string) => {
+        const el = document.querySelector(selector);
+        return el ? getComputedStyle(el).backgroundColor : "absent";
+      };
+      return {
+        glass: document.documentElement.dataset.glass ?? null,
+        shell: pick(".astryx-app-shell"),
+        main: pick(".astryx-app-shell [role=main]"),
+        nav: pick(".astryx-side-nav"),
+        card: pick(".astryx-card"),
+      };
+    });
+  const off = await surfaces();
+  expect(off.glass).toBeNull();
+  expect(off.shell).not.toBe("rgba(0, 0, 0, 0)");
+  const toggle = page.getByRole("switch", { name: "Translucent window" });
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+  const on = await surfaces();
+  expect(on.glass).toBe("true");
+  // The window's own backdrop steps aside for the material macOS draws there,
+  // and the page and sidebar keep most of their surface.
+  expect(on.shell).toBe("rgba(0, 0, 0, 0)");
+  expect(on.main).toMatch(/\/ 0\.88\)$/);
+  expect(on.nav).toMatch(/\/ 0\.92\)$/);
+  // Cards stay opaque, so text keeps the contrast it was measured at.
+  expect(on.card).toBe(off.card);
+  await page.getByRole("button", { name: "About", exact: true }).click();
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  await expect(
+    page.getByRole("switch", { name: "Translucent window" }),
+  ).toBeChecked();
+  expect((await surfaces()).glass).toBe("true");
+  await page.getByRole("switch", { name: "Translucent window" }).click();
+  await expect.poll(async () => (await surfaces()).glass).toBeNull();
+  expect((await surfaces()).shell).toBe(off.shell);
 });
 
 test("the model metrics stack one metric per line", async ({ page }) => {

@@ -132,6 +132,10 @@ pub struct Settings {
     /// On: the recording also shows dictate's ink and floating bar.
     #[serde(default)]
     pub annotate_show_in_recordings: bool,
+    /// On: the settings window takes the system's own material behind the
+    /// page. Off keeps the opaque window every earlier build had.
+    #[serde(default)]
+    pub glass: bool,
 }
 
 fn enabled() -> bool {
@@ -186,6 +190,7 @@ impl Default for Settings {
             annotate_shortcut: default_annotate_shortcut(),
             annotate_enabled: true,
             annotate_show_in_recordings: false,
+            glass: false,
         }
     }
 }
@@ -417,6 +422,7 @@ mod tests {
             mic_mode: MicMode::Warm,
             sound_feedback: true,
             debug_recordings: true,
+            glass: true,
             ..Settings::default()
         };
         save(&path, &settings).unwrap();

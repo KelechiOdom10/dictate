@@ -34,4 +34,9 @@ export type Settings = {
    * On: the recording also shows dictate's ink and floating bar.
    */
   annotateShowInRecordings: boolean;
+  /**
+   * On: the settings window takes the system's own material behind the
+   * page. Off keeps the opaque window every earlier build had.
+   */
+  glass: boolean;
 };
