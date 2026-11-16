@@ -1,7 +1,7 @@
 # The dictate design system
 
 The settings window uses Astryx 0.7.16 components over a customized Neutral
-theme: warm off-white light surfaces, Catppuccin Mocha-inspired dark surfaces,
+theme: warm off-white light surfaces, dark surfaces taken from the owner's Capy Catppuccin theme,
 Geist, and Ember primary actions and bright accents. Paper keeps ink actions.
 The recording overlay remains a separate, compact native-window presentation;
 Paper uses a warm red recording dot while its switches and level bars stay ink.
