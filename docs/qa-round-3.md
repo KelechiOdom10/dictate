@@ -59,11 +59,34 @@ theme when settings loading fails. This is regression evidence, not a native
 pass. The native log now records Settings show requests, webview readiness and
 show success/failure to make the next owner check diagnosable.
 
+The owner subsequently confirmed that Settings works at `d6192be`. That verifies
+visibility only, not the remaining native behavior below.
+
 The earlier wrapped-History screenshot deliberately injected a 140px maximum
 width and used an old saved-shortcut fixture. Normal History keeps both tabs
 on one row at the 720px default window width. The default fixture now matches
 Rust's new Annotate shortcut, ⌥⇧A; a separate test preserves an explicitly saved
 ⌥⇧S setting. Existing user shortcuts are not changed.
+
+## Tray restoration follow-up
+
+Tray refreshes now read the latest status and apply icon plus tooltip together
+on the main thread. A completion worker no longer waits for native tray setters
+while holding the take lock. Deferred-queue regressions cover the terminal
+status values used by normal/Finish completion, copied/skipped takes, and
+Discard, plus retained/cleared errors; these are renderer tests, not native
+pipeline tests. Streaming and batch decoding use the same completion renderer. The recorded native sample
+was idle, so the ordering hazards are code-backed findings, not proof that the
+owner's particular stuck icon was a deadlock.
+
+After restarting this checkout, the next focused native check is one successful
+take with the current model, then one Discard: confirm the activity icon returns
+to its baseline and the app remains responsive. If an error indicator remains,
+check its tooltip/Settings issue: an unresolved Screen Recording warning is
+intentionally retained until dismissed or resolved. New `[tray] refresh` log
+entries record the phase and whether an error remains, without recording text.
+Do not repeat the whole checklist just to test this backend change. The other
+native gates below remain unverified unless the owner separately confirms them.
 
 ## Manual verification
 
@@ -112,7 +135,7 @@ server. These commands have not been used to launch a native instance by the
 reviewer; port 1437 must be free, and Vite will fail rather than choose another:
 
 ```sh
-cd /Users/kelechiodom/.capy/worktrees/jam_01M7GEN019XF8W6HQQD5ADDRNJ/dictate-settings-visibility
+cd /Users/kelechiodom/.capy/worktrees/jam_01M7GEN019XF8W6HQQD5ADDRNJ/dictate-tray-restoration
 export PATH="$HOME/.nvm/versions/node/v24.22.2/bin:/opt/homebrew/bin:$PATH"
 source "$HOME/.cargo/env"
 export CARGO_TARGET_DIR="$HOME/Projects/dictate/target"
