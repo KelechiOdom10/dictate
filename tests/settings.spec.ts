@@ -684,6 +684,55 @@ test("overlay renders live level, resets its timer and keeps terminal states dis
   await expect(page.getByRole("status")).toContainText("Hold the shortcut");
 });
 
+test("overlay keeps the finished pill through its exit and starts the next take clean", async ({
+  page,
+}) => {
+  await openSettings(page, { overlay: true });
+  const send = async (event: string, payload: unknown) => {
+    await page.evaluate(
+      ({ event, payload }) =>
+        window.postMessage({ type: "dictate-test", event, payload }, "*"),
+      { event, payload },
+    );
+  };
+  const resizes = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __commands: string[] }).__commands.filter(
+          (command) => command === "resize_overlay",
+        ).length,
+    );
+  const status = page.getByRole("status");
+  await send("dictation-state", { phase: "recording", error: null });
+  await send("overlay-showing", null);
+  await expect(page.locator(".ui-timer")).toBeVisible();
+  await send("dictation-state", { phase: "copied", error: null });
+  await expect(status).toHaveText("Copied — paste it anywhere");
+  await page.waitForTimeout(300);
+  const settled = await resizes();
+  await send("dictation-state", { phase: "idle", error: null });
+  await page.waitForTimeout(300);
+  await expect(status).toHaveText("Copied — paste it anywhere");
+  await expect(page.locator(".overlay kbd")).toHaveCount(0);
+  await send("overlay-hiding", null);
+  await expect(page.locator(".overlay-capsule")).toHaveClass(/overlay-hiding/);
+  await page.waitForTimeout(300);
+  await expect(status).toHaveText("Copied — paste it anywhere");
+  expect(await resizes()).toBe(settled);
+  await send("dictation-state", { phase: "recording", error: null });
+  await send("overlay-showing", null);
+  await expect(status).toHaveText("Recording");
+  await expect(page.locator(".ui-timer")).toHaveText("00:00");
+  await expect(page.locator(".overlay-capsule")).not.toHaveClass(
+    /overlay-hiding/,
+  );
+  await send("dictation-state", { phase: "done", error: null });
+  await send("dictation-state", { phase: "idle", error: null });
+  await send("overlay-showing", null);
+  await expect(status).toContainText("Listening");
+  await expect(page.locator(".overlay kbd").first()).toBeVisible();
+});
+
 test("overlay shows an Annotate session, its blocked-dictation notice and packaging", async ({
   page,
 }) => {
