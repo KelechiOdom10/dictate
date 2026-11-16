@@ -144,7 +144,7 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             models.append(&CheckMenuItem::with_id(
                 app,
                 format!("model-{index}"),
-                info.name,
+                crate::models::label(info),
                 true,
                 active == Some(info.id),
                 None::<&str>,

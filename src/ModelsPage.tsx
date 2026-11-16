@@ -123,6 +123,7 @@ export default function ModelsPage() {
   const installed = models.data.filter(
     (model) => model.state.kind === "installed",
   );
+  const recommended = models.data.find((model) => model.recommended);
   const activeMissing =
     !models.data.some((model) => model.state.kind === "preparing") &&
     models.data.some(
@@ -135,7 +136,7 @@ export default function ModelsPage() {
       {activeMissing && (
         <p className="models-hint" role="status">
           {installed.length === 0
-            ? "Download a model to start dictating. Small English is a good first choice."
+            ? `Download a model to start dictating. ${recommended?.name ?? "The recommended model"} is a good first choice.`
             : "Your chosen model isn’t downloaded. Use one of yours, or download it again."}
         </p>
       )}
@@ -144,7 +145,10 @@ export default function ModelsPage() {
           {error}
         </p>
       )}
-      {models.data.map((model) => (
+      {[
+        ...models.data.filter((model) => model.recommended),
+        ...models.data.filter((model) => !model.recommended),
+      ].map((model) => (
         <ModelCard
           key={model.id}
           name={model.name}

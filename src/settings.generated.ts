@@ -33,4 +33,9 @@ export type Settings = {
    * On: the recording also shows dictate's ink and floating bar.
    */
   annotateShowInRecordings: boolean;
+  /**
+   * On: Settings asks once whether to download Parakeet. Set for people
+   * who were on a Whisper model before Parakeet became the default.
+   */
+  offerParakeet: boolean;
 };

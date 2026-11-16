@@ -19,7 +19,7 @@ import {
   SettingsGroup,
 } from "./ui";
 import ShortcutRecorder from "./ShortcutRecorder";
-import { readModels, speechModelSchema } from "./models";
+import { modelLabel, readModels, speechModelSchema } from "./models";
 import MicrophoneTest from "./MicrophoneTest";
 
 export default function General({
@@ -212,7 +212,7 @@ export default function General({
               )}
               {installed.map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.name}
+                  {modelLabel(model)}
                 </option>
               ))}
             </Select>

@@ -26,6 +26,7 @@ export const settingsSchema = z
     annotateShortcut: z.string(),
     annotateEnabled: z.boolean(),
     annotateShowInRecordings: z.boolean(),
+    offerParakeet: z.boolean(),
   })
   .strict() satisfies z.ZodType<Settings>;
 
