@@ -627,10 +627,13 @@ kbd.space {
   justify-items: center;
 }
 
+figure.shot {
+  width: 100%;
+}
+
 .shot img {
   display: block;
-  width: 100%;
-  max-width: 60rem;
+  width: 90%;
   height: auto;
   border-radius: 12px;
   box-shadow:
@@ -771,7 +774,7 @@ kbd.space {
 
 .take img {
   grid-area: 1 / 1;
-  width: min(100%, 34rem);
+  width: 90%;
   height: auto;
   border-radius: 12px;
   box-shadow:
@@ -811,8 +814,8 @@ kbd.space {
 
 .layer-quote {
   position: absolute;
-  left: max(0rem, calc(50% - 31rem));
-  bottom: 3rem;
+  left: 0;
+  bottom: 4rem;
   width: 17rem;
   padding: 1rem 1.125rem;
   border-radius: 14px;
@@ -854,7 +857,7 @@ kbd.space {
 
 .layer-code {
   position: absolute;
-  right: max(0rem, calc(50% - 31rem));
+  right: 0;
   top: 4.5rem;
   border-radius: 14px;
   background: oklch(0.2 0.005 75);
@@ -905,6 +908,11 @@ kbd.space {
   .take {
     padding-block: 0;
     gap: 1rem;
+  }
+
+  .take img,
+  .shot img {
+    width: 100%;
   }
 
   .take .layer-quote,

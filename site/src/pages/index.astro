@@ -7,9 +7,9 @@ import "../styles/site.css";
 
 const requirement = `Apple silicon, macOS 15 or later, ${release.size}`;
 
-const shotSizes = "(min-width: 64rem) 60rem, calc(100vw - 2.5rem)";
+const shotSizes = "(min-width: 56rem) 960px, calc(100vw - 2.5rem)";
 
-const takeSizes = "(min-width: 40rem) 34rem, calc(100vw - 2.5rem)";
+const takeSizes = "(min-width: 56rem) 960px, calc(100vw - 2.5rem)";
 
 const steps = [
   { id: "record", name: "Record" },
@@ -203,10 +203,10 @@ const settingsAlt =
           <img
             class="layer layer-clean"
             src="/app/take-clean.webp"
-            srcset="/app/take-clean-640.webp 640w, /app/take-clean.webp 1200w"
+            srcset="/app/take-clean-960.webp 960w, /app/take-clean.webp 1429w"
             sizes={takeSizes}
-            width="1200"
-            height="953"
+            width="1429"
+            height="1135"
             alt="T3 Code's Appearance settings during a real take. The Annotate bar at the top reads 00:45."
             loading="lazy"
             decoding="async"
@@ -214,10 +214,10 @@ const settingsAlt =
           <img
             class="layer layer-ink"
             src="/app/take-ink.webp"
-            srcset="/app/take-ink-640.webp 640w, /app/take-ink.webp 1200w"
+            srcset="/app/take-ink-960.webp 960w, /app/take-ink.webp 1429w"
             sizes={takeSizes}
-            width="1200"
-            height="953"
+            width="1429"
+            height="1135"
             alt="The same screen at 00:53, with a red ink loop drawn around the color schemes and themes."
             loading="lazy"
             decoding="async"
@@ -327,29 +327,36 @@ const settingsAlt =
 
       let loop = 0;
       let seen = false;
-      const stopLoop = () => {
-        clearInterval(loop);
-        loop = 0;
-        seen = false;
-        stopped = true;
-        observer?.disconnect();
-      };
+      let paused = false;
       let stopped = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const advance = () => {
         const at = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
         select(tabs[(at + 1) % tabs.length]);
       };
+      const sync = () => {
+        clearInterval(loop);
+        loop = !stopped && seen && !paused ? window.setInterval(advance, 4000) : 0;
+      };
+      const stopLoop = () => {
+        stopped = true;
+        observer?.disconnect();
+        sync();
+      };
       const observer = stopped
         ? undefined
         : new IntersectionObserver(([entry]) => {
-            if (stopped) return;
             seen = entry.isIntersecting;
-            clearInterval(loop);
-            loop = seen ? window.setInterval(advance, 4000) : 0;
-          }, { threshold: 0.5 });
-      if (observer) observer.observe(annotate);
-      for (const part of [pills, take]) part.addEventListener("pointerenter", stopLoop);
-      pills.addEventListener("focusin", stopLoop);
+            sync();
+          }, { threshold: 0.25 });
+      observer?.observe(annotate);
+      const pause = (on: boolean) => () => {
+        paused = on;
+        sync();
+      };
+      pills.addEventListener("pointermove", pause(true));
+      pills.addEventListener("pointerleave", pause(false));
+      pills.addEventListener("focusin", pause(true));
+      pills.addEventListener("focusout", pause(false));
 
       for (const tab of tabs) {
         tab.addEventListener("click", () => {
@@ -370,6 +377,7 @@ const settingsAlt =
                     : -1;
           if (to < 0) return;
           event.preventDefault();
+          stopLoop();
           select(tabs[to]);
           tabs[to].focus();
         });
