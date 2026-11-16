@@ -29,6 +29,9 @@ html {
 .astryx-button.ui-quiet-focus:focus-visible {
   outline: none;
 }
+.ui-quiet-row {
+  --focus-outline-width: 0px;
+}
 /* Both labels share one grid cell, so the button is always as wide as the
    longer one and never changes width when the test starts. */
 .ui-mic-stack {
@@ -40,11 +43,24 @@ html {
 .ui-mic-ghost {
   visibility: hidden;
 }
-/* The capture state shows a dot where the keys were, inside the button's own
-   size, so nothing is added to the row and no content can wrap. */
-.ui-capture-wait {
+/* The resting and capturing contents share one grid cell, with invisible
+   copies of both, so the button is always as wide as the wider of them and a
+   capture cannot move the row. */
+.ui-capture-stack {
   display: grid;
   place-items: center;
+}
+.ui-capture-stack > * {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.ui-capture-ghost {
+  visibility: hidden;
+}
+.ui-capture-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
 }
 /* A keycap has to read against the button it sits in, and those buttons are
    the neutral fill. Mixing the theme's text colour into it steps the cap away

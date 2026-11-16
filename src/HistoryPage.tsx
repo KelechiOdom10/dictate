@@ -502,7 +502,8 @@ function DictationDetail({
         <>
           <IconButton
             variant="ghost"
-            label={copied ? "Copied" : "Copy text"}
+            label="Copy text"
+            tooltip="Copy the text"
             isDisabled={!entry.text}
             icon={
               copied ? (
@@ -516,6 +517,7 @@ function DictationDetail({
           <IconButton
             variant="ghost"
             label="Delete dictation"
+            tooltip="Delete this dictation"
             isDisabled={deleting || confirming}
             icon={<Trash2 size={16} aria-hidden="true" />}
             onClick={() => setConfirming(true)}
@@ -696,6 +698,41 @@ function AnnotationDetail({
     <Detail
       title="Annotation"
       subtitle={`${relativeTime(started, now)} · ${fullDate.format(started)}`}
+      actions={
+        <>
+          <IconButton
+            variant="ghost"
+            label="Copy again"
+            tooltip="Copy the summary"
+            icon={
+              copied ? (
+                <Check size={16} aria-hidden="true" />
+              ) : (
+                <Copy size={16} aria-hidden="true" />
+              )
+            }
+            onClick={() => void copy()}
+          />
+          <IconButton
+            variant="ghost"
+            label="Reveal in Finder"
+            tooltip="Show the session folder"
+            icon={<FolderOpen size={16} aria-hidden="true" />}
+            onClick={() => void reveal()}
+          />
+          <IconButton
+            variant="ghost"
+            label="Delete annotation"
+            tooltip="Delete this session"
+            isDisabled={deleting || confirming}
+            icon={<Trash2 size={16} aria-hidden="true" />}
+            onClick={() => setConfirming(true)}
+          />
+          <VisuallyHidden role="status" aria-live="polite">
+            {copied ? "Summary copied to clipboard" : ""}
+          </VisuallyHidden>
+        </>
+      }
       metadata={[
         { label: "Application", value: entry.app ?? "Unknown" },
         { label: "Length", value: clock(entry.durationMs) },
@@ -731,40 +768,6 @@ function AnnotationDetail({
           Nothing was said in this session.
         </Text>
       )}
-      <HStack gap={2} vAlign="center">
-        <Button
-          size="sm"
-          label="Copy again"
-          icon={
-            copied ? (
-              <Check size={16} aria-hidden="true" />
-            ) : (
-              <Copy size={16} aria-hidden="true" />
-            )
-          }
-          onClick={() => void copy()}
-        />
-        <Button
-          size="sm"
-          variant="ghost"
-          label="Reveal in Finder"
-          icon={<FolderOpen size={16} aria-hidden="true" />}
-          onClick={() => void reveal()}
-        />
-        <Button
-          size="sm"
-          variant="ghost"
-          label="Delete annotation"
-          icon={<Trash2 size={16} aria-hidden="true" />}
-          isDisabled={deleting || confirming}
-          onClick={() => setConfirming(true)}
-        >
-          Delete
-        </Button>
-        <VisuallyHidden role="status" aria-live="polite">
-          {copied ? "Summary copied to clipboard" : ""}
-        </VisuallyHidden>
-      </HStack>
       <AlertDialog
         isOpen={confirming}
         onOpenChange={setConfirming}

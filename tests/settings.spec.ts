@@ -362,16 +362,25 @@ for (const colorScheme of ["light", "dark"] as const) {
       path: `target/settings-${colorScheme}-browser.png`,
     });
     await page.setViewportSize({ width: 390, height: 844 });
+    // Below the window's own 640 floor the shell hands navigation to a drawer,
+    // so the narrowest layout is read as a drawer rather than the sidebar.
+    const openNav = page.getByRole("button", { name: "Open navigation" });
+    await expect(openNav).toBeVisible();
+    await openNav.click();
     await expect(
       page.getByRole("button", { name: "General", exact: true }),
     ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(
+      page.getByRole("button", { name: "General", exact: true }),
+    ).toBeHidden();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    await page.getByRole("button", { name: "History", exact: true }).focus();
-    await page.keyboard.press("Enter");
+    await openNav.click();
+    await page.getByRole("button", { name: "History", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "History", exact: true }),
     ).toBeVisible();
@@ -1263,24 +1272,32 @@ for (const width of [720, 560, 390])
     const recorder = page.getByRole("button", {
       name: /^Shortcut,/,
     });
-    await expect(recorder.locator("kbd")).toHaveText(["⌥", "⇧", "SPACE"]);
+    // The capture state keeps an invisible copy of its own content so the
+    // button cannot resize, so only the keys that paint are read.
+    await expect(recorder.locator("kbd:visible")).toHaveText([
+      "⌥",
+      "⇧",
+      "SPACE",
+    ]);
     const clipped = await recorder.evaluate((button) =>
-      [...button.querySelectorAll("kbd")].flatMap((kbd) => {
-        const key = kbd.getBoundingClientRect();
-        const hidden: string[] = [];
-        for (let el = kbd.parentElement; el; el = el.parentElement) {
-          if (getComputedStyle(el).overflowX === "visible") continue;
-          const box = el.getBoundingClientRect();
-          if (key.left < box.left - 0.5 || key.right > box.right + 0.5)
-            hidden.push(
-              `${kbd.textContent} clipped by ${el.tagName}.${el.className}`,
-            );
-        }
-        const control = button.getBoundingClientRect();
-        if (key.left < control.left - 0.5 || key.right > control.right + 0.5)
-          hidden.push(`${kbd.textContent} outside the recorder`);
-        return hidden;
-      }),
+      [...button.querySelectorAll("kbd")]
+        .filter((kbd) => kbd.checkVisibility())
+        .flatMap((kbd) => {
+          const key = kbd.getBoundingClientRect();
+          const hidden: string[] = [];
+          for (let el = kbd.parentElement; el; el = el.parentElement) {
+            if (getComputedStyle(el).overflowX === "visible") continue;
+            const box = el.getBoundingClientRect();
+            if (key.left < box.left - 0.5 || key.right > box.right + 0.5)
+              hidden.push(
+                `${kbd.textContent} clipped by ${el.tagName}.${el.className}`,
+              );
+          }
+          const control = button.getBoundingClientRect();
+          if (key.left < control.left - 0.5 || key.right > control.right + 0.5)
+            hidden.push(`${kbd.textContent} outside the recorder`);
+          return hidden;
+        }),
     );
     expect(clipped).toEqual([]);
   });
@@ -1791,10 +1808,14 @@ test("a shortcut capture adds nothing to the row and keeps the button its size",
   const restRow = await rowOf(recorder);
   await recorder.click();
   await expect(recorder).toHaveAccessibleName(/Press shortcut Esc to cancel/);
-  await expect(recorder).not.toHaveText(/Press shortcut/);
+  await expect(recorder).toHaveText(/Press shortcut/);
   expect(await box()).toEqual(restBox);
   expect(await rowOf(recorder)).toEqual(restRow);
-  await expect(recorder.locator(".astryx-status-dot")).toBeVisible();
+  await expect(
+    recorder.locator(
+      ".ui-capture-live:not(.ui-capture-ghost) .astryx-status-dot",
+    ),
+  ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(recorder).toHaveAccessibleName(/^Shortcut, /);
   expect(await box()).toEqual(restBox);
@@ -1816,9 +1837,42 @@ test("cancelling leaves the row's own hairline and no focus line", async ({
   const recorder = page.getByRole("button", { name: /^Shortcut,/ });
   await recorder.click();
   await page.keyboard.press("Escape");
-  // Pointer still on the button: the thick 2px focus line must be gone.
+  // Measured cause: the button's own outline is none after Escape, and the
+  // 2px ring is painted on the ROW by the library's :has(:focus-visible) rule.
+  // So the row is what this reads, and the hairline under it must survive.
+  const ring = () =>
+    recorder.evaluate((el) => {
+      const row = el.closest("li")!;
+      const style = getComputedStyle(row);
+      return {
+        width: parseFloat(style.outlineWidth),
+        divider: style.borderBottomWidth,
+      };
+    });
+  await expect.poll(async () => (await ring()).width).toBe(0);
+  expect((await ring()).divider).toBe("1px");
   await expect
     .poll(() => recorder.evaluate((el) => getComputedStyle(el).outlineStyle))
+    .toBe("none");
+  // Quieting lasts only until the next key, so a keyboard user still gets a
+  // ring the moment they move.
+  await page.keyboard.press("Shift");
+  await expect
+    .poll(() =>
+      recorder.evaluate((el) =>
+        getComputedStyle(el.closest("li")!)
+          .getPropertyValue("--focus-outline-width")
+          .trim(),
+      ),
+    )
+    .not.toBe("0px");
+  await page.keyboard.press("Tab");
+  await expect
+    .poll(() =>
+      recorder.evaluate(
+        (el) => getComputedStyle(el.closest("li")!).outlineStyle,
+      ),
+    )
     .toBe("none");
 });
 

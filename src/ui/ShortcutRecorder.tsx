@@ -105,12 +105,6 @@ export function ShortcutRecorder({
   const [quiet, setQuiet] = useState(false);
   const wasRecording = useRef(recording);
   // The capture state adds a dot and dims the keys, so the button's own width
-  // is pinned to its resting width and the row cannot move.
-  const [resting, setResting] = useState<number>();
-  useEffect(() => {
-    if (recording || !button.current) return;
-    setResting(button.current.getBoundingClientRect().width);
-  }, [recording, value]);
   useEffect(() => {
     if (wasRecording.current && !recording) {
       setQuiet(true);
@@ -119,6 +113,11 @@ export function ShortcutRecorder({
     wasRecording.current = recording;
   }, [recording]);
   useEffect(() => {
+    // The library rings a row through `:has(:focus-visible)` at id-level
+    // specificity, so a focused, quiet button still lights up the row around
+    // it. Zeroing the token the ring is drawn with beats that cleanly.
+    const row = button.current?.closest("li");
+    row?.classList.toggle("ui-quiet-row", quiet);
     if (!quiet) return;
     const clear = () => setQuiet(false);
     window.addEventListener("keydown", clear, { once: true });
@@ -147,15 +146,31 @@ export function ShortcutRecorder({
       onBlur={() => {
         if (recording) onCancel();
       }}
-      style={recording && resting ? { inlineSize: resting } : undefined}
     >
-      {recording ? (
-        <span className="ui-capture-wait">
-          <StatusDot variant="error" label="Waiting for a shortcut" isPulsing />
+      {/* Both states sit in one grid cell with an invisible copy of the widest
+          one, so the button is its largest size from the start and the row
+          never moves when a capture begins. */}
+      <span className="ui-capture-stack">
+        <span aria-hidden="true" className="ui-capture-ghost">
+          <KeyboardShortcut value={value} />
         </span>
-      ) : (
-        <KeyboardShortcut value={value} />
-      )}
+        <span aria-hidden="true" className="ui-capture-ghost ui-capture-live">
+          <StatusDot variant="error" label="Waiting for a shortcut" isPulsing />
+          Press shortcut <Kbd className="ui-keycap" keys="escape" />
+        </span>
+        {recording ? (
+          <span className="ui-capture-live">
+            <StatusDot
+              variant="error"
+              label="Waiting for a shortcut"
+              isPulsing
+            />
+            Press shortcut <Kbd className="ui-keycap" keys="escape" />
+          </span>
+        ) : (
+          <KeyboardShortcut value={value} />
+        )}
+      </span>
     </Button>
   );
 }

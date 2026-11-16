@@ -112,7 +112,10 @@ export default function SettingsWindow({
       <AppShell
         variant="wash"
         contentPadding={6}
-        mobileNav={{ breakpoint: "none" }}
+        // The window's own floor is 640, so this only fires in a browser
+        // narrower than the app can be; without it the content column is
+        // squeezed under the sidebar and a control can outgrow it.
+        mobileNav={{ breakpoint: "sm" }}
         sideNav={
           <SideNav
             resizable={{
