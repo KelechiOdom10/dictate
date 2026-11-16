@@ -561,3 +561,48 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib transcribe::tests::parakee
 cargo test --manifest-path src-tauri/Cargo.toml --lib measure_parakeet_warm_latency -- --ignored --nocapture --test-threads=1
 TMPDIR="$PWD/target" cargo test --manifest-path src-tauri/Cargo.toml --lib parakeet_downloads_from_its_pinned_url -- --ignored --nocapture
 ```
+
+## Parakeet streaming while recording — 15 November 2026
+
+Same machine, build and model as above. With Parakeet active, capture sends the
+take as 16 kHz frames of about 100 ms (`audio::frames`) to a stream on the held
+model (`transcribe::LiveTake`). Release calls `LiveTake::finish`, which
+finalizes the stream. Takes under 4 s, a stream that fails, and a stream that
+heard a different length of audio than the take go through batch
+`transcribe` instead. Whisper models stay batch-only.
+
+Fixtures are generated with `say -v Samantha` and fed one 100 ms frame at a
+time by `paced_take` in `transcribe.rs`. `finish_ms` runs from `finish` to text,
+which is the transcription part of `release_to_text_ms`.
+
+| Check | Result | Target |
+|---|---:|---:|
+| Memo (19.2 s, 62 words), fed in real time: `finish_ms`, three runs | 128 / 130 / 109 ms | ≤ 150 ms |
+| Memo words, streamed vs batch | same 62 words | match |
+| Minute (memo three times, 57.7 s), fed at 4× real time: `finish_ms` | 92 / 86 / 100 ms | — |
+| Minute words | 186 of 186 | all words |
+| Fox (2.67 s) through `LiveTake` | batch path, exact text | correct |
+| Stream fed half the take | batch path, same text as `transcribe` | falls back |
+| Dropping a `LiveTake` mid-take | 0 ms, engine free for the next `transcribe` | discards |
+
+Batch on the memo took about 160 ms in Task A's numbers, so streaming saves
+little at 19 s. It matters more as takes grow: batch on 59 s was 536 ms in
+`docs/stt-engines.md`, streaming finishes in about 90 ms.
+
+Streaming and batch hear the same words but punctuate differently. On the memo,
+streaming wrote "…on the launch. We moved…" and "…upgrade the night before.
+Can we meet…", where batch ran the sentences together with commas.
+Streaming also dropped the final full stop after "Thanks" in one run. The word
+check ignores punctuation for that reason.
+
+Not measured yet: `release_to_text_ms` from physical takes, which needs the
+manual step in the PR. The app logs `[transcribe] streamed: finish_ms=…` or
+`[transcribe] batch: <reason>` for every take, next to the existing
+`[dictate] release_to_text_ms=…` line.
+
+Reproduce:
+
+```sh
+DICTATE_PARAKEET_MODEL=/path/to/parakeet-unified-en-0.6b-Q8_0.gguf \
+  cargo test --manifest-path src-tauri/Cargo.toml --lib transcribe::tests -- --nocapture --test-threads=1
+```
