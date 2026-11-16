@@ -42,3 +42,6 @@ models/
 /themes/**/*.css.d.ts
 /themes/**/*.js
 /themes/**/*.d.ts
+
+# Packaged DMGs
+/release/
