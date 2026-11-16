@@ -68,28 +68,34 @@ Swapping the shipped icon is one line: `SELECTED` in
 `src-tauri/src/app_icon.rs` draws the same artboard as draft A from the live
 palette and hands it to AppKit at launch and whenever Theme or Mode changes. The
 plate is the palette's `canvas` and the four outer bars its `text`; the middle
-bar — the live one — is the theme's own signature colour, taken from
-`--focus-outline-color` in `src/themes/<slug>/<slug>.css`, which is generated
-from the accent dial in `themes/<slug>/<slug>.settings.json`:
+bar — the live one — carries the theme's **identity colour**.
 
-| Theme | Light ring | Dark ring |
-|---|---|---|
-| Ember | `#5c544b` warm brown | `#ababab` |
-| Paper | `#1c1b19` ink | `#ababab` |
-| Capy | `#8372d3` | `#a99cf5` lavender |
-| Rosé Pine | `#966dc3` | `#c4a7e7` iris |
-| Neutral | `#71717a` | `#71717a` |
+The rule, in one sentence: **the icon paints the theme's identity colour, and
+the focus ring is only its contrast-safe variant, which is why the two coincide
+for four of the five themes.**
 
-That ring is what the Appearance picker describes, so each theme's icon is the
-theme's own colour rather than one chosen here. Two honest consequences: Ember's
-icon is warm brown rather than the ember orange, because the orange is the
-overlay's live-input colour and the ring is the brown; and Ember and Paper share
-grey `#ababab` in a dark appearance because that is what their rings are there.
-Paper's ring is its ink, so a Paper icon stays near-monochrome.
+| Theme | Light | Dark | Where it comes from |
+|---|---|---|---|
+| Ember | `#df5822` | `#f67d51` | the `live` role in `src/ui/palettes.generated.json` |
+| Paper | `#1c1b19` | `#ababab` | its focus ring, which is its ink |
+| Capy | `#8372d3` | `#a99cf5` | its focus ring, lavender |
+| Rosé Pine | `#966dc3` | `#c4a7e7` | its focus ring, iris |
+| Neutral | `#71717a` | `#71717a` | its focus ring, grey |
 
-`scripts/check-icon-colours.mjs` compares that table with the stylesheets and
-`pnpm release:mac` runs it first, so a re-dialled theme cannot ship beside a
-stale icon; `pnpm check:icon-colours` runs it alone.
+Ember is the exception and stays one. Its focus ring is warm brown `#5c544b`
+because a focus ring has to survive against surfaces, and draft A was chosen for
+five ink bars with the middle one in ember; painting the brown there would swap
+dictate's identity for a muted grey. Its icon therefore uses the same live orange
+the app already shows while recording. The other four themes have no separate
+identity colour, so their ring is it — and Paper's ring is its ink, so a Paper
+icon stays near-monochrome. `System` resolves through `NSApp.effectiveAppearance`;
+an OS appearance switch underneath it while the app runs does not redraw the icon.
+
+`scripts/check-icon-colours.mjs` holds each half of that table to its own source —
+Ember to the overlay palette's `live` role, the other four to their stylesheets —
+and `pnpm release:mac` runs it before it builds, so neither a re-dialled theme nor
+a re-tuned overlay can ship beside a stale icon. `pnpm check:icon-colours` runs
+it alone.
 
 It goes through AppKit rather than Tauri because Tauri 2 has no app-level icon
 setter: `tauri::AppHandle` exposes window, webview, tray and menu icons only.
@@ -214,7 +220,7 @@ Measured on 16 Nov 2026, macOS 27.0.1, Apple Silicon, rustc 1.99.1, with
 | rebuild after an icon or config change | — | 1 min 31 s |
 | `dictate.app` | 17.57 MiB (17,996 KiB on disk) | |
 | `Contents/MacOS/dictate` | 17.51 MiB (18,358,704 bytes) | |
-| `dictate-0.1.0-arm64.dmg` | 7.54 MiB (7,909,939 bytes) | |
+| `dictate-0.1.0-arm64.dmg` | 7.54 MiB (7,909,931 bytes) | |
 
 The app is arm64 only: `lipo -archs` prints `arm64`. Its Info.plist carries
 `com.kelechiodom.dictate`, `LSMinimumSystemVersion 15.0` and the microphone

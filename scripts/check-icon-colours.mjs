@@ -1,28 +1,40 @@
 /**
- * Fails when the app icon's accent has drifted from the theme it claims to
- * follow.
+ * Fails when the app icon's accent has drifted from the colour it claims to be.
  *
  *   node scripts/check-icon-colours.mjs
  *
- * The Rust icon table cannot import a stylesheet, so `app_icon::RINGS` is a
- * hand copy of each theme's focus ring. That copy is exactly the kind of thing
- * that goes stale when a theme is re-dialled, which is how this branch once
- * shipped three themes sharing one accent. `pnpm release:mac` runs this first.
+ * The icon paints each theme's **identity** colour, and that colour has two
+ * sources by design:
+ *
+ * - Ember's is its live/recording orange, the `live` role in
+ *   `src/ui/palettes.generated.json`, because that orange is the brand and the
+ *   focus ring is only its contrast-safe, desaturated variant.
+ * - Paper, Capy, Rose Pine and Neutral have no separate identity colour, so
+ *   their focus ring (`--focus-outline-color` in the generated stylesheet) is it.
+ *
+ * The Rust table cannot import either file, so `app_icon::IDENTITY` is a hand
+ * copy. That copy is exactly what goes stale when a theme is re-dialled, which
+ * is how this branch once shipped three themes sharing one accent.
+ * `pnpm release:mac` runs this before it builds.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const THEMES = join(root, "src/themes");
+const PALETTES = join(root, "src/ui/palettes.generated.json");
 const TABLE = join(root, "src-tauri/src/app_icon.rs");
 
-/** Theme slug on disk -> the variant name in `app_icon::RINGS`. */
-const VARIANTS = {
-  ember: "Ember",
-  paper: "Paper",
-  capy: "Capy",
-  "rose-pine": "RosePine",
-  zinc: "Neutral",
+/**
+ * Theme slug on disk -> where its identity colour lives.
+ * `live` reads the overlay palette; `ring` reads that theme's stylesheet.
+ */
+const THEMES_BY_SOURCE = {
+  ember: { variant: "Ember", from: "live" },
+  paper: { variant: "Paper", from: "ring" },
+  capy: { variant: "Capy", from: "ring" },
+  "rose-pine": { variant: "RosePine", from: "ring" },
+  zinc: { variant: "Neutral", from: "ring" },
 };
 
 const hex = (value) => {
@@ -31,14 +43,30 @@ const hex = (value) => {
   return [0, 2, 4].map((i) => parseInt(at.slice(i, i + 2), 16));
 };
 
-/** slug -> { light, dark } from that theme's generated stylesheet. */
+const rgb = (value) => {
+  const channels = value.match(/rgb\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\)/);
+  if (!channels) throw new Error(`not an rgb() colour: ${value}`);
+  return channels.slice(1, 4).map(Number);
+};
+
+/** slug -> { light, dark } from the ember overlay palette's `live` role. */
+function liveColours() {
+  const found = {};
+  for (const entry of JSON.parse(readFileSync(PALETTES, "utf8"))) {
+    if (entry.theme !== "ember") continue;
+    const mode = entry.mode === "dark" ? "dark" : "light";
+    found[mode] = rgb(entry.colors.live);
+  }
+  return found;
+}
+
+/** slug -> { light, dark } from that theme's generated stylesheet ring. */
 function rings() {
   const found = {};
   for (const slug of readdirSync(THEMES)) {
-    const dir = join(THEMES, slug);
     let css;
     try {
-      css = readFileSync(join(dir, `${slug}.css`), "utf8");
+      css = readFileSync(join(THEMES, slug, `${slug}.css`), "utf8");
     } catch {
       continue;
     }
@@ -64,41 +92,42 @@ function table() {
   return found;
 }
 
-const stylesheet = rings();
+const live = liveColours();
+const ring = rings();
 const rust = table();
 const problems = [];
 
-for (const [slug, variant] of Object.entries(VARIANTS)) {
-  const theme = stylesheet[slug];
-  if (!theme) {
+for (const [slug, { variant, from }] of Object.entries(THEMES_BY_SOURCE)) {
+  const source = from === "live" ? live : ring[slug];
+  if (!source) {
     problems.push(
-      `${slug}: no stylesheet found, so the ring cannot be checked`,
+      `${slug}: no ${from === "live" ? "ember live" : "stylesheet"} colour found`,
     );
     continue;
   }
   const entry = rust[variant];
   if (!entry) {
-    problems.push(`${variant}: missing from app_icon::RINGS`);
+    problems.push(`${variant}: missing from app_icon::IDENTITY`);
     continue;
   }
   for (const mode of ["light", "dark"]) {
-    if (theme[mode].join() !== entry[mode].join()) {
+    if (source[mode].join() !== entry[mode].join()) {
       problems.push(
-        `${slug} ${mode}: theme has rgb(${theme[mode].join(" ")}), app_icon.rs has rgb(${entry[mode].join(" ")})`,
+        `${slug} ${mode} (${from}): source has rgb(${source[mode].join(" ")}), app_icon.rs has rgb(${entry[mode].join(" ")})`,
       );
     }
   }
 }
 
 if (problems.length > 0) {
-  console.error("icon colours do not match the themes:");
+  console.error("icon colours do not match their sources:");
   for (const problem of problems) console.error(`  ${problem}`);
   console.error(
-    "\nUpdate RINGS in src-tauri/src/app_icon.rs, then run pnpm icons:renders.",
+    "\nUpdate IDENTITY in src-tauri/src/app_icon.rs, then run pnpm icons:renders.",
   );
   process.exit(1);
 }
 
 console.log(
-  `icons: ${Object.keys(VARIANTS).length} theme rings match app_icon.rs`,
+  `icons: ${Object.keys(THEMES_BY_SOURCE).length} identity colours match their sources (ember live, four rings)`,
 );

@@ -42,39 +42,50 @@ pub struct Palette {
     pub accent: [u8; 3],
 }
 
-/// Each theme's signature colour: the focus ring Astryx draws, light and dark.
+/// The colour the middle bar carries: the theme's **identity** colour.
 ///
-/// Read from `--focus-outline-color` in `src/themes/<slug>/<slug>.css`, which is
-/// generated from the accent dial in `themes/<slug>/<slug>.settings.json`. That
-/// ring is what the Appearance picker describes — Capy's lavender, Rose Pine's
-/// iris, Neutral's grey — so it is the theme's own colour rather than one
-/// invented here. `scripts/check-icon-colours.mjs` fails the release build when
-/// this table and the stylesheets disagree.
+/// The rule: the icon paints the theme's identity colour, and the focus ring is
+/// only its contrast-safe variant, which is why the two coincide for four of the
+/// five themes.
 ///
-/// Ember light is warm brown `#5c544b`, not the ember orange: the orange is the
-/// overlay's live-input colour, and Ember's ring is the brown. Ember and Paper
-/// are both grey `#ababab` in a dark appearance because that is what their rings
-/// are there.
-const RINGS: [(Theme, [u8; 3], [u8; 3]); 5] = [
-    (Theme::Ember, [92, 84, 75], [171, 171, 171]),
+/// - **Ember's identity colour is its live/recording orange**, the `live` role
+///   for the Ember overlay palette in `src/ui/palettes.generated.json`. Not its
+///   focus ring: that ring is deliberately desaturated so it reads against
+///   surfaces, while draft A was chosen for "five ink bars, the middle one
+///   ember", so the ember has to stay ember.
+/// - **Paper, Capy, Rose Pine and Neutral** have no separate identity colour, so
+///   their focus ring is it: `--focus-outline-color` in
+///   `src/themes/<slug>/<slug>.css`, generated from the accent dial in
+///   `themes/<slug>/<slug>.settings.json`.
+///
+/// `scripts/check-icon-colours.mjs` holds each half to its own source, so this
+/// table cannot drift from a re-dialled theme or from the overlay palette.
+const IDENTITY: [(Theme, [u8; 3], [u8; 3]); 5] = [
+    // #DF5822 light, #F67D51 dark: ember's `live` role.
+    (Theme::Ember, [223, 88, 34], [246, 125, 81]),
+    // #1c1b19 / #ababab: paper's focus ring, which is its ink.
     (Theme::Paper, [28, 27, 25], [171, 171, 171]),
+    // #8372d3 / #a99cf5: capy's lavender ring.
     (Theme::Capy, [131, 114, 211], [169, 156, 245]),
+    // #966dc3 / #c4a7e7: rose pine's iris ring.
     (Theme::RosePine, [150, 109, 195], [196, 167, 231]),
+    // #71717a in both appearances: neutral's grey ring.
     (Theme::Neutral, [113, 113, 122], [113, 113, 122]),
 ];
 
 /// The plate and the ink are shared by every theme, from the `canvas` and `text`
-/// roles in `src/ui/palettes.generated.json`; the accent is the theme's ring.
+/// roles in `src/ui/palettes.generated.json`; the accent is the theme's identity
+/// colour, documented on [`IDENTITY`].
 pub fn palette(theme: Theme, dark: bool) -> Palette {
     let (plate, bars) = if dark {
         ([26, 24, 22], [241, 238, 234])
     } else {
         ([251, 250, 248], [28, 26, 24])
     };
-    let accent = RINGS
+    let accent = IDENTITY
         .iter()
         .find(|(candidate, ..)| *candidate == theme)
-        .map(|(_, light, dark_ring)| if dark { *dark_ring } else { *light })
+        .map(|(_, light, dark_colour)| if dark { *dark_colour } else { *light })
         .unwrap_or(bars);
     Palette {
         plate,
@@ -269,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn every_theme_has_its_own_ring_in_a_light_appearance() {
+    fn every_theme_has_its_own_identity_colour() {
         let light: Vec<[u8; 3]> = [
             Theme::Ember,
             Theme::Paper,
@@ -280,7 +291,7 @@ mod tests {
         .into_iter()
         .map(|theme| palette(theme, false).accent)
         .collect();
-        assert_eq!(light[0], [92, 84, 75], "ember is warm brown");
+        assert_eq!(light[0], [223, 88, 34], "ember stays ember, not its brown ring");
         assert_eq!(light[2], [131, 114, 211], "capy is lavender");
         assert_eq!(light[3], [150, 109, 195], "rose pine is iris");
         for (index, colour) in light.iter().enumerate() {
@@ -291,11 +302,11 @@ mod tests {
     }
 
     #[test]
-    fn dark_appearance_uses_the_dark_ring() {
+    fn dark_appearance_uses_the_dark_identity_colour() {
+        assert_eq!(palette(Theme::Ember, true).accent, [246, 125, 81]);
         assert_eq!(palette(Theme::Capy, true).accent, [169, 156, 245]);
         assert_eq!(palette(Theme::RosePine, true).accent, [196, 167, 231]);
-        // Ember and Paper both ring grey in a dark appearance; that is the token.
-        assert_eq!(palette(Theme::Ember, true).accent, [171, 171, 171]);
+        // Paper has no identity colour of its own, so its grey ring is it.
         assert_eq!(palette(Theme::Paper, true).accent, [171, 171, 171]);
     }
 
