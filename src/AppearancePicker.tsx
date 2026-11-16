@@ -91,9 +91,13 @@ export function AppearancePicker({
           label="Theme"
           value={theme}
           isDisabled={disabled}
-          onChange={(value) =>
-            onChange({ theme: settingsSchema.shape.theme.parse(value) })
-          }
+          onChange={(value) => {
+            const id = settingsSchema.shape.themeLight.parse(value);
+            // One list for now: this commit only carries the format change, so
+            // both appearances follow the choice. The two-column picker lands
+            // next, and dropping it leaves a coherent single list.
+            onChange({ themeLight: id, themeDark: id });
+          }}
         >
           {THEMES.map((option) => (
             <RadioListItem

@@ -127,7 +127,8 @@ async function openSettings(
         shortcutMode: "hold",
         microphone: null,
         launchAtLogin: false,
-        theme: "ember",
+        themeLight: "ember",
+        themeDark: "ember",
         overlayPosition: "bottom",
         historyRetention: "week",
         appearanceMode: "system",
@@ -441,7 +442,8 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           shortcutMode: "hold",
           microphone: null,
           launchAtLogin: false,
-          theme: "ember",
+          themeLight: "ember",
+          themeDark: "ember",
           overlayPosition: "bottom",
           historyRetention: "week",
           appearanceMode: "system",
@@ -572,6 +574,22 @@ for (const colorScheme of ["light", "dark"] as const) {
   });
 }
 
+test("each appearance uses the theme stored for it", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await openSettings(page, {
+    stored: {
+      themeLight: "paper",
+      themeDark: "capy",
+      appearanceMode: "system",
+    },
+  });
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "capy");
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
+});
+
 const themeCases = [
   { id: "ember", name: "Ember", slug: "ember" },
   { id: "paper", name: "Paper", slug: "paper" },
@@ -638,7 +656,8 @@ test("overlay applies appearance events live, including System changes", async (
                 shortcutMode: "hold",
                 microphone: null,
                 launchAtLogin: false,
-                theme,
+                themeLight: theme,
+                themeDark: theme,
                 overlayPosition: "bottom",
                 historyRetention: "week",
                 appearanceMode,
@@ -800,7 +819,7 @@ test("invalid appearance events show a recoverable overlay error", async ({
       {
         type: "dictate-test",
         event: "settings-changed",
-        payload: { theme: "invalid" },
+        payload: { themeLight: "invalid" },
       },
       "*",
     ),
@@ -815,7 +834,11 @@ for (const label of ["ink", "annotate-bar"] as const) {
     await page.emulateMedia({ colorScheme: "light" });
     await openSettings(page, {
       window: label,
-      stored: { theme: "paper", appearanceMode: "dark" },
+      stored: {
+        themeLight: "paper",
+        themeDark: "paper",
+        appearanceMode: "dark",
+      },
     });
     await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
@@ -837,15 +860,15 @@ for (const label of ["ink", "annotate-bar"] as const) {
     );
     await send({
       ...(current as object),
-      theme: "ember",
+      themeLight: "ember",
       appearanceMode: "light",
     });
     await expect(page.locator("html")).toHaveAttribute("data-palette", "ember");
     await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
     // An invalid event must not call a command the panel isn't granted; the
     // valid one after it proves the invalid one has been handled.
-    await send({ theme: "invalid" });
-    await send({ ...(current as object), theme: "paper" });
+    await send({ themeLight: "invalid" });
+    await send({ ...(current as object), themeLight: "paper" });
     await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
     expect(
       await page.evaluate(
@@ -878,7 +901,8 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 shortcutMode: "hold",
                 microphone: null,
                 launchAtLogin: false,
-                theme,
+                themeLight: theme,
+                themeDark: theme,
                 appearanceMode,
                 overlayPosition: "bottom",
                 historyRetention: "week",
@@ -995,13 +1019,20 @@ for (const exit of ["tab", "window-blur", "navigation"]) {
           "*",
         ),
       );
-    await expect(recorder).toHaveAccessibleName(/^Shortcut, /);
+    // Navigating away unmounts General, so the recorder is only there to read
+    // once the page is back. Reading it mid-transition raced the unmount.
+    if (exit === "navigation")
+      await page.getByRole("button", { name: "General", exact: true }).click();
+    await expect(recorder).toBeVisible();
+    await expect(recorder).not.toHaveAccessibleName(/Press shortcut/);
+    // The capture that was in flight finishes now, and a canceled capture must
+    // not commit a chord nobody chose.
     await page.evaluate(() =>
       (window as unknown as { __finishCapture: () => void }).__finishCapture(),
     );
-    if (exit === "navigation")
-      await page.getByRole("button", { name: "General", exact: true }).click();
-    await expect(recorder).not.toHaveAccessibleName(/Press shortcut/);
+    await expect(recorder).toHaveAccessibleName(
+      "Shortcut, Alt + Shift + Space",
+    );
   });
 }
 
@@ -1037,7 +1068,11 @@ for (const theme of themeCases)
       page,
     }) => {
       await openSettings(page, {
-        stored: { theme: theme.id, appearanceMode: mode },
+        stored: {
+          themeLight: theme.id,
+          themeDark: theme.id,
+          appearanceMode: mode,
+        },
       });
       await expect(page.getByRole("switch")).toBeVisible();
       await expect(page.getByRole("main")).toHaveCSS("color-scheme", mode);
@@ -1137,7 +1172,11 @@ for (const failLoad of [false, true]) {
     await openSettings(page, {
       suspendFrames: true,
       failLoad,
-      stored: { theme: "paper", appearanceMode: "dark" },
+      stored: {
+        themeLight: "paper",
+        themeDark: "paper",
+        appearanceMode: "dark",
+      },
       pendingPage: "Annotate",
     });
     await expect
@@ -1165,7 +1204,7 @@ test("Settings readiness receives queued notice navigation and retains the recov
 }) => {
   await openSettings(page, {
     pendingPage: "Annotate",
-    stored: { appearanceMode: "dark", theme: "paper" },
+    stored: { appearanceMode: "dark", themeLight: "paper", themeDark: "paper" },
     startupError: {
       title: "Annotate needs Screen Recording",
       fix: "Open System Settings to allow access.",
@@ -1513,7 +1552,13 @@ test("the sidebar sits a step behind the page in every theme and mode", async ({
       // A tab each: the settings mock seeds settings at load, so a second
       // mount in one tab keeps the first theme it saw.
       const tab = await page.context().newPage();
-      await openSettings(tab, { stored: { theme, appearanceMode: mode } });
+      await openSettings(tab, {
+        stored: {
+          themeLight: theme,
+          themeDark: theme,
+          appearanceMode: mode,
+        },
+      });
       await expect(tab.getByRole("navigation")).toBeVisible();
       await expect(tab.locator("html")).toHaveAttribute("data-mode", mode);
       const surfaces = await tab.evaluate(() => {
@@ -1725,7 +1770,13 @@ test("a keycap is a different surface from the button it sits in", async ({
   for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
     for (const mode of ["light", "dark"]) {
       const tab = await page.context().newPage();
-      await openSettings(tab, { stored: { theme, appearanceMode: mode } });
+      await openSettings(tab, {
+        stored: {
+          themeLight: theme,
+          themeDark: theme,
+          appearanceMode: mode,
+        },
+      });
       const slug = {
         ember: "ember",
         paper: "paper",

@@ -4,6 +4,13 @@ import { speechModelSchema } from "./models";
 import type { Settings } from "./settings.generated";
 export type { Settings } from "./settings.generated";
 
+// A theme id this build doesn't know, such as one written by a newer build or
+// by hand, falls back to Ember on that side instead of discarding every
+// setting, which is what the Rust side does too.
+const themeSchema = z
+  .enum(["ember", "paper", "capy", "rosePine", "neutral"])
+  .catch("ember");
+
 export const settingsSchema = z
   .object({
     version: z.number().int().nonnegative(),
@@ -11,9 +18,8 @@ export const settingsSchema = z
     shortcutMode: z.enum(["hold", "toggle"]),
     microphone: z.string().nullable(),
     launchAtLogin: z.boolean(),
-    theme: z
-      .enum(["ember", "paper", "capy", "rosePine", "neutral"])
-      .catch("ember"),
+    themeLight: themeSchema,
+    themeDark: themeSchema,
     overlayPosition: z.enum(["top", "bottom"]),
     appearanceMode: z.enum(["system", "light", "dark"]),
     historyRetention: z.enum(["day", "week", "month", "forever"]),

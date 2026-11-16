@@ -2383,7 +2383,7 @@ mod take_tests {
                 ..runtime.settings.clone()
             },
             Settings {
-                theme: settings::Theme::Paper,
+                theme_light: settings::Theme::Paper,
                 ..runtime.settings.clone()
             },
             Settings {

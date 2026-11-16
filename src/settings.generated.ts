@@ -12,7 +12,8 @@ export type Settings = {
   shortcutMode: ShortcutMode;
   microphone: string | null;
   launchAtLogin: boolean;
-  theme: Theme;
+  themeLight: Theme;
+  themeDark: Theme;
   appearanceMode: AppearanceMode;
   overlayPosition: OverlayPosition;
   historyRetention: HistoryRetention;

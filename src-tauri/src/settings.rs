@@ -99,7 +99,9 @@ pub struct Settings {
     #[serde(default)]
     pub launch_at_login: bool,
     #[serde(default, deserialize_with = "theme_or_ember")]
-    pub theme: Theme,
+    pub theme_light: Theme,
+    #[serde(default, deserialize_with = "theme_or_ember")]
+    pub theme_dark: Theme,
     #[serde(default)]
     pub appearance_mode: AppearanceMode,
     #[serde(default)]
@@ -136,7 +138,21 @@ fn enabled() -> bool {
     true
 }
 
-const CURRENT_VERSION: u32 = 1;
+const CURRENT_VERSION: u32 = 2;
+
+/// Before v2 there was one theme id for both appearances. A file that still
+/// carries it has it copied into both, so upgrading keeps the look that was
+/// chosen, and the dead key is dropped so a later save cannot resurrect it.
+fn migrate_theme(value: &mut serde_json::Map<String, serde_json::Value>) {
+    let Some(legacy) = value.remove("theme") else {
+        return;
+    };
+    if value.contains_key("themeLight") || value.contains_key("themeDark") {
+        return;
+    }
+    value.insert("themeLight".into(), legacy.clone());
+    value.insert("themeDark".into(), legacy);
+}
 
 fn default_shortcut() -> String {
     "Alt+Shift+Space".into()
@@ -154,7 +170,8 @@ impl Default for Settings {
             shortcut_mode: ShortcutMode::Hold,
             microphone: None,
             launch_at_login: false,
-            theme: Theme::Ember,
+            theme_light: Theme::Ember,
+            theme_dark: Theme::Ember,
             appearance_mode: AppearanceMode::System,
             overlay_position: OverlayPosition::Bottom,
             history_retention: HistoryRetention::Week,
@@ -228,6 +245,16 @@ impl Settings {
         Ok(SettingsChanges { shortcut, annotate })
     }
 
+    /// The theme that applies in the given appearance. Callers resolve
+    /// `AppearanceMode::System` first, since only the window server knows.
+    pub fn theme_for(&self, dark: bool) -> Theme {
+        if dark {
+            self.theme_dark
+        } else {
+            self.theme_light
+        }
+    }
+
     pub fn chord(&self) -> Result<Shortcut, String> {
         parse_chord(&self.shortcut)
     }
@@ -251,8 +278,13 @@ fn parse_chord(shortcut: &str) -> Result<Shortcut, String> {
 pub fn load(path: &Path) -> Result<Settings, String> {
     match fs::read(path) {
         Ok(bytes) => {
-            let mut settings: Settings =
+            let mut value: serde_json::Value =
                 serde_json::from_slice(&bytes).map_err(|e| format!("Read settings: {e}"))?;
+            if let Some(object) = value.as_object_mut() {
+                migrate_theme(object);
+            }
+            let mut settings: Settings =
+                serde_json::from_value(value).map_err(|e| format!("Read settings: {e}"))?;
             migrate(&mut settings);
             settings.chord()?;
             Ok(settings)
@@ -263,7 +295,7 @@ pub fn load(path: &Path) -> Result<Settings, String> {
 }
 
 fn migrate(settings: &mut Settings) {
-    if settings.version == 0 {
+    if settings.version < CURRENT_VERSION {
         settings.version = CURRENT_VERSION;
     }
 }
@@ -310,6 +342,9 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
     else {
         return Err("Settings must be an object".into());
     };
+    // A file read before the theme migration is written back without the dead
+    // key, so the migration is still a one-way move after a load and save.
+    value.remove("theme");
     value.extend(known);
     serde_json::to_writer_pretty(&mut file, &value).map_err(|e| e.to_string())?;
     file.as_file().sync_all().map_err(|e| e.to_string())?;
@@ -329,7 +364,7 @@ mod tests {
         for corrupt in ["{broken", "[]", "null"] {
             fs::write(&path, corrupt).unwrap();
             let settings = Settings {
-                theme: Theme::Paper,
+                theme_light: Theme::Paper,
                 ..Settings::default()
             };
             save(&path, &settings).unwrap();
@@ -369,7 +404,8 @@ mod tests {
             shortcut_mode: ShortcutMode::Toggle,
             microphone: Some("External microphone".into()),
             launch_at_login: true,
-            theme: Theme::Paper,
+            theme_light: Theme::Paper,
+            theme_dark: Theme::Capy,
             appearance_mode: AppearanceMode::Dark,
             overlay_position: OverlayPosition::Top,
             history_retention: HistoryRetention::Forever,
@@ -390,6 +426,96 @@ mod tests {
     }
 
     #[test]
+    fn a_v1_file_with_one_theme_gives_both_appearances_that_theme() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        // Written the way the shipped build wrote a file: one theme id for both
+        // appearances, version 1, and the rest of the person's settings.
+        fs::write(
+            &path,
+            r#"{
+  "version": 1,
+  "shortcut": "Control+Shift+KeyD",
+  "shortcutMode": "toggle",
+  "microphone": "External microphone",
+  "launchAtLogin": true,
+  "theme": "rosePine",
+  "appearanceMode": "dark",
+  "overlayPosition": "top",
+  "historyRetention": "forever"
+}"#,
+        )
+        .unwrap();
+        let settings = load(&path).unwrap();
+        assert_eq!(settings.theme_light, Theme::RosePine);
+        assert_eq!(settings.theme_dark, Theme::RosePine);
+        assert_eq!(settings.version, 2);
+        assert_eq!(settings.shortcut, "Control+Shift+KeyD");
+        assert_eq!(settings.shortcut_mode, ShortcutMode::Toggle);
+        assert_eq!(settings.microphone.as_deref(), Some("External microphone"));
+        assert!(settings.launch_at_login);
+        assert_eq!(settings.appearance_mode, AppearanceMode::Dark);
+        assert_eq!(settings.overlay_position, OverlayPosition::Top);
+        assert_eq!(settings.history_retention, HistoryRetention::Forever);
+        save(&path, &settings).unwrap();
+        let written: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written["themeLight"], "rosePine");
+        assert_eq!(written["themeDark"], "rosePine");
+        assert!(written.get("theme").is_none(), "{written}");
+    }
+
+    #[test]
+    fn a_file_that_already_separates_the_modes_is_not_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"version":2,"themeLight":"paper","themeDark":"capy","theme":"ember"}"#,
+        )
+        .unwrap();
+        let settings = load(&path).unwrap();
+        assert_eq!(settings.theme_light, Theme::Paper);
+        assert_eq!(settings.theme_dark, Theme::Capy);
+    }
+
+    #[test]
+    fn a_file_with_one_new_key_keeps_it_and_defaults_the_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"version":2,"themeDark":"neutral"}"#).unwrap();
+        let settings = load(&path).unwrap();
+        assert_eq!(settings.theme_dark, Theme::Neutral);
+        assert_eq!(settings.theme_light, Theme::Ember);
+    }
+
+    #[test]
+    fn an_unknown_legacy_theme_falls_back_in_both_modes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"version":1,"theme":"dracula","shortcut":"Control+KeyD"}"#,
+        )
+        .unwrap();
+        let (settings, problem) = load_or_default(&path);
+        assert!(problem.is_none());
+        assert_eq!(settings.theme_light, Theme::Ember);
+        assert_eq!(settings.theme_dark, Theme::Ember);
+        assert_eq!(settings.shortcut, "Control+KeyD");
+    }
+
+    #[test]
+    fn the_theme_for_an_appearance_is_the_one_for_that_side() {
+        let settings = Settings {
+            theme_light: Theme::Paper,
+            theme_dark: Theme::Neutral,
+            ..Settings::default()
+        };
+        assert_eq!(settings.theme_for(false), Theme::Paper);
+        assert_eq!(settings.theme_for(true), Theme::Neutral);
+    }
+
+    #[test]
     fn every_theme_id_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
@@ -401,13 +527,15 @@ mod tests {
             (Theme::Neutral, "neutral"),
         ] {
             let settings = Settings {
-                theme,
+                theme_light: theme,
+                theme_dark: theme,
                 ..Settings::default()
             };
             save(&path, &settings).unwrap();
             let value: serde_json::Value =
                 serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-            assert_eq!(value["theme"], id);
+            assert_eq!(value["themeLight"], id);
+            assert_eq!(value["themeDark"], id);
             assert_eq!(load(&path).unwrap(), settings);
         }
     }
@@ -430,7 +558,8 @@ mod tests {
             .unwrap();
             let (settings, problem) = load_or_default(&path);
             assert!(problem.is_none(), "{theme}");
-            assert_eq!(settings.theme, Theme::Ember, "{theme}");
+            assert_eq!(settings.theme_light, Theme::Ember, "{theme}");
+            assert_eq!(settings.theme_dark, Theme::Ember, "{theme}");
             assert_eq!(settings.shortcut, "Control+KeyD", "{theme}");
             assert_eq!(settings.appearance_mode, AppearanceMode::Dark, "{theme}");
         }
@@ -443,11 +572,12 @@ mod tests {
         fs::write(&path, r#"{"shortcut":"Control+KeyD"}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.shortcut, "Control+KeyD");
-        assert_eq!(settings.version, 1);
+        assert_eq!(settings.version, 2);
         assert_eq!(settings.shortcut_mode, ShortcutMode::Hold);
         assert_eq!(settings.microphone, None);
         assert!(!settings.launch_at_login);
-        assert_eq!(settings.theme, Theme::Ember);
+        assert_eq!(settings.theme_light, Theme::Ember);
+        assert_eq!(settings.theme_dark, Theme::Ember);
         assert_eq!(settings.appearance_mode, AppearanceMode::System);
         assert_eq!(settings.overlay_position, OverlayPosition::Bottom);
         assert_eq!(settings.history_retention, HistoryRetention::Week);
@@ -460,9 +590,9 @@ mod tests {
         assert!(!settings.sound_feedback);
         assert!(!settings.debug_recordings);
         assert_eq!(settings.annotate_shortcut, "Alt+Shift+KeyA");
-        fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
+        fs::write(&path, r#"{"version":3,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
-        assert_eq!(settings.version, 2);
+        assert_eq!(settings.version, 3);
         assert_eq!(settings.shortcut, "Alt+Shift+Space");
         let updated = Settings {
             launch_at_login: true,
@@ -471,7 +601,7 @@ mod tests {
         save(&path, &updated).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(value["newSetting"], true);
-        assert_eq!(value["version"], 2);
+        assert_eq!(value["version"], 3);
         assert_eq!(value["launchAtLogin"], true);
     }
 

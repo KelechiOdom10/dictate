@@ -10,11 +10,11 @@ type Story = StoryObj<typeof meta>;
 
 function Picker({ disabled = false }: { disabled?: boolean }) {
   const [value, setValue] = useState<
-    Pick<Settings, "theme" | "appearanceMode">
-  >({ theme: "ember", appearanceMode: "system" });
+    Pick<Settings, "themeLight" | "appearanceMode">
+  >({ themeLight: "ember", appearanceMode: "system" });
   return (
     <AppearancePicker
-      theme={value.theme}
+      theme={value.themeLight}
       mode={value.appearanceMode}
       disabled={disabled}
       onChange={(patch) => setValue((current) => ({ ...current, ...patch }))}

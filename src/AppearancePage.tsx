@@ -8,7 +8,7 @@ export default function AppearancePage() {
   return (
     <>
       <AppearancePicker
-        theme={query.data.theme}
+        theme={query.data.themeLight}
         mode={query.data.appearanceMode}
         disabled={busy}
         onChange={(patch) => void save(patch)}
