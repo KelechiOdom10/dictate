@@ -8,7 +8,12 @@ import {
   openScreenRecordingSettings,
   readScreenPermission,
 } from "./annotations";
-import { Button, SettingsGroup, SettingsRow as Row, Toggle } from "./ui";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Button } from "@astryxdesign/core/Button";
+import { HStack } from "@astryxdesign/core/HStack";
+import { Switch } from "@astryxdesign/core/Switch";
+import { SettingsGroup, SettingsRow as Row } from "./ui";
+import { LoadError, Loading, SaveStatus } from "./SettingsStatus";
 import ShortcutRecorder from "./ShortcutRecorder";
 
 export default function AnnotatePage() {
@@ -68,18 +73,10 @@ export default function AnnotatePage() {
     }
   }
 
-  if (query.isPending)
-    return (
-      <div className="loading" role="status">
-        Loading your preferences…
-      </div>
-    );
+  if (query.isPending) return <Loading>Loading your preferences…</Loading>;
   if (query.isError)
     return (
-      <div className="notice" role="alert">
-        <p>{String(query.error)}</p>
-        <Button onClick={() => void query.refetch()}>Try again</Button>
-      </div>
+      <LoadError error={query.error} onRetry={() => void query.refetch()} />
     );
   const settings = query.data;
   const busy = mutation.isPending;
@@ -91,16 +88,15 @@ export default function AnnotatePage() {
         icon={<PenLine size={14} aria-hidden="true" />}
       >
         <Row
-          id="annotate-enabled"
           label="Annotate"
           help="Tap the shortcut to record your screen and voice, hold it to draw, tap again to copy."
         >
-          <Toggle
-            id="annotate-enabled"
-            checked={settings.annotateEnabled}
-            disabled={busy || recording}
-            aria-describedby="annotate-enabled-help"
-            onChange={(e) => void save({ annotateEnabled: e.target.checked })}
+          <Switch
+            label="Annotate"
+            isLabelHidden
+            value={settings.annotateEnabled}
+            isDisabled={busy || recording}
+            onChange={(checked) => void save({ annotateEnabled: checked })}
           />
         </Row>
         <ShortcutRecorder
@@ -122,7 +118,6 @@ export default function AnnotatePage() {
         icon={<MonitorUp size={14} aria-hidden="true" />}
       >
         <Row
-          id="screen-permission"
           label="Permission"
           help={
             permission.isPending
@@ -134,49 +129,45 @@ export default function AnnotatePage() {
                   : "Not allowed. Turn on dictate in System Settings, then reopen dictate."
           }
         >
-          <div className="ui-actions">
-            <output
-              id="screen-permission"
-              className={
-                allowed ? "permission-status" : "permission-status row-warning"
+          <HStack gap={2} vAlign="center">
+            <Badge
+              role="status"
+              aria-label="Screen recording permission"
+              variant={
+                permission.isPending
+                  ? "neutral"
+                  : allowed
+                    ? "success"
+                    : "warning"
               }
-              aria-describedby="screen-permission-help"
-            >
-              {permission.isPending ? "…" : allowed ? "Allowed" : "Not allowed"}
-            </output>
+              label={
+                permission.isPending ? "…" : allowed ? "Allowed" : "Not allowed"
+              }
+            />
             <Button
               size="sm"
               variant={allowed ? "ghost" : "primary"}
+              label="Open System Settings"
               onClick={() => void openSystemSettings()}
-            >
-              Open System Settings
-            </Button>
-          </div>
+            />
+          </HStack>
         </Row>
         <Row
-          id="show-in-recordings"
           label="Show in screen recordings"
           help="Off keeps dictate’s ink and bar out of the video. Key frames show your ink either way."
         >
-          <Toggle
-            id="show-in-recordings"
-            checked={settings.annotateShowInRecordings}
-            disabled={busy}
-            aria-describedby="show-in-recordings-help"
-            onChange={(e) =>
-              void save({ annotateShowInRecordings: e.target.checked })
+          <Switch
+            label="Show in screen recordings"
+            isLabelHidden
+            value={settings.annotateShowInRecordings}
+            isDisabled={busy}
+            onChange={(checked) =>
+              void save({ annotateShowInRecordings: checked })
             }
           />
         </Row>
       </SettingsGroup>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      <p className="save-status" role="status">
-        {busy ? "Saving…" : "Changes save automatically."}
-      </p>
+      <SaveStatus busy={busy} error={error} />
     </>
   );
 }

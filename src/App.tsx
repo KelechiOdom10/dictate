@@ -17,7 +17,7 @@ import SettingsWindow from "./SettingsWindow";
 import { AnnotateBarWindow, InkWindow } from "./AnnotateWindows";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings, settingsSchema } from "./settings";
-import { RecordingCapsule, KeyboardShortcut } from "./ui";
+import { RecordingCapsule, OverlayShortcut } from "./ui";
 import { problem, type Problem } from "./problem";
 import "./App.css";
 
@@ -177,7 +177,7 @@ function Overlay({ appearanceError }: { appearanceError: Problem | null }) {
           }
           shortcut={
             phase === "idle" && !error ? (
-              <KeyboardShortcut value={settings.data?.shortcut ?? ""} />
+              <OverlayShortcut value={settings.data?.shortcut ?? ""} />
             ) : undefined
           }
         />

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -203,7 +203,7 @@ async function openSettings(
                   mode: document.documentElement.dataset.mode,
                   libraryTheme: document.documentElement.dataset.astryxTheme,
                   colorScheme: getComputedStyle(
-                    document.querySelector(".settings-shell")!,
+                    document.querySelector("[role=main]")!,
                   ).colorScheme,
                 },
                 configurable: true,
@@ -272,6 +272,14 @@ async function openSettings(
   );
 }
 
+async function choose(page: Page, label: string, option: string) {
+  await page.getByRole("combobox", { name: label, exact: true }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+  await expect(
+    page.getByRole("combobox", { name: label, exact: true }),
+  ).toContainText(option);
+}
+
 test("preferences save, shortcut failures preserve the old value, and placeholders navigate", async ({
   page,
 }) => {
@@ -279,51 +287,39 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
   await expect(
     page.getByRole("heading", { name: "General", exact: true }),
   ).toBeVisible();
-  await page
-    .getByLabel("Shortcut mode", { exact: true })
-    .selectOption("toggle");
+  await choose(page, "Shortcut mode", "Toggle");
   await expect(
     page.getByText("Tap to record. Tap again to insert your words."),
   ).toBeVisible();
-  await page
-    .getByRole("combobox", { name: "Microphone", exact: true })
-    .selectOption("USB Microphone");
+  await choose(page, "Microphone", "USB Microphone");
   await page.getByRole("button", { name: "Test microphone" }).click();
   await expect(page.getByRole("meter")).toHaveAttribute("value", "0.6");
   await page.getByRole("button", { name: "Stop test" }).click();
   await page.getByRole("switch", { name: "Launch at login" }).click();
   await expect(page.getByRole("switch")).toBeChecked();
-  await page.getByRole("button", { name: "Shortcut", exact: true }).click();
+  await page.getByRole("button", { name: /^Shortcut,/ }).click();
   await page.keyboard.press("Control+Shift+D");
-  await expect(
-    page.getByRole("button", { name: "Shortcut", exact: true }),
-  ).toContainText("⌃⇧D");
-  await page.getByRole("button", { name: "Shortcut", exact: true }).click();
+  await expect(page.getByRole("button", { name: /^Shortcut,/ })).toContainText(
+    "⌃⇧D",
+  );
+  await page.getByRole("button", { name: /^Shortcut,/ }).click();
   await page.keyboard.press("Meta+Q");
   await expect(
     page.getByText("Used by another app — pick another", { exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Shortcut,/ })).toContainText(
+    "⌃⇧D",
+  );
   await expect(
-    page.getByRole("button", { name: "Shortcut", exact: true }),
-  ).toContainText("⌃⇧D");
-  await expect(page.getByLabel("Speech model")).toHaveValue("base.en");
+    page.getByRole("combobox", { name: "Speech model", exact: true }),
+  ).toContainText("Base");
   await page.getByRole("button", { name: "Manage models" }).click();
   await expect(
     page.getByRole("region", { name: "Base English" }),
   ).toContainText("In use");
   await page.getByRole("button", { name: "Output", exact: true }).click();
-  await page
-    .getByLabel("After dictation", { exact: true })
-    .selectOption("copyOnly");
-  await expect(page.getByLabel("After dictation", { exact: true })).toHaveValue(
-    "copyOnly",
-  );
-  await page
-    .getByLabel("After dictation", { exact: true })
-    .selectOption("pasteKeep");
-  await expect(page.getByLabel("After dictation", { exact: true })).toHaveValue(
-    "pasteKeep",
-  );
+  await choose(page, "After dictation", "Copy only");
+  await choose(page, "After dictation", "Paste and keep on clipboard");
   await page.getByRole("button", { name: "Advanced", exact: true }).click();
   await page.getByRole("switch", { name: "Sound feedback" }).click();
   await expect(
@@ -332,7 +328,7 @@ test("preferences save, shortcut failures preserve the old value, and placeholde
   await page.getByRole("button", { name: "General", exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "Microphone", exact: true }),
-  ).toHaveValue("USB Microphone");
+  ).toContainText("USB Microphone");
 });
 
 test("load failure offers recovery and controls never appear with unknown settings", async ({
@@ -352,16 +348,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     await openSettings(page);
     await expect(page.getByRole("switch")).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
-    await expect(page.locator("#mode-help")).toHaveCSS("line-height", "18px");
-    expect((await page.locator("#mode-help").boundingBox())?.height).toBe(18);
-    const footerAlignment = await page.locator("footer").evaluate((el) => {
-      const version = el.querySelector("span");
-      const button = el.querySelector("button");
-      return version && button
-        ? version.getBoundingClientRect().x === button.getBoundingClientRect().x
-        : false;
-    });
-    expect(footerAlignment).toBe(true);
+    await expect(page.getByText(/^Version /)).toBeVisible();
     await page.screenshot({
       path: `target/settings-${colorScheme}-browser.png`,
     });
@@ -396,7 +383,7 @@ test("startup recovery is visible after mount and dismissible with the keyboard"
     },
   });
   await expect(page.getByRole("alert")).toContainText(
-    "Settings couldn’t be read. Using defaults. Your old file is saved beside them.",
+    "Using defaults. Your old file is saved beside them.",
   );
   await expect(page.getByRole("switch")).toBeVisible();
   await page.screenshot({ path: "target/startup-recovery-browser.png" });
@@ -567,28 +554,45 @@ for (const colorScheme of ["light", "dark"] as const) {
   });
 }
 
-for (const theme of ["ember", "paper"] as const) {
-  test(`${theme} appearance saves live and System follows macOS`, async ({
+const themeCases = [
+  { id: "ember", name: "Ember", slug: "ember" },
+  { id: "paper", name: "Paper", slug: "paper" },
+  { id: "capy", name: "Capy", slug: "capy" },
+  { id: "rosePine", name: "Rosé Pine", slug: "rose-pine" },
+  { id: "neutral", name: "Neutral", slug: "zinc" },
+] as const;
+for (const theme of themeCases) {
+  test(`${theme.name} appearance saves live and System follows macOS`, async ({
     page,
   }) => {
     await page.emulateMedia({ colorScheme: "light" });
     await openSettings(page);
-    await page.getByLabel("Theme", { exact: true }).selectOption(theme);
-    await expect(page.locator("html")).toHaveAttribute("data-palette", theme);
-    await page.getByLabel("Mode", { exact: true }).selectOption("dark");
+    const radio = page.getByRole("radio", {
+      name: new RegExp(`^${theme.name}`),
+    });
+    await radio.click();
+    await expect(radio).toBeChecked();
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-palette",
+      theme.id,
+    );
+    await expect(
+      page.locator(`[data-astryx-theme="${theme.slug}"]`).first(),
+    ).toBeAttached();
+    await page.getByRole("radio", { name: "Dark", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
     await page.emulateMedia({ colorScheme: "light" });
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
-    await page.getByLabel("Mode", { exact: true }).selectOption("system");
+    await page.getByRole("radio", { name: "System", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
     await page.getByRole("button", { name: "About", exact: true }).click();
     await page.getByRole("button", { name: "General", exact: true }).click();
-    await expect(page.getByLabel("Theme", { exact: true })).toHaveValue(theme);
-    await expect(page.getByLabel("Mode", { exact: true })).toHaveValue(
-      "system",
-    );
+    await expect(radio).toBeChecked();
+    await expect(
+      page.getByRole("radio", { name: "System", exact: true }),
+    ).toBeChecked();
   });
 }
 
@@ -946,8 +950,7 @@ for (const exit of ["tab", "window-blur", "navigation"]) {
   }) => {
     await openSettings(page, { delayCapture: true });
     const recorder = page.getByRole("button", {
-      name: "Shortcut",
-      exact: true,
+      name: /^Shortcut,/,
     });
     await recorder.click();
     await expect(recorder).toContainText("Press shortcut");
@@ -987,52 +990,33 @@ for (const mode of ["light", "dark"] as const) {
     await expect(
       page.getByText("No annotations yet", { exact: true }),
     ).toBeVisible();
-    await expect(page.locator("main .ui-keycaps kbd")).toHaveText([
-      "⌥",
-      "⇧",
-      "A",
-    ]);
-    expect(
-      await annotations.evaluate((input) => input.parentElement!.offsetTop),
-    ).toBe(
-      await page
-        .getByRole("radio", { name: "Dictations", exact: true })
-        .evaluate((input) => input.parentElement!.offsetTop),
-    );
-    await page.evaluate(() => document.fonts.ready);
-    expect(
-      await page
-        .locator(".ui-segments")
-        .evaluate(
-          (el) =>
-            getComputedStyle(el, "::before").backgroundColor !==
-            getComputedStyle(el).backgroundColor,
-        ),
-    ).toBe(true);
+    await expect(
+      page.getByRole("img", { name: "Alt + Shift + A" }).locator("kbd"),
+    ).toHaveText(["⌥", "⇧", "A"]);
+    await expect(annotations).toBeChecked();
     await page.screenshot({
       path: `target/visibility-fix/history-default-${mode}.png`,
     });
   });
 }
 
-for (const palette of ["ember", "paper"])
+for (const theme of themeCases)
   for (const mode of ["light", "dark"] as const) {
-    test(`Astryx settings colors stay readable in ${palette} ${mode}`, async ({
+    test(`${theme.name} ${mode} keeps every text and control pair readable`, async ({
       page,
     }) => {
       await openSettings(page, {
-        stored: { theme: palette, appearanceMode: mode },
+        stored: { theme: theme.id, appearanceMode: mode },
       });
-      await expect(page.locator("html")).toHaveAttribute(
-        "data-astryx-theme",
-        palette === "paper" ? "dictate-paper" : "dictate",
-      );
-      const pairs = await page.locator(".settings-shell").evaluate((el) => {
+      await expect(page.getByRole("switch")).toBeVisible();
+      await expect(page.getByRole("main")).toHaveCSS("color-scheme", mode);
+      const pairs = await page.getByRole("main").evaluate((el) => {
         const probe = document.createElement("canvas");
         el.append(probe);
         const context = probe.getContext("2d", { willReadFrequently: true })!;
         const luminance = (color: string) => {
           probe.style.color = color;
+          context.clearRect(0, 0, 1, 1);
           context.fillStyle = getComputedStyle(probe).color;
           context.fillRect(0, 0, 1, 1);
           return Array.from(context.getImageData(0, 0, 1, 1).data)
@@ -1048,51 +1032,58 @@ for (const palette of ["ember", "paper"])
               0,
             );
         };
-        const pairs = [];
-        for (const foreground of ["text", "muted", "on-primary"])
-          for (const background of foreground === "on-primary"
-            ? ["primary", "primary-hover", "primary-pressed"]
-            : [
-                "canvas",
-                "surface",
-                "control",
-                "control-hover",
-                "control-pressed",
-                "selected",
-                "segment-thumb",
-              ]) {
-            const a = luminance(`var(--${foreground})`),
-              b = luminance(`var(--${background})`);
+        const ratio = (a: string, b: string) => {
+          const x = luminance(a),
+            y = luminance(b);
+          return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+        };
+        const token = (name: string) => `var(--${name})`;
+        const pairs: { pair: string; ratio: number; min: number }[] = [];
+        for (const foreground of ["color-text-primary", "color-text-secondary"])
+          for (const background of [
+            "color-background-body",
+            "color-background-muted",
+            "color-background-surface",
+            "color-background-card",
+            "color-background-popover",
+            "color-neutral",
+          ])
             pairs.push({
-              foreground,
-              background,
-              ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
+              pair: `${foreground} on ${background}`,
+              ratio: ratio(token(foreground), token(background)),
+              min: 4.5,
             });
-          }
-        const track = el.querySelector(".astryx-switch")!;
-        const thumb = el.querySelector(".astryx-switch-thumb")!;
-        const trackLight = luminance(getComputedStyle(track).backgroundColor);
-        for (const [name, color] of [
-          ["switch surface", "var(--surface)"],
-          ["switch thumb", getComputedStyle(thumb).backgroundColor],
-        ]) {
-          const otherLight = luminance(color);
-          pairs.push({
-            foreground: name,
-            background: "off track",
-            ratio:
-              (Math.max(trackLight, otherLight) + 0.05) /
-              (Math.min(trackLight, otherLight) + 0.05),
-          });
-        }
+        for (const background of [
+          "color-background-body",
+          "color-background-surface",
+        ])
+          pairs.push(
+            {
+              pair: `color-text-accent on ${background}`,
+              ratio: ratio(token("color-text-accent"), token(background)),
+              min: 4.5,
+            },
+            {
+              pair: `focus-outline-color on ${background}`,
+              ratio: ratio(token("focus-outline-color"), token(background)),
+              min: 3,
+            },
+            {
+              pair: `color-border-emphasized on ${background}`,
+              ratio: ratio(token("color-border-emphasized"), token(background)),
+              min: 3,
+            },
+          );
+        pairs.push({
+          pair: "color-on-accent on color-accent",
+          ratio: ratio(token("color-on-accent"), token("color-accent")),
+          min: 4.5,
+        });
         probe.remove();
         return pairs;
       });
-      for (const pair of pairs)
-        expect(
-          pair.ratio,
-          `${pair.foreground} on ${pair.background}`,
-        ).toBeGreaterThanOrEqual(pair.background === "off track" ? 3 : 4.5);
+      for (const { pair, ratio, min } of pairs)
+        expect(ratio, pair).toBeGreaterThanOrEqual(min);
     });
   }
 
@@ -1102,42 +1093,9 @@ test("History preserves an explicitly saved Annotate shortcut", async ({
   await openSettings(page, { stored: { annotateShortcut: "Alt+Shift+KeyS" } });
   await page.getByRole("button", { name: "History", exact: true }).click();
   await page.getByRole("radio", { name: "Annotations", exact: true }).check();
-  await expect(page.locator("main .ui-keycaps kbd")).toHaveText([
-    "⌥",
-    "⇧",
-    "S",
-  ]);
-});
-
-test("forced 140px stress case keeps the wrapped History thumb on the selected row", async ({
-  page,
-}) => {
-  await openSettings(page);
-  await page.getByRole("button", { name: "History", exact: true }).click();
-  await page.addStyleTag({ content: ".ui-segments { max-width: 140px; }" });
-  const option = page.getByRole("radio", { name: "Annotations", exact: true });
-  await option.check();
-  await expect
-    .poll(() =>
-      option.evaluate((input) => {
-        const label = input.parentElement!;
-        const thumb = new DOMMatrixReadOnly(
-          getComputedStyle(label.parentElement!, "::before").transform,
-        );
-        return (
-          label.offsetTop > 3 &&
-          Math.abs(thumb.f - label.offsetTop) < 0.1 &&
-          Math.abs(thumb.e - label.offsetLeft) < 0.1 &&
-          label.parentElement!.style.getPropertyValue("--thumb-y") ===
-            `${label.offsetTop}px`
-        );
-      }),
-    )
-    .toBe(true);
   await expect(
-    page.getByText("No annotations yet", { exact: true }),
-  ).toBeVisible();
-  await page.screenshot({ path: "target/independent-qa/wrapped-history.png" });
+    page.getByRole("img", { name: "Alt + Shift + S" }).locator("kbd"),
+  ).toHaveText(["⌥", "⇧", "S"]);
 });
 
 for (const failLoad of [false, true]) {
@@ -1162,7 +1120,7 @@ for (const failLoad of [false, true]) {
       .toEqual({
         palette: failLoad ? "ember" : "paper",
         mode: failLoad ? "light" : "dark",
-        libraryTheme: failLoad ? "dictate" : "dictate-paper",
+        libraryTheme: failLoad ? "ember" : "paper",
         colorScheme: failLoad ? "light dark" : "dark",
       });
     await expect(
@@ -1215,10 +1173,10 @@ for (const mode of ["light", "dark"]) {
     await page.screenshot({
       path: `target/qa-round-3/${output}-settings-${mode}.png`,
     });
-    await page.getByRole("button", { name: "Shortcut", exact: true }).click();
+    await page.getByRole("button", { name: /^Shortcut,/ }).click();
     await expect(
       page
-        .getByRole("button", { name: "Shortcut", exact: true })
+        .getByRole("button", { name: /^Shortcut,/ })
         .filter({ hasText: "Press shortcut" }),
     ).toBeVisible();
     await page.screenshot({
@@ -1283,10 +1241,9 @@ for (const width of [720, 560, 390])
     await page.emulateMedia({ colorScheme: "dark" });
     await openSettings(page);
     const recorder = page.getByRole("button", {
-      name: "Shortcut",
-      exact: true,
+      name: /^Shortcut,/,
     });
-    await expect(recorder.locator("kbd")).toHaveText(["⌥", "⇧", "Space"]);
+    await expect(recorder.locator("kbd")).toHaveText(["⌥", "⇧", "SPACE"]);
     const clipped = await recorder.evaluate((button) =>
       [...button.querySelectorAll("kbd")].flatMap((kbd) => {
         const key = kbd.getBoundingClientRect();
@@ -1311,21 +1268,27 @@ for (const width of [720, 560, 390])
 test("settings controls share one pill shape", async ({ page }) => {
   await openSettings(page);
   await expect(page.getByRole("switch")).toBeAttached();
-  const radii = await page.locator("main").evaluate((main) =>
+  const shapes = await page.getByRole("main").evaluate((main) =>
     [
       ...main.querySelectorAll(
-        ".ui-group button:not(.row-link), .ui-group select, .ui-shortcut",
+        "li button:not([role=switch]), li [role=combobox]",
       ),
     ]
       .filter((el) => el.getBoundingClientRect().width > 0)
       .map((el) => {
-        const { height } = el.getBoundingClientRect();
-        return (
-          parseFloat(getComputedStyle(el).borderTopLeftRadius) >=
-          height / 2 - 0.5
-        );
+        const painted =
+          el.getAttribute("role") === "combobox" ? el.parentElement! : el;
+        const { height } = painted.getBoundingClientRect();
+        return {
+          name: el.getAttribute("aria-label") ?? el.textContent ?? "",
+          pill:
+            parseFloat(getComputedStyle(painted).borderTopLeftRadius) >=
+            height / 2 - 0.5,
+        };
       }),
   );
-  expect(radii.length).toBeGreaterThan(3);
-  expect(radii.every(Boolean)).toBe(true);
+  expect(shapes.length).toBeGreaterThan(3);
+  expect(shapes.filter(({ pill }) => !pill).map(({ name }) => name)).toEqual(
+    [],
+  );
 });

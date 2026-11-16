@@ -1,5 +1,3 @@
-export * from "./Button";
-export * from "./Controls";
 export * from "./Settings";
 export * from "./ShortcutRecorder";
 export * from "./Content";

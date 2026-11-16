@@ -1,6 +1,5 @@
 import palettes from "./palettes.generated.json";
 import contrast from "./contrast.generated.json";
-import { Toast } from "./Content";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { tokens } from "./tokens";
 
@@ -126,17 +125,6 @@ function Foundations() {
           Labels and icons distinguish errors from recording; compare them side
           by side above.
         </p>
-      </section>
-      <section className="foundation-section">
-        <h2>Status surfaces</h2>
-        <div className="story-stack">
-          <Toast>Copied to clipboard.</Toast>
-          <Toast tone="warning">
-            Microphone disconnected. Choose another input.
-          </Toast>
-          <Toast tone="danger">Download failed. Try again.</Toast>
-          <Toast tone="info">Your audio stays on this Mac.</Toast>
-        </div>
       </section>
       <section className="foundation-section">
         <h2>Measured contrast · WCAG AA</h2>

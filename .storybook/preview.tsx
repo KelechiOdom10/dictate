@@ -1,17 +1,14 @@
 import { useEffect } from "react";
 import type { Preview } from "@storybook/react-vite";
 import "../src/ui/ui.css";
-import { SettingsTheme } from "../src/ui/SettingsTheme";
+import { SettingsTheme, THEMES } from "../src/ui/SettingsTheme";
 const preview: Preview = {
   globalTypes: {
     theme: {
       description: "Theme",
       toolbar: {
         icon: "paintbrush",
-        items: [
-          { value: "ember", title: "Ember" },
-          { value: "paper", title: "Paper" },
-        ],
+        items: THEMES.map(({ id, name }) => ({ value: id, title: name })),
         dynamicTitle: true,
       },
     },
@@ -38,17 +35,19 @@ const preview: Preview = {
         document.body.style.background = "var(--canvas)";
       }, [context.globals.theme, context.globals.mode]);
       if (
-        [
-          "Components/Button",
-          "Components/Controls",
-          "Components/Settings",
-          "Components/ShortcutRecorder",
-          "Components/Content",
+        ![
+          "Foundations",
+          "Pages",
+          "Components/RecordingCapsule",
+          "Components/AnnotateBar",
+          "Components/Ink",
+          "Components/SettingsTheme",
+          "Annotate/Ink events",
         ].includes(context.title)
       )
         return (
           <SettingsTheme
-            palette={context.globals.theme}
+            theme={context.globals.theme}
             mode={context.globals.mode}
           >
             <Story />

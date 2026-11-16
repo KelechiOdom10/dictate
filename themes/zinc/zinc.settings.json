@@ -1,0 +1,31 @@
+{
+  "name": "zinc",
+  "like": "neutral",
+  "mode": "both",
+  "settings": [
+    {
+      "thing": "font",
+      "value": "Geist, -apple-system, system-ui, sans-serif",
+      "source": "dial"
+    },
+    {
+      "thing": "neutral",
+      "value": "#71717a",
+      "source": "dial"
+    },
+    {
+      "thing": "accent",
+      "value": "#71717a",
+      "source": "dial"
+    },
+    {
+      "thing": "corners",
+      "value": "pill",
+      "source": "dial",
+      "on": "selector",
+      "only": true
+    }
+  ],
+  "lifted": [],
+  "palette": "3184e9121b9f437744ab57e93c4df7e17ee924222658bddd850eb33438b927f2"
+}

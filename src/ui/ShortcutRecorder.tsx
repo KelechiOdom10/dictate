@@ -1,58 +1,68 @@
 import type { KeyboardEvent } from "react";
-import type { ControlSize } from "./Button";
+import { Button } from "@astryxdesign/core/Button";
+import { Kbd } from "@astryxdesign/core/Kbd";
 
-const keyLabels: Record<string, string> = {
-  CommandOrControl: "⌘",
-  Super: "⌘",
-  Meta: "⌘",
-  Control: "⌃",
-  Alt: "⌥",
-  Option: "⌥",
-  Shift: "⇧",
+const keyNames: Record<string, string> = {
+  CommandOrControl: "meta",
+  Super: "meta",
+  Meta: "meta",
+  Control: "ctrl",
+  Alt: "alt",
+  Option: "alt",
+  Shift: "shift",
+  Escape: "escape",
+  Enter: "enter",
+  Tab: "tab",
+  Backspace: "backspace",
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
 };
-export function KeyboardShortcut({
-  value,
-  size = "md",
-}: {
-  value: string;
-  size?: ControlSize;
-}) {
-  return (
-    <span className={`ui-keycaps ui-size-${size}`}>
-      {value
-        .split("+")
-        .filter(Boolean)
-        .map((key, index) => (
-          <kbd key={index}>
-            {keyLabels[key] ?? key.replace(/^(Key|Digit)/, "")}
-          </kbd>
-        ))}
-    </span>
-  );
+export function shortcutKeys(value: string) {
+  return value
+    .split("+")
+    .filter(Boolean)
+    .map((key) => keyNames[key] ?? key.replace(/^(Key|Digit)/, ""))
+    .join("+");
+}
+const spokenNames: Record<string, string> = {
+  CommandOrControl: "Command",
+  Super: "Command",
+  Meta: "Command",
+  Option: "Alt",
+};
+function spokenKeys(value: string) {
+  return value
+    .split("+")
+    .filter(Boolean)
+    .map((key) => spokenNames[key] ?? key.replace(/^(Key|Digit|Arrow)/, ""))
+    .join(" + ");
+}
+export function KeyboardShortcut({ value }: { value: string }) {
+  return <Kbd keys={shortcutKeys(value)} />;
 }
 type Props = {
-  size?: ControlSize;
-  id?: string;
   value: string;
+  label: string;
   recording: boolean;
   disabled?: boolean;
-  "aria-describedby"?: string;
   onStart: () => void;
   onCancel: () => void;
   onCommit: (shortcut: string) => void;
   onError: (error: string) => void;
 };
 export function ShortcutRecorder({
-  size = "md",
   value,
+  label,
   recording,
+  disabled,
   onStart,
   onCancel,
   onCommit,
   onError,
-  ...props
 }: Props) {
-  function keyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function keyDown(event: KeyboardEvent<HTMLElement>) {
     if (!recording || event.repeat) return;
     if (event.key === "Tab") {
       onCancel();
@@ -77,10 +87,14 @@ export function ShortcutRecorder({
     onCommit([...modifiers, event.code].join("+"));
   }
   return (
-    <button
-      {...props}
-      type="button"
-      className={`ui-button ui-size-${size} ui-button-ghost ui-shortcut ${recording ? "ui-capturing" : ""}`}
+    <Button
+      label={
+        recording
+          ? `${label}, Press shortcut Esc to cancel`
+          : `${label}, ${spokenKeys(value)}`
+      }
+      variant={recording ? "primary" : "secondary"}
+      isDisabled={disabled}
       onClick={(event) => {
         event.currentTarget.focus();
         if (!recording) onStart();
@@ -92,11 +106,11 @@ export function ShortcutRecorder({
     >
       {recording ? (
         <>
-          Press shortcut <KeyboardShortcut value="esc" size={size} />
+          Press shortcut <Kbd keys="escape" />
         </>
       ) : (
-        <KeyboardShortcut value={value} size={size} />
+        <KeyboardShortcut value={value} />
       )}
-    </button>
+    </Button>
   );
 }

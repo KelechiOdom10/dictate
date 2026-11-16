@@ -1,33 +1,57 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { Button } from "./ui";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Text } from "@astryxdesign/core/Text";
+
+export function LoadError({
+  error,
+  onRetry,
+}: {
+  error: unknown;
+  onRetry: () => void;
+}) {
+  return (
+    <Banner
+      role="alert"
+      status="error"
+      title={String(error)}
+      collapsible={false}
+      endContent={<Button size="sm" label="Try again" onClick={onRetry} />}
+    />
+  );
+}
+
+export function Loading({ children }: { children: string }) {
+  return (
+    <Text role="status" color="secondary">
+      {children}
+    </Text>
+  );
+}
 
 /** What a settings page shows before its settings have loaded. */
 export function SettingsPending({ query }: { query: UseQueryResult }) {
   if (query.isError)
     return (
-      <div className="notice" role="alert">
-        <p>{String(query.error)}</p>
-        <Button onClick={() => void query.refetch()}>Try again</Button>
-      </div>
+      <LoadError error={query.error} onRetry={() => void query.refetch()} />
     );
+  return <Loading>Loading your preferences…</Loading>;
+}
+
+export function ErrorNotice({ error }: { error: string }) {
+  if (!error) return null;
   return (
-    <div className="loading" role="status">
-      Loading your preferences…
-    </div>
+    <Banner role="alert" status="error" title={error} collapsible={false} />
   );
 }
 
 export function SaveStatus({ busy, error }: { busy: boolean; error: string }) {
   return (
     <>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      <p className="save-status" role="status">
+      <ErrorNotice error={error} />
+      <Text role="status" type="supporting">
         {busy ? "Saving…" : "Changes save automatically."}
-      </p>
+      </Text>
     </>
   );
 }

@@ -1,5 +1,29 @@
 import { Check, ImageDown, PenLine, Square, X } from "lucide-react";
-import { IconButton } from "./Button";
+import type { ReactNode } from "react";
+
+function BarButton({
+  label,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string;
+  pressed?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="ui-bar-button"
+      aria-label={label}
+      aria-pressed={pressed}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
 
 function clock(seconds: number) {
   const pad = (value: number) => Math.floor(value).toString().padStart(2, "0");
@@ -23,23 +47,16 @@ export function AnnotateBar({
       <span className="ui-timer" role="timer" aria-label="Recording time">
         {clock(seconds)}
       </span>
-      <IconButton
+      <BarButton
         label={pen ? "Stop drawing (Esc)" : "Draw with the mouse"}
-        aria-pressed={pen}
-        variant="ghost"
-        size="sm"
+        pressed={pen}
         onClick={onPen}
       >
         <PenLine />
-      </IconButton>
-      <IconButton
-        label="Stop recording"
-        variant="ghost"
-        size="sm"
-        onClick={onStop}
-      >
+      </BarButton>
+      <BarButton label="Stop recording" onClick={onStop}>
         <Square />
-      </IconButton>
+      </BarButton>
     </div>
   );
 }
@@ -70,18 +87,16 @@ export function AnnotateCopiedBar({
         {imageCopied ? "Image copied" : "Copied"}
       </span>
       {hasImage && (
-        <IconButton
+        <BarButton
           label={imageCopied ? "Image copied" : "Copy image"}
-          variant="ghost"
-          size="sm"
           onClick={onCopyImage}
         >
           {imageCopied ? <Check /> : <ImageDown />}
-        </IconButton>
+        </BarButton>
       )}
-      <IconButton label="Close" variant="ghost" size="sm" onClick={onClose}>
+      <BarButton label="Close" onClick={onClose}>
         <X />
-      </IconButton>
+      </BarButton>
     </div>
   );
 }

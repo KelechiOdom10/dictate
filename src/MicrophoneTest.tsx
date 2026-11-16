@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-import { Button, LevelMeter } from "./ui";
+import { Button } from "@astryxdesign/core/Button";
+import { LevelMeter, SettingsRow } from "./ui";
 
 type Props = {
   testing: boolean;
@@ -49,18 +50,18 @@ export default function MicrophoneTest({
   }, [testing, onError, onTestingChange]);
 
   return (
-    <div className="mic-test">
-      <div className="meter-copy">
-        <LevelMeter level={testing ? level : 0} />
-        <span>
-          {testing
-            ? "Listening · audio is not saved"
-            : "Check your input level"}
-        </span>
-      </div>
-      <Button onClick={() => void onToggle()} disabled={disabled}>
-        {testing ? "Stop test" : "Test microphone"}
-      </Button>
-    </div>
+    <SettingsRow
+      label="Input level"
+      help={
+        testing ? "Listening · audio is not saved" : "Check your input level"
+      }
+    >
+      <LevelMeter level={testing ? level : 0} />
+      <Button
+        label={testing ? "Stop test" : "Test microphone"}
+        isDisabled={disabled}
+        onClick={() => void onToggle()}
+      />
+    </SettingsRow>
   );
 }

@@ -9,7 +9,7 @@ const meta = {
   title: "Components/SettingsTheme",
   component: SettingsTheme,
   render: (_, { globals }) => (
-    <SettingsTheme palette={globals.theme} mode={globals.mode}>
+    <SettingsTheme theme={globals.theme} mode={globals.mode}>
       <Startup />
     </SettingsTheme>
   ),

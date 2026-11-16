@@ -2,8 +2,12 @@ import { useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ExternalLink, FolderOpen, Info } from "lucide-react";
+import { Button } from "@astryxdesign/core/Button";
+import { Text } from "@astryxdesign/core/Text";
+import { VStack } from "@astryxdesign/core/VStack";
 import { openLocation, readAppFolders, type Location } from "./about";
-import { Button, PathText, SettingsGroup, SettingsRow as Row } from "./ui";
+import { ErrorNotice } from "./SettingsStatus";
+import { PathText, SettingsGroup, SettingsRow as Row } from "./ui";
 
 export default function AboutPage() {
   const version = useQuery({ queryKey: ["version"], queryFn: getVersion });
@@ -23,15 +27,20 @@ export default function AboutPage() {
     path: string | undefined,
   ) => (
     <Button
-      id={location}
       size="sm"
-      aria-label={`Show in Finder, ${name}`}
-      aria-describedby={`${location}-help`}
-      disabled={!path}
+      label={`Show in Finder, ${name}`}
+      icon={<FolderOpen size={14} aria-hidden="true" />}
+      isDisabled={!path}
       onClick={() => open.mutate(location)}
     >
-      <FolderOpen size={14} aria-hidden="true" /> Show in Finder
+      Show in Finder
     </Button>
+  );
+  const help = (text: string, path: string | undefined) => (
+    <VStack gap={1}>
+      <Text type="supporting">{text}</Text>
+      {path && <PathText>{path}</PathText>}
+    </VStack>
   );
   return (
     <>
@@ -40,31 +49,25 @@ export default function AboutPage() {
         icon={<Info size={14} aria-hidden="true" />}
       >
         <Row
-          id="version"
           label="Version"
           help="The dictate build running now. Include it when you report a problem."
         >
-          <output
-            id="version"
-            className="ui-row-value"
-            aria-describedby="version-help"
-          >
+          <Text role="status" aria-label="Version" hasTabularNumbers>
             {version.data ?? "…"}
-          </output>
+          </Text>
         </Row>
         <Row
-          id="source"
           label="Source code"
           help="Read the code, or follow along as dictate is built."
         >
           <Button
-            id="source"
             size="sm"
-            aria-label="View on GitHub, source code"
-            aria-describedby="source-help"
+            label="View on GitHub, source code"
+            endContent={undefined}
+            icon={<ExternalLink size={14} aria-hidden="true" />}
             onClick={() => open.mutate("source")}
           >
-            View on GitHub <ExternalLink size={14} aria-hidden="true" />
+            View on GitHub
           </Button>
         </Row>
       </SettingsGroup>
@@ -73,35 +76,27 @@ export default function AboutPage() {
         icon={<FolderOpen size={14} aria-hidden="true" />}
       >
         <Row
-          id="data"
           label="App data"
-          help={
-            <>
-              Settings, history, models and debug recordings.
-              {folders.data && <PathText>{folders.data.data}</PathText>}
-            </>
-          }
+          help={help(
+            "Settings, history, models and debug recordings.",
+            folders.data?.data,
+          )}
         >
           {folder("data", "app data", folders.data?.data)}
         </Row>
         <Row
-          id="logs"
           label="Logs"
-          help={
-            <>
-              What dictate did and any errors, useful when reporting a problem.
-              {folders.data && <PathText>{folders.data.logs}</PathText>}
-            </>
-          }
+          help={help(
+            "What dictate did and any errors, useful when reporting a problem.",
+            folders.data?.logs,
+          )}
         >
           {folder("logs", "logs", folders.data?.logs)}
         </Row>
       </SettingsGroup>
-      {(error || folders.isError) && (
-        <p className="error" role="alert">
-          {error || String(folders.error)}
-        </p>
-      )}
+      <ErrorNotice
+        error={error || (folders.isError ? String(folders.error) : "")}
+      />
     </>
   );
 }

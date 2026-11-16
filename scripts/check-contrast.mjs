@@ -8,7 +8,7 @@ try {
   );
   const results = [];
   const palettes = [];
-  for (const theme of ["ember", "paper"])
+  for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"])
     for (const mode of ["light", "dark"]) {
       const { pairs, palette } = await page.evaluate(
         ({ theme, mode }) => {

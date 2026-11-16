@@ -35,6 +35,29 @@ export function LevelMeter({
     </div>
   );
 }
+const overlayKeys: Record<string, string> = {
+  CommandOrControl: "⌘",
+  Super: "⌘",
+  Meta: "⌘",
+  Control: "⌃",
+  Alt: "⌥",
+  Option: "⌥",
+  Shift: "⇧",
+};
+export function OverlayShortcut({ value }: { value: string }) {
+  return (
+    <span className="ui-keycaps">
+      {value
+        .split("+")
+        .filter(Boolean)
+        .map((key, index) => (
+          <kbd key={index}>
+            {overlayKeys[key] ?? key.replace(/^(Key|Digit)/, "")}
+          </kbd>
+        ))}
+    </span>
+  );
+}
 function clock(seconds: number) {
   const pad = (value: number) => Math.floor(value).toString().padStart(2, "0");
   return `${pad(seconds / 60)}:${pad(seconds % 60)}`;

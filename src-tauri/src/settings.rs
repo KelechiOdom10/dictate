@@ -19,6 +19,16 @@ pub enum Theme {
     #[default]
     Ember,
     Paper,
+    Capy,
+    RosePine,
+    Neutral,
+}
+
+/// A theme id this build doesn't know, such as one written by a newer build
+/// or by hand, falls back to Ember instead of discarding every setting.
+fn theme_or_ember<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Theme, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, TS)]
@@ -88,7 +98,7 @@ pub struct Settings {
     pub microphone: Option<String>,
     #[serde(default)]
     pub launch_at_login: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "theme_or_ember")]
     pub theme: Theme,
     #[serde(default)]
     pub appearance_mode: AppearanceMode,
@@ -377,6 +387,47 @@ mod tests {
         assert_eq!(load(&path).unwrap(), settings);
         fs::write(path, "{broken").unwrap();
         assert!(load(&dir.path().join("settings.json")).is_err());
+    }
+
+    #[test]
+    fn every_theme_id_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        for (theme, id) in [
+            (Theme::Ember, "ember"),
+            (Theme::Paper, "paper"),
+            (Theme::Capy, "capy"),
+            (Theme::RosePine, "rosePine"),
+            (Theme::Neutral, "neutral"),
+        ] {
+            let settings = Settings {
+                theme,
+                ..Settings::default()
+            };
+            save(&path, &settings).unwrap();
+            let value: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(value["theme"], id);
+            assert_eq!(load(&path).unwrap(), settings);
+        }
+    }
+
+    #[test]
+    fn unknown_theme_falls_back_to_ember_and_keeps_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        for theme in [r#""dracula""#, r#""Ember""#, "42", "null", r#"{"id":"capy"}"#] {
+            fs::write(
+                &path,
+                format!(r#"{{"shortcut":"Control+KeyD","theme":{theme},"appearanceMode":"dark"}}"#),
+            )
+            .unwrap();
+            let (settings, problem) = load_or_default(&path);
+            assert!(problem.is_none(), "{theme}");
+            assert_eq!(settings.theme, Theme::Ember, "{theme}");
+            assert_eq!(settings.shortcut, "Control+KeyD", "{theme}");
+            assert_eq!(settings.appearance_mode, AppearanceMode::Dark, "{theme}");
+        }
     }
 
     #[test]

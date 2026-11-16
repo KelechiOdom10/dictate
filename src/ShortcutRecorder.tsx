@@ -79,7 +79,6 @@ export default function ShortcutRecorder({
   }
   return (
     <SettingsRow
-      id={id}
       label={label}
       help={
         conflict ||
@@ -88,8 +87,7 @@ export default function ShortcutRecorder({
       }
     >
       <Recorder
-        id={id}
-        aria-describedby={`${id}-help`}
+        label={label}
         value={value}
         recording={recording}
         disabled={disabled}

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build:themes": "astryx experimental theme compile themes/dictate/dictate.theme.ts && astryx theme build themes/paper.theme.ts -o src/themes/paper/paper.css",
+    "build:themes": "for t in ember paper capy rose-pine zinc; do astryx experimental theme compile themes/$t/$t.theme.ts || exit 1; done",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { useState } from "react";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import type { AnnotationEntry } from "./annotations";
 import type { HistoryEntry, TakeStatus } from "./history";
 import modelFixture from "./models.fixture.json";
@@ -24,6 +24,23 @@ const meta = {
 } satisfies Meta;
 export default meta;
 type Story = StoryObj<typeof meta>;
+async function choose(
+  canvasElement: HTMLElement,
+  label: string,
+  option: string | RegExp,
+) {
+  const select = within(canvasElement).getByRole("combobox", { name: label });
+  await waitFor(() => expect(select).toBeEnabled());
+  await userEvent.click(select);
+  fireEvent.click(
+    await within(document.body).findByRole("option", { name: option }),
+  );
+  await waitFor(() =>
+    expect(
+      within(canvasElement).getByRole("combobox", { name: label }),
+    ).toHaveTextContent(option),
+  );
+}
 const minute = 60_000;
 const sampleHistory = (now: number): HistoryEntry[] =>
   [
@@ -166,7 +183,7 @@ function mockApp(
     shortcutMode: "hold",
     microphone: null,
     launchAtLogin: false,
-    theme: globals.theme === "paper" ? "paper" : "ember",
+    theme: settingsSchema.shape.theme.parse(globals.theme),
     overlayPosition: "bottom",
     historyRetention: "week",
     appearanceMode: globals.mode === "dark" ? "dark" : "light",
@@ -317,10 +334,7 @@ export const GeneralActiveModelMissing: Story = {
     await expect(
       c.queryByRole("button", { name: "Download a model" }),
     ).not.toBeInTheDocument();
-    const select = c.getByRole("combobox", { name: "Speech model" });
-    await expect(select).toBeEnabled();
-    await userEvent.selectOptions(select, "small.en");
-    await waitFor(() => expect(select).toHaveValue("small.en"));
+    await choose(canvasElement, "Speech model", /^Small English/);
     await expect(c.queryByText(/isn’t installed/)).not.toBeInTheDocument();
   },
 };
@@ -335,10 +349,9 @@ export const GeneralFreshProfile: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     const select = await c.findByRole("combobox", { name: "Speech model" });
-    await waitFor(() => expect(select).toHaveValue("parakeet-unified-en"));
-    await expect(
-      c.getByRole("option", { name: "Parakeet English (Recommended)" }),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(select).toHaveTextContent("Parakeet English (Recommended)"),
+    );
   },
 };
 export const GeneralLoading: Story = {
@@ -385,7 +398,10 @@ export const History: Story = {
     const c = within(canvasElement);
     const slack = await c.findByRole("button", { name: /Ship the history/ });
     await userEvent.click(slack);
-    await expect(slack).toHaveAttribute("aria-current", "true");
+    await expect(slack.closest("[aria-current]")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
     await expect(
       c.getByRole("region", { name: "Dictation" }),
     ).toHaveTextContent("Then hand it to review.");
@@ -393,7 +409,10 @@ export const History: Story = {
     await expect(
       c.getByRole("button", { name: /No speech detected/ }),
     ).toHaveFocus();
-    await expect(c.getByRole("button", { name: "Copy text" })).toBeDisabled();
+    await expect(c.getByRole("button", { name: "Copy text" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     await userEvent.click(c.getByRole("button", { name: /Bakery/i }));
   },
 };
@@ -449,7 +468,7 @@ export const HistoryAnnotationActions: Story = {
     ).toHaveTextContent("Nothing was said in this session.");
     await expect(
       c.getByRole("region", { name: "Annotation" }),
-    ).toHaveTextContent("Partial session. Video cut short");
+    ).toHaveTextContent(/Partial session\.\s*Video cut short/);
   },
 };
 export const HistoryAnnotationsEmpty: Story = {
@@ -476,14 +495,16 @@ export const HistoryDelete: Story = {
     await userEvent.click(c.getByRole("button", { name: "Delete dictation" }));
     await userEvent.click(
       within(
-        c.getByRole("group", { name: "Delete this dictation?" }),
+        c.getByRole("alertdialog", { name: "Delete this dictation?" }),
       ).getByRole("button", { name: "Delete dictation" }),
     );
     await waitFor(() =>
       expect(c.queryByRole("button", { name: /bakery/i })).toBeNull(),
     );
     await expect(
-      c.getByRole("button", { name: /Ship the history/ }),
+      c
+        .getByRole("button", { name: /Ship the history/ })
+        .closest("[aria-current]"),
     ).toHaveAttribute("aria-current", "true");
   },
 };
@@ -492,17 +513,20 @@ export const HistoryRetention: Story = {
   render: () => <GeneralPage page="History" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
-    const keep = await c.findByRole("combobox", { name: "Keep history for" });
-    await waitFor(() => expect(keep).toBeEnabled());
-    await userEvent.selectOptions(keep, "forever");
-    await expect(c.queryByRole("group", { name: /older than/ })).toBeNull();
-    await userEvent.selectOptions(keep, "day");
-    await expect(
-      c.getByRole("group", { name: "Delete dictations older than 1 day?" }),
-    ).toBeVisible();
+    await c.findByRole("combobox", { name: "Keep history for" });
+    await choose(canvasElement, "Keep history for", "Forever");
+    await expect(c.queryByRole("alertdialog")).toBeNull();
+    const keep = c.getByRole("combobox", { name: "Keep history for" });
+    await userEvent.click(keep);
+    fireEvent.click(
+      await within(document.body).findByRole("option", { name: "1 day" }),
+    );
+    const confirm = await c.findByRole("alertdialog", {
+      name: "Delete dictations older than 1 day?",
+    });
+    await waitFor(() => expect(confirm).toBeVisible());
     await userEvent.click(c.getByRole("button", { name: "Cancel" }));
-    await expect(keep).toHaveValue("forever");
-    await userEvent.selectOptions(keep, "day");
+    await expect(keep).toHaveTextContent("Forever");
   },
 };
 export const HistoryLoadMore: Story = {
@@ -752,7 +776,10 @@ export const AnnotateToggles: Story = {
     await waitFor(() => expect(show).toBeChecked());
     await userEvent.click(enabled);
     await waitFor(() => expect(enabled).not.toBeChecked());
-    await expect(c.getByRole("button", { name: /Shortcut/ })).toBeDisabled();
+    await expect(c.getByRole("button", { name: /^Shortcut,/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   },
 };
 export const AnnotateNotAllowed: Story = {
@@ -776,14 +803,15 @@ export const Output: Story = {
     const method = await c.findByRole("combobox", {
       name: "After dictation",
     });
-    await expect(method).toHaveValue("paste");
-    await userEvent.selectOptions(method, "copyOnly");
-    await waitFor(() => expect(method).toHaveValue("copyOnly"));
+    await expect(method).toHaveTextContent(/^Paste$/);
+    await choose(canvasElement, "After dictation", "Copy only");
     await expect(c.getByText(/Paste with ⌘V when you’re ready/)).toBeVisible();
-    await userEvent.selectOptions(method, "paste");
-    await waitFor(() => expect(method).toHaveValue("paste"));
-    await userEvent.selectOptions(method, "pasteKeep");
-    await waitFor(() => expect(method).toHaveValue("pasteKeep"));
+    await choose(canvasElement, "After dictation", /^Paste$/);
+    await choose(
+      canvasElement,
+      "After dictation",
+      "Paste and keep on clipboard",
+    );
     const capitalise = c.getByRole("switch", {
       name: "Capitalise the first letter",
     });
@@ -803,7 +831,7 @@ export const OutputCopyOnly: Story = {
     const c = within(canvasElement);
     await expect(
       await c.findByRole("combobox", { name: "After dictation" }),
-    ).toHaveValue("copyOnly");
+    ).toHaveTextContent("Copy only");
     await expect(
       c.getByRole("switch", { name: "Add a trailing space" }),
     ).toBeChecked();
@@ -821,11 +849,8 @@ export const Advanced: Story = {
     await userEvent.click(warm);
     await waitFor(() => expect(warm).toBeChecked());
     await expect(c.getByText(/first word isn’t clipped/)).toBeVisible();
-    const position = c.getByRole("combobox", { name: "Overlay position" });
-    await userEvent.selectOptions(position, "top");
-    await waitFor(() => expect(position).toHaveValue("top"));
-    await waitFor(() => expect(position).toBeEnabled());
-    await userEvent.selectOptions(position, "bottom");
+    await choose(canvasElement, "Overlay position", "Top");
+    await choose(canvasElement, "Overlay position", "Bottom");
   },
 };
 export const About: Story = {
