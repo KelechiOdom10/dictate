@@ -27,7 +27,7 @@ export function LevelMeter({
   );
 }
 export type RecordingState =
-  | { kind: "recording"; seconds: number; level: number }
+  | { kind: "recording"; seconds: number; level?: number }
   | { kind: "transcribing" }
   | { kind: "done" }
   | { kind: "error"; message: string }
@@ -76,7 +76,7 @@ export function RecordingCapsule({
               .toString()
               .padStart(2, "0")}
           </span>
-          <LevelMeter level={state.level} />
+          {state.level !== undefined && <LevelMeter level={state.level} />}
         </>
       )}
       {shortcut}

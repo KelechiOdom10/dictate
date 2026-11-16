@@ -25,6 +25,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 async function mockSettings() {
   let settings: Settings = {
+    version: 1,
     shortcut: "Alt+Shift+Space",
     shortcutMode: "hold",
     microphone: null,
@@ -33,6 +34,7 @@ async function mockSettings() {
   mockWindows("settings");
   mockIPC(
     (command, args) => {
+      if (command === "pipeline_status") return { phase: "idle", error: null };
       if (command === "get_settings") return settings;
       if (command === "save_settings") {
         settings = settingsSchema.parse(
@@ -85,7 +87,11 @@ export const GeneralLoading: Story = {
   beforeEach: () => {
     mockWindows("settings");
     mockIPC(
-      (command) => (command === "get_settings" ? new Promise(() => {}) : null),
+      (command) => {
+        if (command === "pipeline_status")
+          return { phase: "idle", error: null };
+        return command === "get_settings" ? new Promise(() => {}) : null;
+      },
       { shouldMockEvents: true },
     );
     return clearMocks;
@@ -97,6 +103,8 @@ export const GeneralError: Story = {
     mockWindows("settings");
     mockIPC(
       (command) => {
+        if (command === "pipeline_status")
+          return { phase: "idle", error: null };
         if (command === "get_settings")
           throw new Error("Settings file could not be read.");
         return null;

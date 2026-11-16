@@ -38,11 +38,12 @@ struct Runtime {
     settings: Settings,
     phase: Phase,
     capturing_shortcut: bool,
+    shortcut_registered: bool,
 }
 
 #[tauri::command]
-fn pipeline_status() -> String {
-    format!("modules loaded; recording={}", audio::is_recording())
+fn pipeline_status(app: AppHandle) -> surface::Status {
+    surface::status(&app)
 }
 
 /// Begin capture. Called on key-down.
@@ -135,12 +136,12 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
         .join("settings.json");
     let was_enabled = app.autolaunch().is_enabled().map_err(|e| e.to_string())?;
     let old_chord = runtime.settings.chord()?;
-    let changed = chord != old_chord || runtime.capturing_shortcut;
+    let changed = chord != old_chord || !runtime.shortcut_registered;
     if changed {
         app.global_shortcut()
             .register(chord)
             .map_err(|e| format!("Shortcut unavailable: {e}"))?;
-        if !runtime.capturing_shortcut
+        if runtime.shortcut_registered
             && let Err(error) = app.global_shortcut().unregister(old_chord)
         {
             app.global_shortcut()
@@ -173,7 +174,7 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
             if let Err(error) = app.global_shortcut().unregister(chord) {
                 errors.push(format!("Remove new shortcut: {error}"));
             }
-            if !runtime.capturing_shortcut
+            if runtime.shortcut_registered
                 && let Err(error) = app.global_shortcut().register(old_chord)
             {
                 errors.push(format!("Restore shortcut: {error}"));
@@ -182,8 +183,15 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
         return Err(errors.join("; "));
     }
     runtime.capturing_shortcut = false;
+    runtime.shortcut_registered = true;
     runtime.settings = settings.clone();
     surface::update_shortcut(&app, &settings.shortcut);
+    if let Err(error) = app.emit("settings-changed", &settings) {
+        report_error(
+            &app,
+            &format!("Settings saved, but could not refresh the shortcut label: {error}"),
+        );
+    }
     Ok(settings)
 }
 
@@ -198,13 +206,29 @@ fn capture_shortcut(app: AppHandle, enabled: bool) -> Result<(), String> {
         return Err("Finish dictating before recording a shortcut".into());
     }
     let chord = runtime.settings.chord()?;
-    if enabled {
-        app.global_shortcut().unregister(chord)
-    } else {
-        app.global_shortcut().register(chord)
+    if enabled && runtime.shortcut_registered {
+        app.global_shortcut()
+            .unregister(chord)
+            .map_err(|e| e.to_string())?;
+        runtime.shortcut_registered = false;
+    } else if !enabled && !runtime.shortcut_registered {
+        app.global_shortcut()
+            .register(chord)
+            .map_err(|e| e.to_string())?;
+        runtime.shortcut_registered = true;
     }
-    .map_err(|e| e.to_string())?;
     runtime.capturing_shortcut = enabled;
+    Ok(())
+}
+
+#[tauri::command]
+fn dismiss_error(app: AppHandle) -> Result<(), String> {
+    surface::clear_error(&app);
+    if surface::status(&app).phase == "idle"
+        && let Some(window) = app.get_webview_window("main")
+    {
+        window.hide().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -216,8 +240,9 @@ fn input_devices() -> Result<Vec<String>, String> {
 #[tauri::command]
 fn microphone_test(app: AppHandle, enabled: bool) -> Result<(), String> {
     if enabled {
-        let settings = get_settings(app)?;
-        audio::monitor_start(settings.microphone)
+        let settings = get_settings(app.clone())?;
+        let device = available_microphone(&app, settings.microphone)?;
+        audio::monitor_start(device)
     } else {
         audio::monitor_stop()
     }
@@ -228,8 +253,30 @@ fn microphone_level() -> Result<f32, String> {
     audio::microphone_level()
 }
 
+fn available_microphone(
+    app: &AppHandle,
+    selected: Option<String>,
+) -> Result<Option<String>, String> {
+    if let Some(name) = &selected
+        && !audio::input_devices()?.contains(name)
+    {
+        report_error(
+            app,
+            &format!("Microphone unavailable: {name}. Using the default microphone."),
+        );
+        return Ok(None);
+    }
+    Ok(selected)
+}
+
 fn report_error(app: &AppHandle, error: &str) {
     eprintln!("[dictate] {error}");
+    surface::set_error(app, error);
+    if let Some(window) = app.get_webview_window("main")
+        && let Err(error) = window.show()
+    {
+        eprintln!("[dictate] show error: {error}");
+    }
     if let Err(error) = app.emit("dictation-error", error) {
         eprintln!("[dictate] emit error: {error}");
     }
@@ -252,10 +299,9 @@ fn hotkey(
         return;
     }
     if next == Phase::Recording {
-        let result = match runtime.settings.microphone.clone() {
-            Some(device) => audio::start_device(Some(device)),
-            None => audio::start(),
-        };
+        surface::clear_error(app);
+        let result = available_microphone(app, runtime.settings.microphone.clone())
+            .and_then(audio::start_device);
         if let Err(error) = result {
             report_error(app, &error);
             return;
@@ -269,11 +315,6 @@ fn hotkey(
         }
     } else {
         let released = Instant::now();
-        if let Some(window) = app.get_webview_window("main")
-            && let Err(error) = window.hide()
-        {
-            report_error(app, &error.to_string());
-        }
         match audio::stop() {
             Ok(samples) => {
                 runtime.phase = Phase::Transcribing;
@@ -297,6 +338,12 @@ fn hotkey(
                         runtime.phase = Phase::Idle;
                     }
                     surface::set_phase(&app, "idle");
+                    if surface::status(&app).error.is_none()
+                        && let Some(window) = app.get_webview_window("main")
+                        && let Err(error) = window.hide()
+                    {
+                        report_error(&app, &error.to_string());
+                    }
                 });
             }
             Err(error) => {
@@ -333,6 +380,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             pipeline_status,
+            dismiss_error,
             record_start,
             record_stop,
             finish_dictation,
@@ -346,15 +394,36 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            let settings = settings::load(&app.path().app_data_dir()?.join("settings.json"))?;
-            app.global_shortcut().register(settings.chord()?)?;
+            let (settings, mut startup_error) =
+                settings::load_or_default(&app.path().app_data_dir()?.join("settings.json"));
+            let shortcut_registered = match settings.chord().and_then(|chord| {
+                app.global_shortcut()
+                    .register(chord)
+                    .map_err(|e| e.to_string())
+            }) {
+                Ok(()) => true,
+                Err(error) => {
+                    let message = format!(
+                        "Shortcut unavailable: {error}. Choose another shortcut in Settings."
+                    );
+                    startup_error = Some(match startup_error {
+                        Some(previous) => format!("{previous}\n{message}"),
+                        None => message,
+                    });
+                    false
+                }
+            };
             app.manage(Mutex::new(Runtime {
                 settings: settings.clone(),
                 phase: Phase::Idle,
                 capturing_shortcut: false,
+                shortcut_registered,
             }));
             surface::setup(app, &settings)?;
-            if !std::env::args().any(|arg| arg == "--autostart")
+            if let Some(error) = &startup_error {
+                report_error(app.handle(), error);
+            }
+            if (startup_error.is_some() || !std::env::args().any(|arg| arg == "--autostart"))
                 && let Some(window) = app.get_webview_window("settings")
             {
                 window.show()?;

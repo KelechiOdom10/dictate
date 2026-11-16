@@ -5,6 +5,7 @@ export type { Settings } from "./settings.generated";
 
 export const settingsSchema: z.ZodType<Settings> = z
   .object({
+    version: z.number().int().nonnegative(),
     shortcut: z.string(),
     shortcutMode: z.enum(["hold", "toggle"]),
     microphone: z.string().nullable(),
