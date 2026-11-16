@@ -1,0 +1,353 @@
+---
+import Icon from "../components/Icon.astro";
+import Mark from "../components/Mark.astro";
+import geist from "../assets/fonts/geist-latin.woff2?url";
+import { release } from "../release";
+import "../styles/site.css";
+
+const requirement = `Apple silicon, macOS 15 or later, ${release.size}`;
+
+const shotSizes = "(min-width: 64rem) 60rem, calc(100vw - 2.5rem)";
+
+const takeSizes = "(min-width: 40rem) 34rem, calc(100vw - 2.5rem)";
+
+const steps = [
+  { id: "record", name: "Record" },
+  { id: "draw", name: "Draw" },
+  { id: "talk", name: "Talk" },
+  { id: "copy", name: "Copy" },
+];
+
+const quote =
+  "And if you notice here, I can kind of come in here and choose okay for light mode, maybe I use Ember, right?";
+
+const summary = [
+  "[annotation 2:20 · T3 Code (Nightly)]",
+  "- #5 (0:53) circled region",
+  "  x 0.32–0.88, y 0.14–0.72",
+  "  — “And if you notice here, I can kind",
+  "    of come in here and choose okay”",
+  "- #6 (1:05) circled region",
+  "  x 0.34–0.91, y 0.13–0.82",
+  "  — “for light mode, maybe I use Ember,",
+  "    right?”",
+];
+
+const settingsAlt =
+  "dictate's General settings: the Option-Shift-Space shortcut in Hold to talk mode, Parakeet English as the speech model, and the microphone.";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dictate: hold to talk, on your Mac</title>
+    <meta
+      name="description"
+      content="Hold Option-Shift-Space and speak. Let go, and dictate types it into the app you are using. It runs on your Mac, with no account."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href={geist} as="font" type="font/woff2" crossorigin />
+    <script is:inline>
+      try {
+        const mode = localStorage.getItem("dictate-mode");
+        if (mode === "light" || mode === "dark") document.documentElement.dataset.mode = mode;
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="bar-top wrap">
+      <a class="brand" href="/" aria-label="dictate home">
+        <Mark class="brand-mark" />
+        <span>dictate</span>
+      </a>
+      <fieldset class="modes">
+        <legend class="visually-hidden">Appearance</legend>
+        <label title="Match system">
+          <input type="radio" name="mode" value="system" checked />
+          <Icon name="monitor" />
+          <span class="visually-hidden">Match system</span>
+        </label>
+        <label title="Light">
+          <input type="radio" name="mode" value="light" />
+          <Icon name="sun" />
+          <span class="visually-hidden">Light</span>
+        </label>
+        <label title="Dark">
+          <input type="radio" name="mode" value="dark" />
+          <Icon name="moon" />
+          <span class="visually-hidden">Dark</span>
+        </label>
+      </fieldset>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="title">
+        <div class="wrap hero-inner">
+          <ul class="tiles" aria-hidden="true">
+            <li class="tile"><Icon name="mic" /></li>
+            <li class="tile"><Icon name="type" /></li>
+            <li class="tile"><Icon name="lock" /></li>
+            <li class="tile"><Icon name="pen" /></li>
+          </ul>
+
+          <div class="stage" data-stage>
+            <Mark class="hero-mark" label="The dictate icon: five bars, the middle one lit" />
+            <button
+              class="keys"
+              type="button"
+              data-keys
+              aria-label="Option Shift Space: hold to talk"
+              aria-pressed="false"
+              aria-describedby="keys-status"
+            >
+              <kbd>⌥</kbd><kbd>⇧</kbd><kbd class="space">Space</kbd>
+            </button>
+            <p class="status" id="keys-status" data-status="idle">
+              <span class="status-hint">Press and hold</span>
+              <span class="capsule capsule-recording" aria-hidden="true">
+                <span class="dot"></span>Recording <span class="timer" data-timer>00:00</span>
+                <span class="levels"><i></i><i></i><i></i><i></i><i></i></span>
+              </span>
+              <span class="capsule capsule-done" aria-hidden="true">
+                <Icon name="check" />Text inserted
+              </span>
+              <span class="visually-hidden" aria-live="polite" data-announce></span>
+            </p>
+          </div>
+
+          <h1 id="title">Hold to talk.</h1>
+          <p class="lead">
+            Hold Option-Shift-Space and speak. Let go, and dictate types it into the app you are
+            using. It runs on your Mac, with no account.
+          </p>
+
+          <dl class="install" id="download">
+            <div>
+              <dt>Download</dt>
+              <dd class="meta">{requirement}</dd>
+              <dd class="action">
+                <a class="button" href={release.href} download>
+                  <Icon name="download" />
+                  Download
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt>First open</dt>
+              <dd class="meta">
+                Not notarised: open it once, then click Open Anyway in System Settings, Privacy
+                &amp; Security.
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="wrap section shot" aria-labelledby="app-title">
+        <h2 id="app-title" class="visually-hidden">The settings window</h2>
+        <figure class="shot">
+          <img
+            class="shot-light"
+            src="/app/settings-light.webp"
+            srcset={`/app/settings-light-720.webp 720w, /app/settings-light.webp 1440w`}
+            sizes={shotSizes}
+            width="1440"
+            height="1160"
+            alt={settingsAlt}
+            loading="lazy"
+            decoding="async"
+          />
+          <img
+            class="shot-dark"
+            src="/app/settings-dark.webp"
+            srcset={`/app/settings-dark-720.webp 720w, /app/settings-dark.webp 1440w`}
+            sizes={shotSizes}
+            width="1440"
+            height="1160"
+            alt={settingsAlt}
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+      </section>
+
+      <section class="wrap section annotate" aria-labelledby="annotate-title" data-annotate data-step="record">
+        <div class="annotate-head">
+          <h2 id="annotate-title">Annotate</h2>
+          <p class="lead">Circle the thing. Say what's wrong. Paste one summary into your agent.</p>
+        </div>
+        <div class="pills" role="tablist" aria-label="Annotate, step by step">
+          {
+            steps.map((step, i) => (
+              <button
+                type="button"
+                role="tab"
+                id={`step-${step.id}`}
+                aria-controls="take"
+                aria-selected={i === 0 ? "true" : "false"}
+                tabindex={i === 0 ? 0 : -1}
+                data-step={step.id}
+              >
+                <span class="n" aria-hidden="true">{i + 1}</span>
+                {step.name}
+              </button>
+            ))
+          }
+        </div>
+        <div class="take" id="take" role="tabpanel" aria-labelledby="step-record" tabindex="0">
+          <img
+            class="layer layer-clean"
+            src="/app/take-clean.webp"
+            srcset="/app/take-clean-640.webp 640w, /app/take-clean.webp 1200w"
+            sizes={takeSizes}
+            width="1200"
+            height="953"
+            alt="T3 Code's Appearance settings during a real take. The Annotate bar at the top reads 00:45."
+            loading="lazy"
+            decoding="async"
+          />
+          <img
+            class="layer layer-ink"
+            src="/app/take-ink.webp"
+            srcset="/app/take-ink-640.webp 640w, /app/take-ink.webp 1200w"
+            sizes={takeSizes}
+            width="1200"
+            height="953"
+            alt="The same screen at 00:53, with a red ink loop drawn around the color schemes and themes."
+            loading="lazy"
+            decoding="async"
+          />
+          <figure class="layer layer-quote">
+            <blockquote>{quote}</blockquote>
+            <figcaption><span class="mono">0:53</span> said while circling</figcaption>
+          </figure>
+          <figure class="layer layer-code">
+            <figcaption><span>summary.md</span><span class="copied">Copied · packaged in 2.2 s</span></figcaption>
+            <pre>{summary.join("\n")}</pre>
+          </figure>
+        </div>
+      </section>
+    </main>
+
+    <footer class="wrap foot">
+      <p>dictate {release.version}</p>
+    </footer>
+
+    <script>
+      const root = document.documentElement;
+      const stage = document.querySelector<HTMLElement>("[data-stage]")!;
+      const keys = document.querySelector<HTMLButtonElement>("[data-keys]")!;
+      const status = document.querySelector<HTMLElement>("[data-status]")!;
+      const timer = document.querySelector<HTMLElement>("[data-timer]")!;
+      const announce = document.querySelector<HTMLElement>("[data-announce]")!;
+      let started = 0;
+      let tick = 0;
+      let settle = 0;
+
+      const clock = (seconds: number) =>
+        `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
+      const show = (state: "idle" | "recording" | "done") => {
+        status.dataset.status = state;
+        announce.textContent =
+          state === "recording" ? "Recording" : state === "done" ? "Text inserted" : "";
+      };
+
+      const listen = (on: boolean) => {
+        if (stage.hasAttribute("data-listening") === on) return;
+        stage.toggleAttribute("data-listening", on);
+        keys.setAttribute("aria-pressed", String(on));
+        clearInterval(tick);
+        clearTimeout(settle);
+        if (on) {
+          started = Date.now();
+          timer.textContent = clock(0);
+          tick = window.setInterval(() => {
+            timer.textContent = clock(Math.floor((Date.now() - started) / 1000));
+          }, 250);
+          show("recording");
+          return;
+        }
+        show("done");
+        settle = window.setTimeout(() => show("idle"), 1600);
+      };
+      const stop = () => listen(false);
+
+      keys.addEventListener("pointerdown", (event) => {
+        keys.setPointerCapture(event.pointerId);
+        listen(true);
+      });
+      for (const type of ["pointerup", "pointercancel", "lostpointercapture", "blur"]) {
+        keys.addEventListener(type, stop);
+      }
+      keys.addEventListener("keydown", (event) => {
+        if (event.key !== " " && event.key !== "Enter") return;
+        event.preventDefault();
+        listen(true);
+      });
+      keys.addEventListener("keyup", (event) => {
+        if (event.key === " " || event.key === "Enter") stop();
+      });
+      window.addEventListener("keydown", (event) => {
+        if (event.code !== "Space" || !event.altKey || !event.shiftKey) return;
+        event.preventDefault();
+        listen(true);
+      });
+      window.addEventListener("keyup", (event) => {
+        if (event.code === "Space" || event.key === "Alt" || event.key === "Shift") stop();
+      });
+      window.addEventListener("blur", stop);
+
+      const annotate = document.querySelector<HTMLElement>("[data-annotate]")!;
+      const take = document.getElementById("take")!;
+      const tabs = [...annotate.querySelectorAll<HTMLButtonElement>("[role=tab]")];
+      const select = (next: HTMLButtonElement) => {
+        for (const tab of tabs) {
+          tab.setAttribute("aria-selected", String(tab === next));
+          tab.tabIndex = tab === next ? 0 : -1;
+        }
+        annotate.dataset.step = next.dataset.step;
+        take.setAttribute("aria-labelledby", next.id);
+      };
+      for (const tab of tabs) {
+        tab.addEventListener("click", () => select(tab));
+        tab.addEventListener("keydown", (event) => {
+          const at = tabs.indexOf(tab);
+          const to =
+            event.key === "ArrowRight" || event.key === "ArrowDown"
+              ? (at + 1) % tabs.length
+              : event.key === "ArrowLeft" || event.key === "ArrowUp"
+                ? (at + tabs.length - 1) % tabs.length
+                : event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? tabs.length - 1
+                    : -1;
+          if (to < 0) return;
+          event.preventDefault();
+          select(tabs[to]);
+          tabs[to].focus();
+        });
+      }
+
+      const saved = root.dataset.mode ?? "system";
+      for (const input of document.querySelectorAll<HTMLInputElement>('input[name="mode"]')) {
+        input.checked = input.value === saved;
+        input.addEventListener("change", () => {
+          if (input.value === "system") {
+            delete root.dataset.mode;
+            localStorage.removeItem("dictate-mode");
+          } else {
+            root.dataset.mode = input.value;
+            localStorage.setItem("dictate-mode", input.value);
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
