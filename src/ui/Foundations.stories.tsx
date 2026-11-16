@@ -120,10 +120,10 @@ function Foundations() {
           ))}
         </div>
         <p className="ui-preview">
-          Danger is warm red at 22°, separated from Ember at 40° by hue and
-          lightness. Paper’s record dot uses a brighter red from the same ramp.
-          Labels and icons distinguish errors from recording; compare them side
-          by side above.
+          Danger is red at 22°, 18° from ember at 40° and set apart by lightness
+          too. Paper's record dot uses a brighter red from the same hue. Labels
+          and icons distinguish errors from recording; compare them side by side
+          above.
         </p>
       </section>
       <section className="foundation-section">
