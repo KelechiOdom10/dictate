@@ -189,7 +189,7 @@ function Foundations() {
         </div>
       </section>
       <section className="foundation-section">
-        <h2>Typography · Instrument Sans</h2>
+        <h2>Typography · Geist</h2>
         <p className="ui-preview">
           22px title · 18px content heading · 13px row label and md control ·
           12px helper and section overline. Regular 400, medium 500, semibold

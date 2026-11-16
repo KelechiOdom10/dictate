@@ -116,12 +116,23 @@ p {
   border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
-  min-height: var(--control-height);
+  min-height: calc(var(--control-height) - 4px);
   padding: 0 var(--control-padding);
+  color: var(--muted);
+  font-weight: var(--weight-medium);
+  transition:
+    background-color var(--duration-fast),
+    color var(--duration-fast);
+}
+.ui-segments label:hover input:not(:checked, :disabled) + span {
+  color: var(--text);
 }
 .ui-segments input:checked + span {
-  background: var(--primary);
-  color: var(--on-primary);
+  background: var(--segment-thumb);
+  color: var(--text);
+  box-shadow:
+    0 0 0 1px var(--keycap-edge),
+    0 1px 2px oklch(0 0 0 / 0.08);
 }
 .ui-segments input:focus-visible + span {
   outline: 2px solid var(--accent);
@@ -147,16 +158,30 @@ p {
   color: var(--muted);
 }
 .ui-keycaps kbd {
-  background: color-mix(in srgb, currentColor 8%, transparent);
-  border-radius: 4px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  background: var(--keycap);
+  color: var(--text);
+  border: 1px solid var(--keycap-edge);
+  border-radius: 6px;
+  box-shadow: 0 1px 0 var(--keycap-edge);
   font-size: inherit;
+  font-weight: var(--weight-medium);
   line-height: 1.3;
-  min-width: var(--control-icon);
-  padding: 2px 4px;
+  min-width: 1.75em;
+  padding: 1px 5px;
+}
+.ui-shortcut .ui-keycaps kbd {
+  line-height: 1;
+  min-width: calc(var(--control-height) - 8px);
+  height: calc(var(--control-height) - 8px);
+  padding: 0 calc(var(--control-gap) - 2px);
 }
 .ui-card {
   background: var(--surface);
+  border: 1px solid var(--card-edge);
   border-radius: var(--radius-panel);
   padding: var(--space-5);
   display: grid;
@@ -244,6 +269,7 @@ p {
 .ui-detail {
   padding: var(--space-6);
   background: var(--surface);
+  border: 1px solid var(--card-edge);
   border-radius: var(--radius-panel);
   display: grid;
   gap: var(--space-5);
@@ -518,6 +544,7 @@ p {
 }
 .ui-group {
   background: var(--surface);
+  border: 1px solid var(--card-edge);
   border-radius: var(--radius-panel);
   overflow: visible;
 }
@@ -537,7 +564,7 @@ p {
   justify-content: flex-end;
 }
 .ui-shortcut:hover:not(:disabled) {
-  background: var(--primary-hover);
+  background: var(--control);
 }
 kbd {
   font: inherit;
@@ -630,12 +657,14 @@ kbd {
   line-height: var(--leading-tight);
   display: inline-flex;
   flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
   margin: 0;
   border: 0;
   border-radius: var(--radius-pill);
-  background: var(--surface);
-  padding: 0;
-  gap: var(--control-gap);
+  background: var(--control);
+  padding: 2px;
+  gap: var(--space-half);
   min-height: var(--control-height);
 }
 .ui-keycaps {
@@ -865,7 +894,7 @@ button:active:not(:disabled) {
   background: var(--primary-pressed);
 }
 .ui-shortcut:active:not(:disabled) {
-  background: var(--primary-pressed);
+  background: var(--control-hover);
 }
 .ui-toggle:focus-visible {
   outline: none;
@@ -922,10 +951,11 @@ button:active:not(:disabled) {
   border-radius: var(--radius-pill);
 }
 .ui-shortcut {
-  min-width: 115px;
-  background: var(--primary);
-  color: var(--on-primary);
+  background: transparent;
+  color: var(--text);
   width: fit-content;
+  padding: 0 var(--space-1);
+  margin-inline-end: calc(0px - var(--space-1));
 }
 .ui-search:has(input:focus-visible) {
   outline: 2px solid var(--accent);
@@ -941,6 +971,7 @@ button:active:not(:disabled) {
   width: 100%;
 }
 .ui-shortcut.ui-capturing {
+  padding: 0 var(--control-padding);
   background: var(--success);
   color: var(--success-text);
 }
@@ -1020,7 +1051,8 @@ h3 {
   container-type: inline-size;
 }
 .ui-model-active {
-  box-shadow: inset 0 0 0 1.5px var(--primary);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 0.5px var(--primary);
 }
 .ui-model-top {
   display: grid;

@@ -223,6 +223,7 @@ function mockApp(
       }
       if (command === "list_models") return listModels();
       if (command === "list_annotations") return annotate.entries ?? [];
+      if (command === "development_build") return false;
       if (command === "screen_permission") return annotate.permission ?? true;
       if (
         command === "copy_annotation" ||
@@ -293,13 +294,35 @@ export const GeneralNoModel: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     await expect(
-      await c.findByText("Download a speech model in Settings › Models."),
+      await c.findByText(
+        "No speech model yet. Download one to start dictating.",
+      ),
     ).toBeVisible();
     await expect(
       c.getByRole("button", { name: "Download a model" }),
     ).toBeVisible();
   },
 };
+export const GeneralActiveModelMissing: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], { states: { "small.en": { kind: "installed" } } }),
+  render: () => <GeneralPage />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(
+      await c.findByText("Base English isn’t installed. Choose another model."),
+    ).toBeVisible();
+    await expect(
+      c.queryByRole("button", { name: "Download a model" }),
+    ).not.toBeInTheDocument();
+    const select = c.getByRole("combobox", { name: "Speech model" });
+    await expect(select).toBeEnabled();
+    await userEvent.selectOptions(select, "small.en");
+    await waitFor(() => expect(select).toHaveValue("small.en"));
+    await expect(c.queryByText(/isn’t installed/)).not.toBeInTheDocument();
+  },
+};
+
 export const GeneralLoading: Story = {
   beforeEach: () => {
     mockWindows("settings");

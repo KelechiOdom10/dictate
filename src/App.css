@@ -126,14 +126,6 @@ meter {
   gap: var(--space-4);
   container-type: inline-size;
 }
-.history-toolbar {
-  display: flex;
-  gap: var(--space-3);
-}
-.history-toolbar .ui-search {
-  flex: 1;
-  min-width: 0;
-}
 .history .error {
   margin: 0;
 }
@@ -164,9 +156,6 @@ meter {
   top: 0;
 }
 @container (max-width: 520px) {
-  .history-toolbar {
-    flex-wrap: wrap;
-  }
   .history-split {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -284,11 +273,6 @@ html.overlay-window,
   color: var(--text);
   font-size: var(--font-sm);
 }
-.general-model {
-  margin-top: 0;
-  align-items: center;
-  gap: var(--space-2);
-}
 
 .ink-window {
   position: fixed;
@@ -297,4 +281,30 @@ html.overlay-window,
 }
 .annotate-bar-window {
   height: 100vh;
+}
+.history > .ui-segments {
+  justify-self: start;
+}
+.history > .ui-settings-group {
+  margin-top: var(--space-4);
+}
+.history-retention-confirm {
+  padding: 0 var(--space-4) var(--space-4);
+}
+.row-link {
+  font: inherit;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+}
+.row-link:hover:not(:disabled),
+.row-link:active:not(:disabled) {
+  background: none;
+  text-decoration-color: currentColor;
 }

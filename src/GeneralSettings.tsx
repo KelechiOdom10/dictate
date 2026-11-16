@@ -101,13 +101,15 @@ export default function General({
   const settings = query.data;
   const busy = mutation.isPending;
   const installed = (models.data ?? []).filter(
-    (model) => model.state.kind === "installed" || model.active,
+    (model) => model.state.kind === "installed",
   );
-  const modelMissing =
+  const activeMissing =
     models.data !== undefined &&
-    !models.data.some(
-      (model) => model.active && model.state.kind === "installed",
-    );
+    !installed.some((model) => model.id === settings.speechModel);
+  const noneInstalled = models.data !== undefined && installed.length === 0;
+  const activeName =
+    models.data?.find((model) => model.id === settings.speechModel)?.name ??
+    settings.speechModel;
   return (
     <>
       <SettingsGroup
@@ -155,48 +157,66 @@ export default function General({
           id="speech-model"
           label="Speech model"
           help={
-            modelMissing ? (
+            noneInstalled ? (
               <span className="row-warning">
-                Download a speech model in Settings › Models.
+                No speech model yet. Download one to start dictating.
               </span>
             ) : (
-              "Used for every dictation. Download others in Models."
+              <>
+                {activeMissing ? (
+                  <span className="row-warning">
+                    {activeName} isn’t installed. Choose another model.
+                  </span>
+                ) : (
+                  "Used for every dictation."
+                )}{" "}
+                <button
+                  type="button"
+                  className="row-link"
+                  onClick={onOpenModels}
+                >
+                  Manage models
+                </button>
+              </>
             )
           }
         >
-          <div className="ui-actions general-model">
+          {noneInstalled ? (
+            <Button
+              id="speech-model"
+              aria-label="Download a model"
+              aria-describedby="speech-model-help"
+              variant="primary"
+              onClick={onOpenModels}
+            >
+              Download a model
+            </Button>
+          ) : (
             <Select
               id="speech-model"
               aria-describedby="speech-model-help"
               value={settings.speechModel}
-              disabled={busy || recording || installed.length < 2}
+              disabled={
+                busy || recording || (!activeMissing && installed.length < 2)
+              }
               onChange={(e) =>
                 void save({
                   speechModel: speechModelSchema.parse(e.target.value),
                 })
               }
             >
-              {installed.length === 0 && (
-                <option value={settings.speechModel}>
-                  {settings.speechModel}
+              {activeMissing && (
+                <option value={settings.speechModel} disabled>
+                  {activeName} (not installed)
                 </option>
               )}
               {installed.map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.state.kind === "installed"
-                    ? model.name
-                    : `${model.name} (not downloaded)`}
+                  {model.name}
                 </option>
               ))}
             </Select>
-            <Button
-              size="sm"
-              variant={modelMissing ? "primary" : "ghost"}
-              onClick={onOpenModels}
-            >
-              {modelMissing ? "Download a model" : "Manage models"}
-            </Button>
-          </div>
+          )}
         </Row>
       </SettingsGroup>
       <SettingsGroup

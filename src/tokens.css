@@ -1,13 +1,13 @@
 @font-face {
-  font-family: "Instrument Sans";
-  src: url("./assets/fonts/instrument-sans-latin.woff2") format("woff2");
+  font-family: "Geist";
+  src: url("./assets/fonts/geist-latin.woff2") format("woff2");
   font-style: normal;
   font-weight: 400 600;
   font-display: swap;
 }
 :root {
   font-family:
-    "Instrument Sans",
+    "Geist",
     -apple-system,
     system-ui,
     sans-serif;
@@ -63,6 +63,10 @@
   --control-hover: var(--brown-250);
   --control-pressed: var(--brown-300);
   --selected: var(--brown-200);
+  --keycap: var(--brown-0);
+  --keycap-edge: var(--brown-300);
+  --segment-thumb: var(--brown-0);
+  --card-edge: var(--brown-200);
   --primary: var(--brown-900);
   --primary-hover: var(--brown-800);
   --primary-pressed: var(--brown-700);
@@ -146,6 +150,10 @@
   --control-hover: var(--brown-700);
   --control-pressed: var(--brown-650);
   --selected: var(--brown-800);
+  --keycap: var(--brown-750);
+  --keycap-edge: var(--brown-650);
+  --segment-thumb: var(--brown-650);
+  --card-edge: transparent;
   --primary: var(--brown-100);
   --primary-hover: var(--brown-300);
   --primary-pressed: var(--brown-400);

@@ -171,7 +171,7 @@ export const ControlsSideBySide: Story = {
       <div className="control-comparison">
         <h1>Controls side by side</h1>
         <p className="ui-preview">
-          One scale · Instrument Sans · height / text / icon / gap
+          One scale · Geist · height / text / icon / gap
         </p>
         {(["sm", "md", "lg"] as const).map((size) => (
           <section key={size}>
@@ -247,16 +247,18 @@ export const ControlsSideBySide: Story = {
           await expect(getComputedStyle(control).fontSize).toBe(`${font}px`);
       }
       for (const control of section.querySelectorAll(
-        ".ui-button:not(.ui-icon-button), select, .ui-search",
+        ".ui-button:not(.ui-icon-button):not(.ui-shortcut), select, .ui-search",
       )) {
         await expect(getComputedStyle(control).paddingInlineStart).toBe(
           `${padding}px`,
         );
       }
       for (const control of section.querySelectorAll(
-        ".ui-button:not(.ui-icon-button), .ui-search, .ui-segments",
+        ".ui-button:not(.ui-icon-button):not(.ui-shortcut), .ui-search, .ui-segments",
       )) {
-        await expect(getComputedStyle(control).gap).toBe(`${gap}px`);
+        await expect(getComputedStyle(control).gap).toBe(
+          control.classList.contains("ui-segments") ? "2px" : `${gap}px`,
+        );
       }
     }
   },
