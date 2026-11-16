@@ -197,10 +197,14 @@ pub fn sync_with(theme: Theme, dark: bool, set: impl FnOnce(&[u8])) -> bool {
 /// Re-draws the app icon for the current settings, on the main thread because
 /// AppKit only takes a new application icon there.
 pub fn sync(app: &tauri::AppHandle, settings: &Settings) {
-    let theme = settings.theme;
-    let mode = settings.appearance_mode;
+    // Each appearance has its own theme, and only the main thread can ask
+    // AppKit which appearance is in effect, so the side is resolved there and
+    // the icon follows whichever theme is actually on screen.
+    let settings = settings.clone();
     if let Err(error) = app.run_on_main_thread(move || {
-        if !sync_with(theme, is_dark(mode), set_application_icon) {
+        let dark = is_dark(settings.appearance_mode);
+        let theme = settings.theme_for(dark);
+        if !sync_with(theme, dark, set_application_icon) {
             log::warn!("[icon] could not draw the {theme:?} icon");
         }
     }) {

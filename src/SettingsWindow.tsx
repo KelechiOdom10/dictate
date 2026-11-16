@@ -37,7 +37,12 @@ import {
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings } from "./settings";
 import { openLocation } from "./about";
-import { SettingsTheme } from "./ui/SettingsTheme";
+import {
+  SettingsTheme,
+  shownDark,
+  themeForMode,
+  useSystemDark,
+} from "./ui/SettingsTheme";
 
 const subtitles: Record<string, string> = {
   General: "Make dictate feel like second nature.",
@@ -72,6 +77,10 @@ export default function SettingsWindow({
   const [page, setPage] = useState(initialPage);
   const [navigationReady, setNavigationReady] = useState(false);
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+  const dark = shownDark(
+    settings.data?.appearanceMode ?? "system",
+    useSystemDark(),
+  );
   useEffect(() => {
     let disposed = false;
     const subscription = listen("settings-page", ({ payload }) => {
@@ -106,8 +115,16 @@ export default function SettingsWindow({
   }
   return (
     <SettingsTheme
-      theme={settings.data?.theme}
-      mode={settings.data?.appearanceMode}
+      theme={themeForMode(
+        {
+          themeLight: settings.data?.themeLight ?? "ember",
+          themeDark: settings.data?.themeDark ?? "ember",
+        },
+        dark,
+      )}
+      // Until the settings arrive the window has no pair of themes, so it
+      // follows the Mac; once they do, the resolved side is explicit.
+      mode={settings.data ? (dark ? "dark" : "light") : "system"}
     >
       <AppShell
         variant="wash"
