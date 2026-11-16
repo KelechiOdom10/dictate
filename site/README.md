@@ -48,7 +48,7 @@ move the DMG to R2.
 `public/app/settings-{light,dark}.webp` (1440 px, 2× the 720 × 580 settings
 window) and their 720 px versions are Storybook captures of the
 `Pages / General Fresh Profile` story in Ember, taken from PR #48 at
-`5f19989`. The page shows the light or dark capture to match the visitor's
+`5f19989` and re-shot from `main` at `8f0d77c`, where they came out byte-identical (the General page did not change). The page shows the light or dark capture to match the visitor's
 mode. Retake both when the settings window changes.
 
 ## Deploying on Cloudflare (Workers Builds)
