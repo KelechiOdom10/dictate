@@ -8,6 +8,7 @@ export type ModelState =
       total: number;
       cancelling: boolean;
     }
+  | { kind: "preparing" }
   | { kind: "installed" }
   | { kind: "failed"; message: string };
 export type ModelEntry = {

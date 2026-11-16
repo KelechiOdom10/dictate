@@ -465,6 +465,16 @@ export const ModelsDownloading: Story = {
     await expect(c.getByText("205 MB of 488 MB")).toBeVisible();
   },
 };
+export const ModelsPreparing: Story = {
+  beforeEach: ({ globals }) =>
+    mockApp(globals, [], { states: { "base.en": { kind: "preparing" } } }),
+  render: () => <GeneralPage page="Models" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(await c.findByText("Preparing your model…")).toBeVisible();
+    expect(c.queryByText(/Download a model to start/)).toBeNull();
+  },
+};
 export const ModelsInstalled: Story = {
   beforeEach: ({ globals }) =>
     mockApp(globals, [], {

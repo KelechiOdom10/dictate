@@ -276,6 +276,7 @@ export type ModelStatus =
       cancelling: boolean;
       onCancel: () => void;
     }
+  | { kind: "preparing" }
   | {
       kind: "installed";
       active: boolean;
@@ -350,6 +351,12 @@ export function ModelCard({
               Cancel
             </Button>
           </>
+        );
+      case "preparing":
+        return (
+          <span className="ui-date" role="status">
+            Preparing your model…
+          </span>
         );
       case "installed":
         return status.active ? (

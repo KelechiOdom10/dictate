@@ -95,6 +95,8 @@ export default function ModelsPage() {
           onCancel: run(cancelDownload),
         };
       }
+      case "preparing":
+        return { kind: "preparing" };
       case "installed":
         return {
           kind: "installed",
@@ -113,9 +115,11 @@ export default function ModelsPage() {
   const installed = models.data.filter(
     (model) => model.state.kind === "installed",
   );
-  const activeMissing = models.data.some(
-    (model) => model.active && model.state.kind !== "installed",
-  );
+  const activeMissing =
+    !models.data.some((model) => model.state.kind === "preparing") &&
+    models.data.some(
+      (model) => model.active && model.state.kind !== "installed",
+    );
 
   return (
     <div className="models">

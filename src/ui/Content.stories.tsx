@@ -192,6 +192,18 @@ export const Models: Story = {
     </div>
   ),
 };
+export const ModelPreparing: Story = {
+  name: "ModelCard / preparing a model from an earlier version",
+  render: () => (
+    <ModelCard
+      name="Base English"
+      description="Fast and dependable for everyday dictation."
+      ratings={ratings(0.4, "Fair", 0.81, "190 ms")}
+      size="148 MB"
+      status={{ kind: "preparing" }}
+    />
+  ),
+};
 export const Progress: Story = {
   name: "ProgressBar / empty, partial, complete, indeterminate",
   render: () => (
