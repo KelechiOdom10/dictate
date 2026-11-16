@@ -6,11 +6,11 @@ pub enum Cue {
     Stop,
 }
 
-/// Audio a take drops from its start while the start sound plays, so the
+/// Audio a take records as silence while the start sound plays, so the
 /// sound is not transcribed. Tink is audible for about 40 ms (below -50 dB
 /// after that) and `afplay` launches in about 3 ms; the rest covers macOS
 /// opening the output device. Measured on this machine, 15 Nov 2026.
-pub const START_SKIP: std::time::Duration = std::time::Duration::from_millis(150);
+pub const START_MUTE: std::time::Duration = std::time::Duration::from_millis(150);
 
 fn path(cue: Cue) -> &'static str {
     match cue {

@@ -30,8 +30,9 @@ struct Captured {
     retain: bool,
     preroll: VecDeque<f32>,
     preroll_frames: usize,
-    /// Frames a take drops before it keeps any, so the start sound is not in it.
-    skip_frames: usize,
+    /// Frames a take records as silence, so the start sound is not in it but
+    /// the timing after it is unchanged.
+    mute_frames: usize,
 }
 
 struct Recording {
@@ -58,7 +59,7 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                     let mut warm: Option<Recording> = None;
                     for command in receiver {
                         match command {
-                            Command::Start(device, skip, reply) => {
+                            Command::Start(device, mute, reply) => {
                                 let result = if let Some(active) = &recording {
                                     active.captured.lock().map_err(|e| e.to_string()).and_then(
                                         |data| data.error.clone().map_or(Ok(active.fallback), Err),
@@ -75,7 +76,7 @@ fn controller() -> Result<&'static mpsc::Sender<Command>, String> {
                                         })
                                         .map(|active| {
                                             let fallback = active.fallback;
-                                            active.skip(skip);
+                                            active.mute(mute);
                                             recording = Some(active);
                                             fallback
                                         })
@@ -187,10 +188,10 @@ pub fn start() -> Result<(), Problem> {
     start_device(None, std::time::Duration::ZERO).map(|_| ())
 }
 
-/// Starts a take on `device`, dropping its first `skip` of new audio.
-pub fn start_device(device: Option<String>, skip: std::time::Duration) -> Result<bool, Problem> {
+/// Starts a take on `device`, recording its first `mute` of new audio as silence.
+pub fn start_device(device: Option<String>, mute: std::time::Duration) -> Result<bool, Problem> {
     let (reply, result) = mpsc::channel();
-    send(Command::Start(device, skip, reply))
+    send(Command::Start(device, mute, reply))
         .and_then(|()| {
             result
                 .recv()
@@ -328,20 +329,28 @@ fn default_device_name() -> Option<String> {
 /// Whether a warm stream that `opened` for `preference` still records what
 /// `requested` asks for. A stream that opened the system default (because
 /// nothing was named, or the named microphone was missing) is stale once the
-/// default changes, for example when AirPods connect.
+/// default changes, for example when AirPods connect. A fallback is also stale
+/// once the named microphone is connected again.
 fn warm_stream_serves(
     preference: &Option<String>,
     opened: &str,
     requested: &Option<String>,
     current_default: impl FnOnce() -> Option<String>,
+    connected: impl FnOnce(&str) -> bool,
 ) -> bool {
     if preference != requested {
         return false;
     }
     match requested {
         Some(name) if name == opened => true,
+        Some(name) if connected(name) => false,
         _ => current_default().as_deref() == Some(opened),
     }
+}
+
+/// Lists devices afresh: the cache would miss a microphone plugged in since.
+fn microphone_connected(name: &str) -> bool {
+    list_devices().is_ok_and(|devices| devices.iter().any(|(label, _)| label == name))
 }
 
 fn open_recording(name: Option<&str>, mode: Mode) -> Result<Recording, String> {
@@ -443,8 +452,9 @@ where
             .sum::<f32>()
             / channels as f32;
         squares += mono * mono;
-        if captured.retain && captured.skip_frames > 0 {
-            captured.skip_frames -= 1;
+        if captured.retain && captured.mute_frames > 0 {
+            captured.mute_frames -= 1;
+            captured.samples.push(0.0);
         } else if captured.retain {
             captured.samples.push(mono);
         } else if captured.preroll_frames > 0 {
@@ -479,12 +489,13 @@ impl Recording {
             &self.device,
             requested,
             default_device_name,
+            microphone_connected,
         )
     }
 
-    fn skip(&self, duration: std::time::Duration) {
+    fn mute(&self, duration: std::time::Duration) {
         if let Ok(mut captured) = self.captured.lock() {
-            captured.skip_frames = (self.rate as u128 * duration.as_millis() / 1000) as usize;
+            captured.mute_frames = (self.rate as u128 * duration.as_millis() / 1000) as usize;
         }
     }
 
@@ -517,7 +528,7 @@ impl Recording {
                 .lock()
                 .map_err(|e| recording_failed(e.to_string()))?;
             captured.retain = false;
-            captured.skip_frames = 0;
+            captured.mute_frames = 0;
             captured.preroll.clear();
             std::mem::take(&mut captured.samples)
         };
@@ -742,29 +753,56 @@ mod tests {
         let airpods = || Some("AirPods Pro".to_string());
         let unchanged = || Some("MacBook Pro Microphone".to_string());
         let unasked = || -> Option<String> { panic!("named match needs no lookup") };
+        let unlisted = |_: &str| -> bool { panic!("only a fallback lists devices") };
+        let usb_missing = |name: &str| name != "USB Mic";
+        let usb_back = |_: &str| true;
 
-        assert!(warm_stream_serves(&None, &built_in, &None, unchanged));
+        assert!(warm_stream_serves(
+            &None, &built_in, &None, unchanged, unlisted
+        ));
         assert!(
-            !warm_stream_serves(&None, &built_in, &None, airpods),
+            !warm_stream_serves(&None, &built_in, &None, airpods, unlisted),
             "system default moved to AirPods"
         );
-        assert!(!warm_stream_serves(&None, &built_in, &None, || None));
+        assert!(!warm_stream_serves(
+            &None,
+            &built_in,
+            &None,
+            || None,
+            unlisted
+        ));
 
         let named = Some(built_in.clone());
-        assert!(warm_stream_serves(&named, &built_in, &named, unasked));
-        assert!(!warm_stream_serves(&named, &built_in, &None, unchanged));
-        assert!(!warm_stream_serves(&None, &built_in, &named, unchanged));
+        assert!(warm_stream_serves(
+            &named, &built_in, &named, unasked, unlisted
+        ));
+        assert!(!warm_stream_serves(
+            &named, &built_in, &None, unchanged, unlisted
+        ));
+        assert!(!warm_stream_serves(
+            &None, &built_in, &named, unchanged, unlisted
+        ));
 
         let missing = Some("USB Mic".to_string());
         assert!(
-            warm_stream_serves(&missing, &built_in, &missing, unchanged),
-            "fallback to the default stays while the default holds"
+            warm_stream_serves(&missing, &built_in, &missing, unchanged, usb_missing),
+            "fallback to the default stays while the chosen mic is missing and the default holds"
         );
-        assert!(!warm_stream_serves(&missing, &built_in, &missing, airpods));
+        assert!(!warm_stream_serves(
+            &missing,
+            &built_in,
+            &missing,
+            airpods,
+            usb_missing
+        ));
+        assert!(
+            !warm_stream_serves(&missing, &built_in, &missing, unasked, usb_back),
+            "fallback reopens on the chosen mic once it is connected again"
+        );
     }
 
     #[test]
-    fn a_take_drops_its_first_frames_when_asked_but_keeps_the_preroll() {
+    fn a_take_mutes_its_first_frames_when_asked_but_keeps_the_preroll_and_timing() {
         let mut take = Captured {
             preroll_frames: 2,
             ..Captured::default()
@@ -772,10 +810,10 @@ mod tests {
         capture_block(&mut take, &[0.1_f32, 0.2], 1);
         take.samples = take.preroll.drain(..).collect();
         take.retain = true;
-        take.skip_frames = 2;
+        take.mute_frames = 2;
         capture_block(&mut take, &[0.9_f32, 0.9, 0.3, 0.4], 1);
-        assert_eq!(take.samples, [0.1, 0.2, 0.3, 0.4]);
-        assert_eq!(take.skip_frames, 0);
+        assert_eq!(take.samples, [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
+        assert_eq!(take.mute_frames, 0);
     }
 
     #[test]
