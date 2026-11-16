@@ -7,7 +7,8 @@
     "dev": "astro dev",
     "build": "astro check && astro build",
     "preview": "astro preview",
-    "add-build": "node scripts/add-build.ts"
+    "add-build": "node scripts/add-build.ts",
+    "deploy": "astro build && wrangler deploy"
   },
   "dependencies": {
     "astro": "7.4.12"
@@ -15,6 +16,7 @@
   "devDependencies": {
     "@astrojs/check": "0.9.12",
     "@types/node": "^24.19.2",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "wrangler": "^4.163.0"
   }
 }
