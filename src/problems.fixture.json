@@ -1,0 +1,27 @@
+{
+  "accessibility": {
+    "title": "Accessibility access needed",
+    "fix": "Allow dictate in System Settings → Privacy & Security → Accessibility.",
+    "detail": null
+  },
+  "settingsRefresh": {
+    "title": "Settings couldn’t refresh",
+    "fix": "Open Settings and save again.",
+    "detail": null
+  },
+  "noSamples": {
+    "title": "No sound from the microphone",
+    "fix": "Check it in Settings → General → Test microphone.",
+    "detail": "Microphone delivered no samples"
+  },
+  "missingModel": {
+    "title": "Speech model missing",
+    "fix": "Download a speech model in Settings › Models.",
+    "detail": "no file at /Applications/dictate.app/models/ggml-base.en.bin"
+  },
+  "whisperMissing": {
+    "title": "whisper-cli not found",
+    "fix": "Run `brew install whisper.cpp` in Terminal, then try again.",
+    "detail": "not on PATH, /opt/homebrew/bin or /usr/local/bin"
+  }
+}
