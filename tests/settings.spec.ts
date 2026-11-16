@@ -2721,7 +2721,7 @@ for (const width of [640, 720, 820, 1100]) {
         new RegExp(
           view === "Dictations"
             ? "^17\\.6 MB on this Mac"
-            : "^3\\.0 MB on this Mac · 14 sessions$",
+            : "^3\\.0 MB on this Mac · 14 sessions · kept until deleted$",
         ),
       );
       await expect(line).toHaveCount(1);
@@ -2775,7 +2775,7 @@ for (const width of [640, 720, 820, 1100]) {
       const line = page.getByText(
         view === "Dictations"
           ? /^17\.6 MB on this Mac/
-          : /^3\.0 MB on this Mac · 14 sessions$/,
+          : /^3\.0 MB on this Mac · 14 sessions · kept until deleted$/,
       );
       await expect(line).toBeVisible();
       const readable = () =>

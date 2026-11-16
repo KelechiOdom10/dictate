@@ -796,7 +796,7 @@ function Annotations() {
       <ErrorNotice error={error} />
       <Text type="supporting">
         {usage.data
-          ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${entries.length.toLocaleString()} ${entries.length === 1 ? "session" : "sessions"}`
+          ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${entries.length.toLocaleString()} ${entries.length === 1 ? "session" : "sessions"} · kept until deleted`
           : "Measuring this Mac"}
       </Text>
       <Grid
