@@ -131,11 +131,7 @@ pub fn pixmap(theme: Theme, dark: bool) -> Option<Pixmap> {
         Transform::identity(),
         None,
     );
-    for (bar, (center, half_height)) in BAR_CENTERS
-        .iter()
-        .zip(BAR_HALF_HEIGHTS)
-        .enumerate()
-    {
+    for (bar, (center, half_height)) in BAR_CENTERS.iter().zip(BAR_HALF_HEIGHTS).enumerate() {
         let colour = if bar == LIVE_BAR {
             palette.accent
         } else {
@@ -254,7 +250,7 @@ fn set_application_icon(png: &[u8]) {
 #[cfg(target_os = "macos")]
 fn current_appearance_is_dark() -> bool {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSAppearanceNameDarkAqua};
+    use objc2_app_kit::{NSAppearanceNameDarkAqua, NSApplication};
 
     let Some(mtm) = MainThreadMarker::new() else {
         return false;
@@ -291,7 +287,11 @@ mod tests {
         .into_iter()
         .map(|theme| palette(theme, false).accent)
         .collect();
-        assert_eq!(light[0], [223, 88, 34], "ember stays ember, not its brown ring");
+        assert_eq!(
+            light[0],
+            [223, 88, 34],
+            "ember stays ember, not its brown ring"
+        );
         assert_eq!(light[2], [131, 114, 211], "capy is lavender");
         assert_eq!(light[3], [150, 109, 195], "rose pine is iris");
         for (index, colour) in light.iter().enumerate() {
