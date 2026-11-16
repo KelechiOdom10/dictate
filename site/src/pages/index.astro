@@ -335,7 +335,7 @@ const settingsAlt =
       };
       const sync = () => {
         clearInterval(loop);
-        loop = !stopped && seen && !paused ? window.setInterval(advance, 4000) : 0;
+        loop = !stopped && seen && !paused ? window.setInterval(advance, 2400) : 0;
       };
       const stopLoop = () => {
         stopped = true;
