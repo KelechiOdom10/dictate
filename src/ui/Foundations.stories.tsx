@@ -121,8 +121,9 @@ function Foundations() {
           ))}
         </div>
         <p className="ui-preview">
-          Danger uses crimson at 355°, 45° away from ember at 40°. Labels and
-          icons distinguish errors from recording; compare them side by side
+          Danger is red at 22°, 18° from ember at 40° and set apart by lightness
+          too. Paper's record dot uses a brighter red from the same hue. Labels
+          and icons distinguish errors from recording; compare them side by side
           above.
         </p>
       </section>
