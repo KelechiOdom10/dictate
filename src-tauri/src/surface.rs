@@ -67,15 +67,34 @@ fn artwork(phase: &str) -> &'static str {
     }
 }
 
-fn icon(phase: &str) -> Image<'static> {
-    let mut pixels = vec![0; 22 * 22 * 4];
-    let heights = match artwork(phase) {
-        "error" => [20, 4, 20, 4, 20],
-        "recording" => [6, 14, 20, 12, 6],
-        "transcribing" => [12, 6, 12, 6, 12],
-        _ => [4, 8, 12, 8, 4],
+/// Animation frames per loop, shown at `FRAME_INTERVAL`: about 8 fps.
+const FRAMES: usize = 8;
+const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(125);
+
+/// Bar heights for an artwork. `None` is the static artwork; a frame index is
+/// one step of the recording pulse or the transcribing sweep.
+fn heights(artwork: &str, frame: Option<usize>) -> [usize; 5] {
+    let wave = |bar: usize, frame: usize| {
+        ((frame as f64 / FRAMES as f64 - bar as f64 / 5.0) * std::f64::consts::TAU).cos()
     };
-    for (bar, height) in heights.into_iter().enumerate() {
+    match (artwork, frame) {
+        ("error", _) => [20, 4, 20, 4, 20],
+        ("recording", None) => [6, 14, 20, 12, 6],
+        ("recording", Some(frame)) => std::array::from_fn(|bar| {
+            let base = [6.0, 14.0, 20.0, 12.0, 6.0][bar];
+            (base * (0.8 + 0.2 * wave(bar, frame))).round().max(4.0) as usize
+        }),
+        ("transcribing", None) => [12, 6, 12, 6, 12],
+        ("transcribing", Some(frame)) => {
+            std::array::from_fn(|bar| 6 + (8.0 * wave(bar, frame).max(0.0)).round() as usize)
+        }
+        _ => [4, 8, 12, 8, 4],
+    }
+}
+
+fn frame_icon(artwork: &str, frame: Option<usize>) -> Image<'static> {
+    let mut pixels = vec![0; 22 * 22 * 4];
+    for (bar, height) in heights(artwork, frame).into_iter().enumerate() {
         for y in (22 - height) / 2..(22 + height) / 2 {
             for x in 2 + bar * 4..4 + bar * 4 {
                 pixels[(y * 22 + x) * 4 + 3] = 255;
@@ -83,6 +102,10 @@ fn icon(phase: &str) -> Image<'static> {
         }
     }
     Image::new_owned(pixels, 22, 22)
+}
+
+fn icon(phase: &str) -> Image<'static> {
+    frame_icon(artwork(phase), None)
 }
 
 fn tray_presentation(status: &Status) -> (&str, String) {
@@ -98,30 +121,117 @@ fn tray_presentation(status: &Status) -> (&str, String) {
     (phase, tooltip)
 }
 
-/// What the tray shows now: artwork key and tooltip.
+/// What the tray shows now. `frame` is `Some` while an animation runs, and
+/// `generation` changes with every artwork change so a running timer can tell
+/// it is stale.
 #[derive(Clone, Debug, PartialEq)]
 struct Shown {
     artwork: &'static str,
+    frame: Option<usize>,
     tooltip: String,
+    generation: u64,
 }
 
-/// The tray's current artwork and tooltip, read and written on the main thread.
+/// The tray's current presentation, shared by refreshes and the frame timer.
 struct TrayShown(Mutex<Shown>);
 
-/// The changes a refresh must make: a new image only when the artwork changes,
-/// a new tooltip only when the text changes.
-fn tray_changes(shown: &mut Shown, status: &Status) -> (Option<&'static str>, Option<String>) {
+/// What a refresh must do: install an image, set a tooltip, start a timer.
+#[derive(Debug, Default, PartialEq)]
+struct Changes {
+    icon: Option<(&'static str, Option<usize>)>,
+    tooltip: Option<String>,
+    timer: Option<u64>,
+}
+
+/// A new image only when the artwork changes, a new tooltip only when the text
+/// changes, and one timer per animated artwork, never one per refresh.
+fn tray_changes(shown: &mut Shown, status: &Status, reduce_motion: bool) -> Changes {
     let (phase, tooltip) = tray_presentation(status);
     let artwork = artwork(phase);
-    let icon = (shown.artwork != artwork).then(|| {
+    let mut changes = Changes::default();
+    if shown.artwork != artwork {
+        let animated = !reduce_motion && matches!(artwork, "recording" | "transcribing");
         shown.artwork = artwork;
-        artwork
-    });
-    let tooltip = (shown.tooltip != tooltip).then(|| {
+        shown.frame = animated.then_some(0);
+        shown.generation += 1;
+        changes.icon = Some((artwork, shown.frame));
+        changes.timer = animated.then_some(shown.generation);
+    }
+    if shown.tooltip != tooltip {
         shown.tooltip = tooltip.clone();
-        tooltip
+        changes.tooltip = Some(tooltip);
+    }
+    changes
+}
+
+/// The next frame for the timer started at `generation`, or `None` once the
+/// artwork has changed and that timer must stop.
+fn advance(shown: &mut Shown, generation: u64) -> Option<(&'static str, usize)> {
+    if shown.generation != generation {
+        return None;
+    }
+    let frame = (shown.frame? + 1) % FRAMES;
+    shown.frame = Some(frame);
+    Some((shown.artwork, frame))
+}
+
+/// The frame timer: wait, take the next frame, install it, until there is none.
+fn animate(
+    mut wait: impl FnMut(),
+    mut next: impl FnMut() -> Option<(&'static str, usize)>,
+    mut install: impl FnMut(&'static str, usize),
+) {
+    loop {
+        wait();
+        let Some((artwork, frame)) = next() else {
+            return;
+        };
+        install(artwork, frame);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn reduce_motion() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reduce_motion() -> bool {
+    false
+}
+
+fn shown(app: &AppHandle) -> std::sync::MutexGuard<'_, Shown> {
+    app.state::<TrayShown>()
+        .inner()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+fn start_animation(app: AppHandle, generation: u64) {
+    std::thread::spawn(move || {
+        animate(
+            || std::thread::sleep(FRAME_INTERVAL),
+            || advance(&mut shown(&app), generation),
+            |artwork, frame| {
+                let installing = app.clone();
+                let dispatched = app.run_on_main_thread(move || {
+                    if shown(&installing).generation != generation {
+                        return;
+                    }
+                    if let Some(tray) = installing.tray_by_id("dictate")
+                        && let Err(error) = tray
+                            .set_icon_with_as_template(Some(frame_icon(artwork, Some(frame))), true)
+                    {
+                        log::warn!("[tray] frame: {error}");
+                    }
+                });
+                if let Err(error) = dispatched {
+                    log::warn!("[tray] frame dispatch: {error}");
+                }
+            },
+        );
     });
-    (icon, tooltip)
 }
 
 fn dispatch_tray_refresh(
@@ -143,20 +253,17 @@ fn refresh_tray(app: &AppHandle) {
         move || status(&reading),
         move |status| {
             if let Some(tray) = applying.tray_by_id("dictate") {
-                let (artwork, tooltip) = tray_changes(
-                    &mut applying
-                        .state::<TrayShown>()
-                        .0
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner()),
-                    &status,
-                );
-                if let Some(artwork) = artwork
-                    && let Err(error) = tray.set_icon_with_as_template(Some(icon(artwork)), true)
+                let changes = tray_changes(&mut shown(&applying), &status, reduce_motion());
+                if let Some((artwork, frame)) = changes.icon
+                    && let Err(error) =
+                        tray.set_icon_with_as_template(Some(frame_icon(artwork, frame)), true)
                 {
                     log::warn!("[tray] icon: {error}");
                 }
-                if let Some(tooltip) = tooltip
+                if let Some(generation) = changes.timer {
+                    start_animation(applying.clone(), generation);
+                }
+                if let Some(tooltip) = changes.tooltip
                     && let Err(error) = tray.set_tooltip(Some(tooltip))
                 {
                     log::warn!("[tray] tooltip: {error}");
@@ -165,7 +272,7 @@ fn refresh_tray(app: &AppHandle) {
                     "[tray] refresh phase={} error={} icon={}",
                     status.phase,
                     status.error.is_some(),
-                    artwork.unwrap_or("unchanged")
+                    changes.icon.map_or("unchanged", |(artwork, _)| artwork)
                 );
             } else {
                 log::warn!("[tray] icon unavailable");
@@ -345,7 +452,9 @@ pub fn setup(app: &App, _settings: &Settings) -> tauri::Result<()> {
     }));
     app.manage(TrayShown(Mutex::new(Shown {
         artwork: "idle",
+        frame: None,
         tooltip: "dictate · idle".into(),
+        generation: 0,
     })));
     let menu = menu(app.handle())?;
     TrayIconBuilder::with_id("dictate")
@@ -524,12 +633,25 @@ mod tests {
         }
     }
 
+    fn idle() -> Shown {
+        Shown {
+            artwork: "idle",
+            frame: None,
+            tooltip: "dictate · idle".into(),
+            generation: 0,
+        }
+    }
+
+    fn at(phase: &str) -> Status {
+        Status {
+            phase: phase.into(),
+            ..Status::default()
+        }
+    }
+
     #[test]
     fn a_phase_transition_never_installs_the_same_icon_twice() {
-        let mut shown = Shown {
-            artwork: "idle",
-            tooltip: "dictate · idle".into(),
-        };
+        let mut shown = idle();
         let mut installed = Vec::new();
         let mut tooltips = 0;
         let mut status = Status::default();
@@ -555,30 +677,110 @@ mod tests {
         for (phase, error) in steps {
             status.phase = phase.into();
             status.error = error;
-            let (icon, tooltip) = tray_changes(&mut shown, &status);
-            installed.extend(icon);
-            tooltips += usize::from(tooltip.is_some());
+            let changes = tray_changes(&mut shown, &status, false);
+            installed.extend(changes.icon);
+            tooltips += usize::from(changes.tooltip.is_some());
         }
         assert_eq!(
             installed,
             [
-                "recording",
-                "transcribing",
-                "idle",
-                "recording",
-                "transcribing",
-                "error",
-                "idle"
+                ("recording", Some(0)),
+                ("transcribing", Some(0)),
+                ("idle", None),
+                ("recording", Some(0)),
+                ("transcribing", Some(0)),
+                ("error", None),
+                ("idle", None),
             ]
         );
         assert!(installed.windows(2).all(|pair| pair[0] != pair[1]));
         assert_eq!(tooltips, 8);
+        assert_eq!((shown.artwork, shown.frame), ("idle", None));
+    }
+
+    #[test]
+    fn frames_advance_on_the_timer_while_recording_and_the_timer_stops_at_idle() {
+        let shown = Mutex::new(idle());
+        let generation = tray_changes(&mut shown.lock().unwrap(), &at("recording"), false)
+            .timer
+            .expect("recording starts one timer");
         assert_eq!(
-            shown,
-            Shown {
-                artwork: "idle",
-                tooltip: "dictate · idle".into(),
+            tray_changes(&mut shown.lock().unwrap(), &at("recording"), false),
+            Changes::default()
+        );
+        let mut ticks = 0;
+        let mut installed = Vec::new();
+        animate(
+            || {
+                ticks += 1;
+                if ticks == FRAMES + 3 {
+                    let changes = tray_changes(&mut shown.lock().unwrap(), &at("copied"), false);
+                    assert_eq!(changes.icon, Some(("idle", None)));
+                    assert_eq!(changes.timer, None);
+                }
+            },
+            || advance(&mut shown.lock().unwrap(), generation),
+            |artwork, frame| installed.push((artwork, frame)),
+        );
+        let expected: Vec<_> = (1..FRAMES + 3)
+            .map(|tick| ("recording", tick % FRAMES))
+            .collect();
+        assert_eq!(installed, expected);
+        assert_eq!(ticks, FRAMES + 3);
+        assert_eq!(advance(&mut shown.lock().unwrap(), generation), None);
+        assert_eq!(shown.lock().unwrap().frame, None);
+    }
+
+    #[test]
+    fn a_new_animated_phase_retires_the_previous_timer() {
+        let mut shown = idle();
+        let recording = tray_changes(&mut shown, &at("recording"), false)
+            .timer
+            .unwrap();
+        let transcribing = tray_changes(&mut shown, &at("transcribing"), false)
+            .timer
+            .unwrap();
+        assert_ne!(recording, transcribing);
+        assert_eq!(advance(&mut shown, recording), None);
+        assert_eq!(advance(&mut shown, transcribing), Some(("transcribing", 1)));
+    }
+
+    #[test]
+    fn reduce_motion_keeps_the_static_artwork_and_starts_no_timer() {
+        let mut shown = idle();
+        for phase in ["recording", "transcribing"] {
+            let changes = tray_changes(&mut shown, &at(phase), true);
+            assert_eq!(changes.icon, Some((phase, None)));
+            assert_eq!(changes.timer, None);
+            let generation = shown.generation;
+            assert_eq!(advance(&mut shown, generation), None);
+            assert_eq!(frame_icon(phase, None).rgba(), icon(phase).rgba());
+        }
+    }
+
+    #[test]
+    fn animation_frames_fit_the_icon_and_move_every_step() {
+        for artwork in ["recording", "transcribing"] {
+            let frames: Vec<_> = (0..FRAMES)
+                .map(|frame| heights(artwork, Some(frame)))
+                .collect();
+            assert!(
+                frames
+                    .iter()
+                    .flatten()
+                    .all(|height| (4..=20).contains(height))
+            );
+            for frame in 0..FRAMES {
+                assert_ne!(
+                    frames[frame],
+                    frames[(frame + 1) % FRAMES],
+                    "{artwork} {frame}"
+                );
             }
+        }
+        assert_ne!(
+            heights("recording", Some(0)),
+            heights("transcribing", Some(0))
         );
     }
 }
