@@ -41,12 +41,105 @@ struct Runtime {
     shortcut_registered: bool,
 }
 
+trait SettingsPlatform {
+    fn input_devices(&self) -> Result<Vec<String>, String>;
+    fn login_enabled(&self) -> Result<bool, String>;
+    fn set_login(&self, enabled: bool) -> Result<(), String>;
+    fn register(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String>;
+    fn unregister(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String>;
+    fn persist(&self, settings: &Settings) -> Result<(), String>;
+}
+
+impl SettingsPlatform for AppHandle {
+    fn input_devices(&self) -> Result<Vec<String>, String> {
+        audio::input_devices()
+    }
+    fn login_enabled(&self) -> Result<bool, String> {
+        self.autolaunch().is_enabled().map_err(|e| e.to_string())
+    }
+    fn set_login(&self, enabled: bool) -> Result<(), String> {
+        if enabled {
+            self.autolaunch().enable()
+        } else {
+            self.autolaunch().disable()
+        }
+        .map_err(|e| e.to_string())
+    }
+    fn register(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String> {
+        self.global_shortcut()
+            .register(chord)
+            .map_err(|e| e.to_string())
+    }
+    fn unregister(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String> {
+        self.global_shortcut()
+            .unregister(chord)
+            .map_err(|e| e.to_string())
+    }
+    fn persist(&self, settings: &Settings) -> Result<(), String> {
+        let path = self
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("settings.json");
+        settings::save(&path, settings)
+    }
+}
+
 impl Runtime {
-    fn shortcut_changes(
-        &self,
-        chord: tauri_plugin_global_shortcut::Shortcut,
+    fn save_settings(
+        &mut self,
+        settings: Settings,
+        platform: &impl SettingsPlatform,
     ) -> Result<bool, String> {
-        Ok(chord != self.settings.chord()?)
+        if self.phase != Phase::Idle || audio::is_recording() {
+            return Err("Finish dictating before changing settings".into());
+        }
+        let changes = settings.validate_changes(&self.settings, || platform.input_devices())?;
+        let was_enabled = platform.login_enabled()?;
+        if let Some((old_chord, chord)) = changes.shortcut {
+            platform
+                .register(chord)
+                .map_err(|e| format!("Shortcut unavailable: {e}"))?;
+            if self.shortcut_registered
+                && let Err(error) = platform.unregister(old_chord)
+            {
+                platform
+                    .unregister(chord)
+                    .map_err(|e| format!("{error}; remove new shortcut: {e}"))?;
+                return Err(error);
+            }
+        }
+        let result = (|| {
+            if settings.launch_at_login != was_enabled {
+                platform.set_login(settings.launch_at_login)?;
+            }
+            platform.persist(&settings)
+        })();
+        if let Err(error) = result {
+            let mut errors = vec![error];
+            if settings.launch_at_login != was_enabled
+                && let Err(error) = platform.set_login(was_enabled)
+            {
+                errors.push(format!("Restore launch at login: {error}"));
+            }
+            if let Some((old_chord, chord)) = changes.shortcut {
+                if let Err(error) = platform.unregister(chord) {
+                    errors.push(format!("Remove new shortcut: {error}"));
+                }
+                if self.shortcut_registered
+                    && let Err(error) = platform.register(old_chord)
+                {
+                    errors.push(format!("Restore shortcut: {error}"));
+                }
+            }
+            return Err(errors.join("; "));
+        }
+        if changes.shortcut.is_some() {
+            self.capturing_shortcut = false;
+            self.shortcut_registered = true;
+        }
+        self.settings = settings;
+        Ok(changes.shortcut.is_some())
     }
 
     fn capture_shortcut(
@@ -152,74 +245,9 @@ fn get_settings(app: AppHandle) -> Result<Settings, String> {
 fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let state = app.state::<Mutex<Runtime>>();
     let mut runtime = state.lock().map_err(|e| e.to_string())?;
-    if runtime.phase != Phase::Idle || audio::is_recording() {
-        return Err("Finish dictating before changing settings".into());
-    }
-    let chord = settings.chord()?;
-    if let Some(name) = &settings.microphone
-        && !audio::input_devices()?.contains(name)
-    {
-        return Err(format!("Microphone unavailable: {name}"));
-    }
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("settings.json");
-    let was_enabled = app.autolaunch().is_enabled().map_err(|e| e.to_string())?;
-    let old_chord = runtime.settings.chord()?;
-    let changed = runtime.shortcut_changes(chord)?;
-    if changed {
-        app.global_shortcut()
-            .register(chord)
-            .map_err(|e| format!("Shortcut unavailable: {e}"))?;
-        if runtime.shortcut_registered
-            && let Err(error) = app.global_shortcut().unregister(old_chord)
-        {
-            app.global_shortcut()
-                .unregister(chord)
-                .map_err(|e| format!("{error}; remove new shortcut: {e}"))?;
-            return Err(error.to_string());
-        }
-    }
-    let change_login = |enabled| {
-        if enabled {
-            app.autolaunch().enable()
-        } else {
-            app.autolaunch().disable()
-        }
-    };
-    let result = (|| {
-        if settings.launch_at_login != was_enabled {
-            change_login(settings.launch_at_login).map_err(|e| e.to_string())?;
-        }
-        settings::save(&path, &settings)
-    })();
-    if let Err(error) = result {
-        let mut errors = vec![error];
-        if settings.launch_at_login != was_enabled
-            && let Err(error) = change_login(was_enabled)
-        {
-            errors.push(format!("Restore launch at login: {error}"));
-        }
-        if changed {
-            if let Err(error) = app.global_shortcut().unregister(chord) {
-                errors.push(format!("Remove new shortcut: {error}"));
-            }
-            if runtime.shortcut_registered
-                && let Err(error) = app.global_shortcut().register(old_chord)
-            {
-                errors.push(format!("Restore shortcut: {error}"));
-            }
-        }
-        return Err(errors.join("; "));
-    }
-    if changed {
-        runtime.capturing_shortcut = false;
-        runtime.shortcut_registered = true;
+    if runtime.save_settings(settings.clone(), &app)? {
         surface::clear_error(&app);
     }
-    runtime.settings = settings.clone();
     surface::update_shortcut(&app, &settings.shortcut);
     if let Err(error) = app.emit("settings-changed", &settings) {
         report_error(
@@ -514,32 +542,114 @@ mod take_tests {
         }
     }
 
+    struct TestSettingsPlatform {
+        path: std::path::PathBuf,
+        login: std::cell::Cell<bool>,
+        device_checks: std::cell::Cell<usize>,
+        registered: std::cell::RefCell<Vec<tauri_plugin_global_shortcut::Shortcut>>,
+    }
+
+    impl SettingsPlatform for TestSettingsPlatform {
+        fn input_devices(&self) -> Result<Vec<String>, String> {
+            self.device_checks.set(self.device_checks.get() + 1);
+            Ok(Vec::new())
+        }
+        fn login_enabled(&self) -> Result<bool, String> {
+            Ok(self.login.get())
+        }
+        fn set_login(&self, enabled: bool) -> Result<(), String> {
+            self.login.set(enabled);
+            Ok(())
+        }
+        fn register(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String> {
+            self.registered.borrow_mut().push(chord);
+            Ok(())
+        }
+        fn unregister(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String> {
+            let mut registered = self.registered.borrow_mut();
+            let index = registered
+                .iter()
+                .position(|registered| *registered == chord)
+                .expect("Shortcut must be registered before unregistering");
+            registered.remove(index);
+            Ok(())
+        }
+        fn persist(&self, settings: &Settings) -> Result<(), String> {
+            settings::save(&self.path, settings)
+        }
+    }
+
     #[test]
-    fn unrelated_settings_do_not_retry_an_unavailable_shortcut() {
+    fn save_settings_persists_unrelated_changes_with_unplugged_microphone_and_taken_shortcut() {
+        let dir = tempfile::tempdir().unwrap();
+        let platform = TestSettingsPlatform {
+            path: dir.path().join("settings.json"),
+            login: std::cell::Cell::new(false),
+            device_checks: std::cell::Cell::new(0),
+            registered: std::cell::RefCell::new(Vec::new()),
+        };
         let mut runtime = unavailable_shortcut();
+        runtime.settings.microphone = Some("Unplugged USB microphone".into());
         for settings in [
             Settings {
-                microphone: Some("USB microphone".into()),
-                ..Settings::default()
-            },
-            Settings {
                 shortcut_mode: ShortcutMode::Toggle,
-                ..Settings::default()
+                ..runtime.settings.clone()
             },
             Settings {
                 launch_at_login: true,
-                ..Settings::default()
+                ..runtime.settings.clone()
+            },
+            Settings {
+                theme: settings::Theme::Paper,
+                ..runtime.settings.clone()
+            },
+            Settings {
+                appearance_mode: settings::AppearanceMode::Dark,
+                ..runtime.settings.clone()
             },
         ] {
-            assert!(!runtime.shortcut_changes(settings.chord().unwrap()).unwrap());
-            runtime.settings = settings;
+            assert!(!runtime.save_settings(settings.clone(), &platform).unwrap());
+            assert_eq!(settings::load(&platform.path).unwrap(), settings);
+            assert_eq!(runtime.settings, settings);
+            assert_eq!(platform.login.get(), settings.launch_at_login);
             assert!(!runtime.shortcut_registered);
+            assert!(platform.registered.borrow().is_empty());
+            assert_eq!(platform.device_checks.get(), 0);
         }
+        let before = runtime.settings.clone();
+        let invalid = Settings {
+            shortcut: "Space".into(),
+            ..before.clone()
+        };
         assert!(
             runtime
-                .shortcut_changes("Control+KeyD".parse().unwrap())
-                .unwrap()
+                .save_settings(invalid, &platform)
+                .unwrap_err()
+                .contains("Choose a shortcut")
         );
+        let missing = Settings {
+            microphone: Some("Another missing microphone".into()),
+            ..before.clone()
+        };
+        assert_eq!(
+            runtime.save_settings(missing, &platform).unwrap_err(),
+            "Microphone unavailable: Another missing microphone"
+        );
+        assert_eq!(platform.device_checks.get(), 1);
+        assert_eq!(runtime.settings, before);
+        assert_eq!(settings::load(&platform.path).unwrap(), before);
+        let changed = Settings {
+            shortcut: "Control+KeyD".into(),
+            ..before
+        };
+        assert!(runtime.save_settings(changed.clone(), &platform).unwrap());
+        assert_eq!(
+            platform.registered.borrow().as_slice(),
+            &[changed.chord().unwrap()]
+        );
+        assert_eq!(platform.device_checks.get(), 1);
+        assert!(runtime.shortcut_registered);
+        assert_eq!(settings::load(&platform.path).unwrap(), changed);
     }
 
     #[test]

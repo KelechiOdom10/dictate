@@ -67,7 +67,32 @@ impl Default for Settings {
     }
 }
 
+pub struct SettingsChanges {
+    pub shortcut: Option<(Shortcut, Shortcut)>,
+}
+
 impl Settings {
+    pub fn validate_changes(
+        &self,
+        previous: &Settings,
+        input_devices: impl FnOnce() -> Result<Vec<String>, String>,
+    ) -> Result<SettingsChanges, String> {
+        let shortcut = if self.shortcut != previous.shortcut {
+            let old = previous.chord()?;
+            let new = self.chord()?;
+            (old != new).then_some((old, new))
+        } else {
+            None
+        };
+        if self.microphone != previous.microphone
+            && let Some(name) = &self.microphone
+            && !input_devices()?.contains(name)
+        {
+            return Err(format!("Microphone unavailable: {name}"));
+        }
+        Ok(SettingsChanges { shortcut })
+    }
+
     pub fn chord(&self) -> Result<Shortcut, String> {
         let chord: Shortcut = self
             .shortcut
@@ -127,7 +152,7 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
     let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     let mut value = match fs::read(path) {
         Ok(bytes) => serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes)
-            .map_err(|e| format!("Read existing settings: {e}"))?,
+            .unwrap_or_default(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
         Err(error) => return Err(format!("Read existing settings: {error}")),
     };
@@ -147,6 +172,21 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_replaces_corrupt_settings_left_after_failed_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        for corrupt in ["{broken", "[]", "null"] {
+            fs::write(&path, corrupt).unwrap();
+            let settings = Settings {
+                theme: Theme::Paper,
+                ..Settings::default()
+            };
+            save(&path, &settings).unwrap();
+            assert_eq!(load(&path).unwrap(), settings);
+        }
+    }
 
     #[test]
     fn typescript_contract_matches_rust_settings() {
