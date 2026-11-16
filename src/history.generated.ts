@@ -11,3 +11,4 @@ export type HistoryEntry = {
   status: TakeStatus;
   detail: string | null;
 };
+export type HistoryList = { entries: Array<HistoryEntry>; hasMore: boolean };

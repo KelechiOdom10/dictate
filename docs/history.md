@@ -21,12 +21,24 @@ is one row in `takes`:
 | `status` | `pasted`, `skipped` or `failed`. |
 | `detail` | Skip reason or the failure's title, fix and cause. |
 
-Audio is never stored. There is no setting for it yet; one would come with
-playback.
+Audio is never stored. An opt-in "keep audio" setting is deferred; it would come
+with playback.
+
+The connection turns on `PRAGMA secure_delete`, so a deleted or pruned take's
+text is overwritten in the file rather than left in a free page. A test reads
+the raw file after a delete to prove it.
+
+A take whose audio never arrives (`audio::stop` fails) is still saved, as a
+failed row with the error in `detail`.
+
+The page asks for the newest 500 matching takes. When more exist it says
+"Showing the latest 500" and offers "Load older dictations", which asks for 500
+more.
 
 Schema changes are appended to `MIGRATIONS` and tracked with SQLite's
 `user_version`. A file from a newer app is refused rather than downgraded; the
-app then runs with history off and says so.
+app then runs with history off and says this version can't read the history and
+to update dictate. Other open failures suggest a restart.
 
 ## Retention
 

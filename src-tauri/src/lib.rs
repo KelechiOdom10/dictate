@@ -20,15 +20,21 @@ mod transcribe;
 
 mod focus;
 mod history;
+mod models;
 mod overlay;
 mod problem;
 mod settings;
 mod surface;
 
-use history::{HistoryEntry, NewTake, TakeStatus};
+use history::{HistoryList, NewTake, TakeStatus};
+use models::{ModelEntry, SpeechModel};
 use problem::Problem;
 use settings::{HistoryRetention, Settings, ShortcutMode};
-use std::{sync::Mutex, time::Instant};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::Instant,
+};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -55,10 +61,18 @@ struct TakeStart {
     app: Option<String>,
 }
 
-type History = Mutex<Option<history::Store>>;
+/// The open store, or the message to show when history is off.
+type History = Mutex<Result<history::Store, String>>;
+
+/// Where model weights live (`<app data>/models`) and which are downloading.
+struct Models {
+    dir: PathBuf,
+    downloads: Mutex<models::Downloads>,
+}
 
 trait SettingsPlatform {
     fn input_devices(&self) -> Result<Vec<String>, String>;
+    fn model_installed(&self, model: SpeechModel) -> bool;
     fn login_enabled(&self) -> Result<bool, String>;
     fn set_login(&self, enabled: bool) -> Result<(), String>;
     fn register(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String>;
@@ -69,6 +83,9 @@ trait SettingsPlatform {
 impl SettingsPlatform for AppHandle {
     fn input_devices(&self) -> Result<Vec<String>, String> {
         audio::input_devices()
+    }
+    fn model_installed(&self, model: SpeechModel) -> bool {
+        models::path(&self.state::<Models>().dir, model).is_file()
     }
     fn login_enabled(&self) -> Result<bool, String> {
         self.autolaunch().is_enabled().map_err(|e| e.to_string())
@@ -110,7 +127,11 @@ impl Runtime {
         if self.phase != Phase::Idle || audio::is_recording() {
             return Err("Finish dictating before changing settings".into());
         }
-        let changes = settings.validate_changes(&self.settings, || platform.input_devices())?;
+        let changes = settings.validate_changes(
+            &self.settings,
+            || platform.input_devices(),
+            |model| platform.model_installed(model),
+        )?;
         let was_enabled = platform.login_enabled()?;
         if let Some((old_chord, chord)) = changes.shortcut {
             platform
@@ -208,7 +229,8 @@ fn record_stop() -> Result<usize, String> {
 #[tauri::command]
 fn finish_dictation(app: AppHandle) -> Result<String, String> {
     let samples = audio::stop()?;
-    let text = dictation_text(&samples)?.text;
+    let model = active_model_path(&app)?;
+    let text = dictation_text(&samples, &model)?.text;
     if !text.is_empty() {
         insert::paste(&app, &text)?;
     }
@@ -242,7 +264,7 @@ struct Transcript {
     skip_reason: Option<String>,
 }
 
-fn dictation_text(samples: &[f32]) -> Result<Transcript, Problem> {
+fn dictation_text(samples: &[f32], model: &Path) -> Result<Transcript, Problem> {
     if let Some(reason) = take_skip_reason(samples) {
         println!("[hotkey] skipped: {reason}");
         return Ok(Transcript {
@@ -252,7 +274,7 @@ fn dictation_text(samples: &[f32]) -> Result<Transcript, Problem> {
         });
     }
     let started = Instant::now();
-    let text = transcribe::transcribe(samples)?;
+    let text = transcribe::transcribe(samples, model)?;
     let inference_ms = Some(started.elapsed().as_millis() as i64);
     if !transcript_has_text(&text) {
         println!("[hotkey] skipped: transcript has no letters or numbers");
@@ -275,11 +297,7 @@ fn with_history<T>(
 ) -> Result<T, String> {
     let state = app.state::<History>();
     let store = state.lock().map_err(|e| e.to_string())?;
-    read(
-        store
-            .as_ref()
-            .ok_or("History is unavailable. Restart dictate to try again.")?,
-    )
+    read(store.as_ref().map_err(Clone::clone)?)
 }
 
 fn record_take(app: &AppHandle, take: &NewTake, retention: HistoryRetention) {
@@ -298,7 +316,7 @@ fn record_take(app: &AppHandle, take: &NewTake, retention: HistoryRetention) {
 }
 
 #[tauri::command]
-fn list_history(app: AppHandle, search: String) -> Result<Vec<HistoryEntry>, String> {
+fn list_history(app: AppHandle, search: String, limit: u32) -> Result<HistoryList, String> {
     let retention = app
         .state::<Mutex<Runtime>>()
         .lock()
@@ -307,13 +325,118 @@ fn list_history(app: AppHandle, search: String) -> Result<Vec<HistoryEntry>, Str
         .history_retention;
     with_history(&app, |store| {
         store.prune(retention, history::now_ms())?;
-        store.list(&search)
+        store.list(&search, limit)
     })
 }
 
 #[tauri::command]
 fn delete_history(app: AppHandle, id: i64) -> Result<(), String> {
     with_history(&app, |store| store.delete(id))
+}
+
+fn active_model_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let model = app
+        .state::<Mutex<Runtime>>()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .settings
+        .speech_model;
+    Ok(models::path(&app.state::<Models>().dir, model))
+}
+
+#[tauri::command]
+fn list_models(app: AppHandle) -> Result<Vec<ModelEntry>, String> {
+    let active = app
+        .state::<Mutex<Runtime>>()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .settings
+        .speech_model;
+    let models = app.state::<Models>();
+    let downloads = models.downloads.lock().map_err(|e| e.to_string())?;
+    Ok(downloads.entries(&models.dir, active))
+}
+
+fn models_changed(app: &AppHandle) {
+    if let Err(error) = app.emit("models-changed", ()) {
+        eprintln!("[models] emit: {error}");
+    }
+}
+
+#[tauri::command]
+fn download_model(app: AppHandle, model: SpeechModel) -> Result<(), String> {
+    let models = app.state::<Models>();
+    if models::path(&models.dir, model).is_file() {
+        return Ok(());
+    }
+    let cancel = models
+        .downloads
+        .lock()
+        .map_err(|e| e.to_string())?
+        .begin(model)?;
+    let dir = models.dir.clone();
+    models_changed(&app);
+    std::thread::spawn(move || {
+        let mut last_emit = Instant::now();
+        let result = models::fetch(model, &dir, &cancel, |received| {
+            if let Ok(mut downloads) = app.state::<Models>().downloads.lock() {
+                downloads.progress(model, received);
+            }
+            if last_emit.elapsed().as_millis() >= 150 {
+                last_emit = Instant::now();
+                models_changed(&app);
+            }
+        });
+        match &result {
+            Ok(()) => println!("[models] downloaded {}", models::info(model).file_name),
+            Err(error) => eprintln!("[models] {}: {error}", models::info(model).file_name),
+        }
+        if let Ok(mut downloads) = app.state::<Models>().downloads.lock() {
+            downloads.finish(model, &result);
+        }
+        models_changed(&app);
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_download(app: AppHandle, model: SpeechModel) -> Result<(), String> {
+    app.state::<Models>()
+        .downloads
+        .lock()
+        .map_err(|e| e.to_string())?
+        .cancel(model);
+    models_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_model(app: AppHandle, model: SpeechModel) -> Result<(), String> {
+    let runtime = app.state::<Mutex<Runtime>>();
+    let runtime = runtime.lock().map_err(|e| e.to_string())?;
+    if runtime.settings.speech_model == model {
+        return Err("Choose another model before deleting this one".into());
+    }
+    let models = app.state::<Models>();
+    if models
+        .downloads
+        .lock()
+        .map_err(|e| e.to_string())?
+        .is_running(model)
+    {
+        return Err("Cancel the download first".into());
+    }
+    models::delete(&models.dir, model)?;
+    drop(runtime);
+    models_changed(&app);
+    Ok(())
+}
+
+/// `None` when whisper-cli was found; otherwise the problem, with the
+/// install command in its fix.
+#[tauri::command]
+fn whisper_status() -> Option<Problem> {
+    transcribe::whisper_cli().err()
 }
 
 #[tauri::command]
@@ -328,7 +451,9 @@ fn get_settings(app: AppHandle) -> Result<Settings, String> {
 fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let state = app.state::<Mutex<Runtime>>();
     let mut runtime = state.lock().map_err(|e| e.to_string())?;
-    if runtime.save_settings(settings.clone(), &app)? {
+    let shortcut_changed = runtime.save_settings(settings.clone(), &app)?;
+    drop(runtime);
+    if shortcut_changed {
         surface::clear_error(&app);
     }
     *app.state::<Mutex<settings::OverlayPosition>>()
@@ -498,6 +623,7 @@ fn hotkey(
             app: None,
         });
         let retention = runtime.settings.history_retention;
+        let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
         match audio::stop() {
             Ok(samples) => {
                 runtime.phase = Phase::Transcribing;
@@ -505,7 +631,7 @@ fn hotkey(
                 let take_id = runtime.take_id;
                 let app = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    let transcript = dictation_text(&samples);
+                    let transcript = dictation_text(&samples, &model);
                     let result = transcript.as_ref().map_err(Clone::clone).and_then(|t| {
                         if !t.text.is_empty() {
                             insert::paste(&app, &t.text)?;
@@ -528,7 +654,7 @@ fn hotkey(
                             text,
                             created_at_ms: start.started_at_ms,
                             app: start.app,
-                            model: transcribe::model_name(),
+                            model: transcribe::model_name(&model),
                             audio_ms: (samples.len() / 16) as i64,
                             inference_ms,
                             total_ms,
@@ -587,9 +713,34 @@ fn hotkey(
                 runtime.phase = Phase::Idle;
                 surface::set_phase(app, "idle");
                 drop(runtime);
+                record_take(
+                    app,
+                    &failed_capture(
+                        &start,
+                        &model,
+                        released.elapsed().as_millis() as i64,
+                        &error,
+                    ),
+                    retention,
+                );
                 report_error(app, &error);
             }
         }
+    }
+}
+
+/// The History row for a take whose audio never arrived.
+fn failed_capture(start: &TakeStart, model: &Path, total_ms: i64, error: &Problem) -> NewTake {
+    NewTake {
+        text: String::new(),
+        created_at_ms: start.started_at_ms,
+        app: start.app.clone(),
+        model: transcribe::model_name(model),
+        audio_ms: 0,
+        inference_ms: None,
+        total_ms,
+        status: TakeStatus::Failed,
+        detail: Some(error.to_string()),
     }
 }
 
@@ -631,7 +782,12 @@ pub fn run() {
             resize_overlay,
             report_settings_refresh_error,
             list_history,
-            delete_history
+            delete_history,
+            list_models,
+            download_model,
+            cancel_download,
+            delete_model,
+            whisper_status
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -640,25 +796,25 @@ pub fn run() {
             let (settings, mut startup_error) =
                 settings::load_or_default(&data_dir.join("settings.json"));
             let store = history::Store::open(&data_dir.join("history.sqlite3")).and_then(|store| {
-                store.prune(settings.history_retention, history::now_ms())?;
+                store
+                    .prune(settings.history_retention, history::now_ms())
+                    .map_err(history::OpenError::Failed)?;
                 Ok(store)
             });
-            let store = match store {
-                Ok(store) => Some(store),
-                Err(error) => {
-                    let problem = Problem::new(
-                        "History is off",
-                        "Dictation still works. Restart dictate to turn history back on.",
-                    )
-                    .because(error);
-                    startup_error = Some(match startup_error {
-                        Some(previous) => previous.and(problem),
-                        None => problem,
-                    });
-                    None
-                }
-            };
+            let store = store.map_err(|error| {
+                let problem = error.problem();
+                let message = problem.fix.clone();
+                startup_error = Some(match startup_error.take() {
+                    Some(previous) => previous.and(problem),
+                    None => problem,
+                });
+                message
+            });
             app.manage::<History>(Mutex::new(store));
+            app.manage(Models {
+                dir: data_dir.join("models"),
+                downloads: Mutex::default(),
+            });
             let shortcut_registered = match settings.chord().and_then(|chord| {
                 app.global_shortcut()
                     .register(chord)
@@ -783,6 +939,9 @@ mod take_tests {
             self.device_checks.set(self.device_checks.get() + 1);
             Ok(Vec::new())
         }
+        fn model_installed(&self, model: SpeechModel) -> bool {
+            model == SpeechModel::SmallEn
+        }
         fn login_enabled(&self) -> Result<bool, String> {
             Ok(self.login.get())
         }
@@ -865,6 +1024,16 @@ mod take_tests {
             "Microphone unavailable: Another missing microphone"
         );
         assert_eq!(platform.device_checks.get(), 1);
+        let not_downloaded = Settings {
+            speech_model: SpeechModel::MediumEn,
+            ..before.clone()
+        };
+        assert_eq!(
+            runtime
+                .save_settings(not_downloaded, &platform)
+                .unwrap_err(),
+            "Download Medium English before choosing it"
+        );
         assert_eq!(runtime.settings, before);
         assert_eq!(settings::load(&platform.path).unwrap(), before);
         let changed = Settings {
@@ -879,6 +1048,17 @@ mod take_tests {
         assert_eq!(platform.device_checks.get(), 1);
         assert!(runtime.shortcut_registered);
         assert_eq!(settings::load(&platform.path).unwrap(), changed);
+        let downloaded = Settings {
+            speech_model: SpeechModel::SmallEn,
+            ..changed
+        };
+        assert!(
+            !runtime
+                .save_settings(downloaded.clone(), &platform)
+                .unwrap()
+        );
+        assert_eq!(runtime.settings.speech_model, SpeechModel::SmallEn);
+        assert_eq!(settings::load(&platform.path).unwrap(), downloaded);
     }
 
     #[test]
@@ -957,10 +1137,53 @@ mod take_tests {
             "missingModel": transcribe::missing_model(std::path::Path::new(
                 "/Applications/dictate.app/models/ggml-base.en.bin"
             )),
+            "whisperMissing": transcribe::whisper_missing(),
         });
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("../../src/problems.fixture.json")).unwrap();
         assert_eq!(fixture, real);
+    }
+
+    #[test]
+    fn failed_capture_is_recorded_as_a_failed_take() {
+        let take = failed_capture(
+            &TakeStart {
+                started_at_ms: 1_000,
+                app: Some("Notes".into()),
+            },
+            Path::new("/models/ggml-base.en.bin"),
+            12,
+            &audio::no_samples(),
+        );
+        assert_eq!(take.status, TakeStatus::Failed);
+        assert_eq!(take.created_at_ms, 1_000);
+        assert_eq!(take.app.as_deref(), Some("Notes"));
+        assert_eq!(take.total_ms, 12);
+        assert_eq!(take.audio_ms, 0);
+        assert_eq!(take.model, "ggml-base.en");
+        assert!(take.text.is_empty());
+        assert!(
+            take.detail
+                .unwrap()
+                .contains("No sound from the microphone")
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let store = history::Store::open(&dir.path().join("history.sqlite3")).unwrap();
+        store
+            .insert(&failed_capture(
+                &TakeStart {
+                    started_at_ms: 1,
+                    app: None,
+                },
+                Path::new("/models/ggml-base.en.bin"),
+                1,
+                &audio::no_samples(),
+            ))
+            .unwrap();
+        assert_eq!(
+            store.list("", 10).unwrap().entries[0].status,
+            TakeStatus::Failed
+        );
     }
 
     #[test]
@@ -970,7 +1193,7 @@ mod take_tests {
         assert!(take_skip_reason(&vec![0.002; 16_000]).is_some());
         assert!(take_skip_reason(&[]).is_some());
         for samples in [vec![0.0; 32_000], vec![0.2; 2_400]] {
-            let transcript = dictation_text(&samples).unwrap();
+            let transcript = dictation_text(&samples, Path::new("/nonexistent.bin")).unwrap();
             assert_eq!(transcript.text, "");
             assert_eq!(transcript.inference_ms, None);
             assert!(transcript.skip_reason.is_some());

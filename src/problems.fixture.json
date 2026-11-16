@@ -16,7 +16,12 @@
   },
   "missingModel": {
     "title": "Speech model missing",
-    "fix": "Download ggml-base.en.bin into dictate’s models folder.",
+    "fix": "Download one in Settings → Models.",
     "detail": "no file at /Applications/dictate.app/models/ggml-base.en.bin"
+  },
+  "whisperMissing": {
+    "title": "whisper-cli not found",
+    "fix": "Run `brew install whisper.cpp` in Terminal, then try again.",
+    "detail": "not on PATH, /opt/homebrew/bin or /usr/local/bin"
   }
 }

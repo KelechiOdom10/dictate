@@ -1,3 +1,4 @@
+use crate::models::SpeechModel;
 use crate::problem::Problem;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
@@ -79,6 +80,8 @@ pub struct Settings {
     pub overlay_position: OverlayPosition,
     #[serde(default)]
     pub history_retention: HistoryRetention,
+    #[serde(default)]
+    pub speech_model: SpeechModel,
 }
 
 const CURRENT_VERSION: u32 = 1;
@@ -99,6 +102,7 @@ impl Default for Settings {
             appearance_mode: AppearanceMode::System,
             overlay_position: OverlayPosition::Bottom,
             history_retention: HistoryRetention::Week,
+            speech_model: SpeechModel::BaseEn,
         }
     }
 }
@@ -112,7 +116,14 @@ impl Settings {
         &self,
         previous: &Settings,
         input_devices: impl FnOnce() -> Result<Vec<String>, String>,
+        model_installed: impl FnOnce(SpeechModel) -> bool,
     ) -> Result<SettingsChanges, String> {
+        if self.speech_model != previous.speech_model && !model_installed(self.speech_model) {
+            return Err(format!(
+                "Download {} before choosing it",
+                crate::models::info(self.speech_model).name
+            ));
+        }
         let shortcut = if self.shortcut != previous.shortcut {
             let old = previous.chord()?;
             let new = self.chord()?;
@@ -233,7 +244,7 @@ mod tests {
     #[test]
     fn typescript_contract_matches_rust_settings() {
         let contract = format!(
-            "export {}\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
+            "import type {{ SpeechModel }} from \"./models.generated\";\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\nexport {}\n",
             ShortcutMode::decl(),
             Theme::decl(),
             AppearanceMode::decl(),
@@ -264,6 +275,7 @@ mod tests {
             appearance_mode: AppearanceMode::Dark,
             overlay_position: OverlayPosition::Top,
             history_retention: HistoryRetention::Forever,
+            speech_model: SpeechModel::SmallEn,
             ..Settings::default()
         };
         save(&path, &settings).unwrap();
@@ -287,6 +299,7 @@ mod tests {
         assert_eq!(settings.appearance_mode, AppearanceMode::System);
         assert_eq!(settings.overlay_position, OverlayPosition::Bottom);
         assert_eq!(settings.history_retention, HistoryRetention::Week);
+        assert_eq!(settings.speech_model, SpeechModel::BaseEn);
         fs::write(&path, r#"{"version":2,"newSetting":true}"#).unwrap();
         let settings = load(&path).unwrap();
         assert_eq!(settings.version, 2);

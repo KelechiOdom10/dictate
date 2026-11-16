@@ -26,6 +26,16 @@ const historyReady = {
   "pages--history-no-matches": (page) =>
     page.getByRole("heading", { name: "No matches for “zebra”" }).waitFor(),
 };
+const modelsReady = {
+  "pages--models-idle": (page) =>
+    page.getByText(/Download a model to start dictating/).waitFor(),
+  "pages--models-downloading": (page) =>
+    page.getByText("205 MB of 488 MB").waitFor(),
+  "pages--models-installed": (page) =>
+    page.getByRole("button", { name: "Use Small English" }).waitFor(),
+  "pages--models-error": (page) =>
+    page.getByText("brew install whisper.cpp").waitFor(),
+};
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({
@@ -70,7 +80,9 @@ try {
         await page.setViewportSize({
           width: entry.id.includes("controls-side-by-side")
             ? 1440
-            : entry.id === "pages--general" || entry.id in historyReady
+            : entry.id === "pages--general" ||
+                entry.id in historyReady ||
+                entry.id in modelsReady
               ? 820
               : 1000,
           height:
@@ -94,6 +106,7 @@ try {
         )
           await page.locator("#login").waitFor();
         if (entry.id in historyReady) await historyReady[entry.id](page);
+        if (entry.id in modelsReady) await modelsReady[entry.id](page);
         await page.evaluate(async () => {
           await document.fonts.ready;
           for (const weight of [400, 500, 600]) {
@@ -171,7 +184,8 @@ try {
       for (const id of [
         "pages--general",
         "pages--history",
-        "pages--models",
+        "pages--models-downloading",
+        "pages--models-error",
         "components-recordingcapsule--all-states",
       ]) {
         await page.goto(
@@ -181,6 +195,7 @@ try {
           .locator("#storybook-root > *")
           .first()
           .waitFor({ state: "visible" });
+        if (id in modelsReady) await modelsReady[id](page);
         if (
           await page.evaluate(
             () => document.documentElement.scrollWidth > innerWidth,

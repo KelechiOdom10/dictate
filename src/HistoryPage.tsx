@@ -13,6 +13,7 @@ import {
   entryTitle,
   formatMs,
   formatSeconds,
+  HISTORY_PAGE,
   modelLabel,
   readHistory,
   relativeTime,
@@ -27,6 +28,7 @@ import {
 } from "./settings";
 import {
   Button,
+  Confirm,
   DetailPanel,
   EmptyState,
   FilterChips,
@@ -78,9 +80,11 @@ export default function HistoryPage() {
   );
   const [error, setError] = useState("");
   const query = useDeferredValue(search.trim());
+  const [limit, setLimit] = useState({ query, count: HISTORY_PAGE });
+  const count = limit.query === query ? limit.count : HISTORY_PAGE;
   const history = useQuery({
-    queryKey: ["history", query],
-    queryFn: () => readHistory(query),
+    queryKey: ["history", query, count],
+    queryFn: () => readHistory(query, count),
     placeholderData: keepPreviousData,
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
@@ -107,7 +111,7 @@ export default function HistoryPage() {
     };
   }, [client]);
 
-  const entries = (history.data ?? []).filter(
+  const entries = (history.data?.entries ?? []).filter(
     (entry) => filter === "all" || entry.status === filter,
   );
   const selected =
@@ -193,7 +197,21 @@ export default function HistoryPage() {
       </div>
     );
 
-  const nothingYet = !query && history.data.length === 0;
+  const nothingYet = !query && history.data.entries.length === 0;
+  const more = history.data.hasMore && (
+    <div className="history-more">
+      <p className="ui-date">
+        Showing the latest {history.data.entries.length.toLocaleString()}.
+      </p>
+      <Button
+        size="sm"
+        disabled={history.isFetching}
+        onClick={() => setLimit({ query, count: count + HISTORY_PAGE })}
+      >
+        {history.isFetching ? "Loading…" : "Load older dictations"}
+      </Button>
+    </div>
+  );
   return (
     <div className="history">
       {toolbar}
@@ -231,7 +249,10 @@ export default function HistoryPage() {
             query ? (
               <Button onClick={() => setSearch("")}>Clear search</Button>
             ) : (
-              <Button onClick={() => setFilter("all")}>Show all</Button>
+              <>
+                <Button onClick={() => setFilter("all")}>Show all</Button>
+                {more}
+              </>
             )
           }
         >
@@ -241,22 +262,25 @@ export default function HistoryPage() {
         </EmptyState>
       ) : (
         <div className="history-split">
-          <SelectList
-            label="Dictations"
-            items={entries.map((entry) => ({
-              id: entry.id,
-              title: entryTitle(entry),
-              meta: [
-                entry.app ?? "Unknown app",
-                entry.status === "pasted" ? null : statusLabels[entry.status],
-              ]
-                .filter(Boolean)
-                .join(" · "),
-              date: relativeTime(entry.createdAtMs, now),
-            }))}
-            value={selected.id}
-            onChange={setSelectedId}
-          />
+          <div className="history-list">
+            <SelectList
+              label="Dictations"
+              items={entries.map((entry) => ({
+                id: entry.id,
+                title: entryTitle(entry),
+                meta: [
+                  entry.app ?? "Unknown app",
+                  entry.status === "pasted" ? null : statusLabels[entry.status],
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+                date: relativeTime(entry.createdAtMs, now),
+              }))}
+              value={selected.id}
+              onChange={setSelectedId}
+            />
+            {more}
+          </div>
           <Detail
             key={selected.id}
             entry={selected}
@@ -267,46 +291,6 @@ export default function HistoryPage() {
           />
         </div>
       )}
-    </div>
-  );
-}
-
-function Confirm({
-  question,
-  confirmLabel,
-  children,
-  onConfirm,
-  onCancel,
-}: {
-  question: string;
-  confirmLabel: string;
-  children?: React.ReactNode;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => cancel.current?.focus(), []);
-  return (
-    <div
-      className="history-confirm"
-      role="group"
-      aria-label={question}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
-      }}
-    >
-      <div>
-        <p className="history-confirm-question">{question}</p>
-        {children && <p className="ui-preview">{children}</p>}
-      </div>
-      <div className="ui-actions">
-        <Button ref={cancel} onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={onConfirm}>
-          {confirmLabel}
-        </Button>
-      </div>
     </div>
   );
 }

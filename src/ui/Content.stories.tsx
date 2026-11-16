@@ -120,44 +120,72 @@ export const Detail: Story = {
     </DetailPanel>
   ),
 };
+const ratings = (
+  accuracy: number,
+  accuracyText: string,
+  speed: number,
+  speedText: string,
+) => [
+  { label: "Accuracy", value: accuracy, text: accuracyText },
+  { label: "Speed", value: speed, text: speedText },
+];
 export const Models: Story = {
-  name: "ModelCard / available, downloading, installed, error",
+  name: "ModelCard / available, downloading, installed, in use, error",
   render: () => (
     <div className="story-stack">
       <ModelCard
-        name="Base English"
-        description="A balanced everyday companion."
-        accuracy={75}
-        speed={90}
-        size="142 MB"
+        name="Small English"
+        description="Noticeably more accurate, still quick on this Mac."
+        ratings={ratings(0.6, "Good", 0.43, "440 ms")}
+        size="488 MB"
         badge="Recommended"
         status={{ kind: "available", onDownload: () => {} }}
       />
       <ModelCard
-        name="Small English"
-        description="More detail, a little more time."
-        accuracy={90}
-        speed={65}
-        size="466 MB"
-        status={{ kind: "downloading", progress: 42 }}
+        name="Medium English"
+        description="Careful with names and jargon, but slower."
+        ratings={ratings(0.8, "Very good", 0.18, "1.0 s")}
+        size="1.5 GB"
+        status={{
+          kind: "downloading",
+          progress: 42,
+          detail: "644 MB of 1.5 GB",
+          cancelling: false,
+          onCancel: () => {},
+        }}
       />
       <ModelCard
         name="Tiny English"
-        description="For quick thoughts."
-        accuracy={60}
-        speed={100}
-        size="75 MB"
-        status={{ kind: "installed" }}
+        description="Instant, for short notes. Misses more words."
+        ratings={ratings(0.2, "Basic", 1, "190 ms")}
+        size="78 MB"
+        status={{
+          kind: "installed",
+          active: false,
+          onUse: () => {},
+          onDelete: () => {},
+        }}
       />
       <ModelCard
-        name="Medium English"
-        description="For careful transcription."
-        accuracy={95}
-        speed={40}
-        size="1.5 GB"
+        name="Base English"
+        description="Fast and dependable for everyday dictation."
+        ratings={ratings(0.4, "Fair", 0.81, "190 ms")}
+        size="148 MB"
+        status={{
+          kind: "installed",
+          active: true,
+          onUse: () => {},
+          onDelete: () => {},
+        }}
+      />
+      <ModelCard
+        name="Large v3 Turbo"
+        description="The most accurate. Multilingual, set to English here."
+        ratings={ratings(1, "Best", 0.17, "1.1 s")}
+        size="1.6 GB"
         status={{
           kind: "error",
-          message: "Download interrupted. Try again.",
+          message: "Download failed. Check your connection and try again.",
           onRetry: () => {},
         }}
       />

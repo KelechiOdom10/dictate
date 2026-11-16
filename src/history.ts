@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-import type { HistoryEntry } from "./history.generated";
-export type { HistoryEntry, TakeStatus } from "./history.generated";
+import type { HistoryEntry, HistoryList } from "./history.generated";
+export type {
+  HistoryEntry,
+  HistoryList,
+  TakeStatus,
+} from "./history.generated";
 
 export const historyEntrySchema = z
   .object({
@@ -18,8 +22,14 @@ export const historyEntrySchema = z
   })
   .strict() satisfies z.ZodType<HistoryEntry>;
 
-export const readHistory = async (search: string) =>
-  z.array(historyEntrySchema).parse(await invoke("list_history", { search }));
+export const historyListSchema = z
+  .object({ entries: z.array(historyEntrySchema), hasMore: z.boolean() })
+  .strict() satisfies z.ZodType<HistoryList>;
+
+/** How many takes the list asks for at a time. */
+export const HISTORY_PAGE = 500;
+export const readHistory = async (search: string, limit: number) =>
+  historyListSchema.parse(await invoke("list_history", { search, limit }));
 export const deleteHistory = (id: number) =>
   invoke<null>("delete_history", { id });
 
