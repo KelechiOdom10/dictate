@@ -19,6 +19,7 @@
 
 pub mod annotate;
 mod annotate_ui;
+pub mod app_icon;
 mod audio;
 #[cfg(target_os = "macos")]
 mod clipboard;
@@ -780,6 +781,9 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
     let previous = runtime.settings.clone();
     let shortcut_changed = runtime.save_settings(settings.clone(), &app)?;
     drop(runtime);
+    if (previous.theme, previous.appearance_mode) != (settings.theme, settings.appearance_mode) {
+        app_icon::sync(&app, &settings);
+    }
     if previous.speech_model != settings.speech_model {
         prepare_active_model(&app);
     }
@@ -1938,6 +1942,7 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let (settings, mut startup_error) =
                 settings::load_or_default(&data_dir.join("settings.json"));
+            app_icon::sync(app.handle(), &settings);
             let models_dir = data_dir.join("models");
             let removed = models::remove_partials(&models_dir);
             if removed > 0 {

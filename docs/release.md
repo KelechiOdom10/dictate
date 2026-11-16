@@ -62,6 +62,41 @@ The drafts are in [`icon-drafts/`](icon-drafts/). Three Dock candidates (`a`,
 
 Swapping the shipped icon is one line: `SELECTED` in
 `scripts/build-icons.mjs`. Then `pnpm icons` and `pnpm release:mac`.
+
+### The app icon follows the theme, and where that is visible
+
+`src-tauri/src/app_icon.rs` draws the same artboard as draft A from the live
+palette and hands it to AppKit at launch and whenever Theme or Mode changes.
+The plate is the palette's `canvas`, the four outer bars are `text`, and the
+middle bar — the live one — is `live`: Ember light `#DF5822`, Ember dark
+`#F67D51`. Paper has no second hue, so a Paper icon is monochrome ink by
+construction. `System` resolves through `NSApp.effectiveAppearance`; an OS
+appearance switch underneath it while the app runs does not redraw the icon.
+
+It goes through AppKit rather than Tauri because Tauri 2 has no app-level icon
+setter: `tauri::AppHandle` exposes window, webview, tray and menu icons only.
+`NSApplication.setApplicationIconImage` (`objc2-app-kit`) is the mechanism.
+
+Three limits worth knowing before anyone builds on this:
+
+- **This app has no Dock tile.** It runs with `ActivationPolicy::Accessory`, so
+  it is absent from the Dock and from the app switcher. The themed icon is
+  therefore prepared rather than seen: it becomes visible if the app ever takes
+  a Regular activation policy.
+- **Finder, Launchpad and Get Info do not follow it.** They read the `.icns`
+  inside the bundle, and the only way to change that after installation is to
+  rewrite the bundle, which invalidates the signature. They keep showing
+  whichever draft was built in, until a new build replaces it.
+- **The menu-bar glyph is not themed on purpose.** It is a template image and
+  macOS tints templates for light and dark menu bars itself; giving it a colour
+  would replace that correct behaviour with a fixed one. Do not "fix" it. The
+  artwork is drawn in `src-tauri/src/surface.rs` and stays monochrome black
+  plus alpha.
+
+`cargo test --lib app_icon` covers the accent each theme produces and that a
+theme change calls the setter. `cargo run --example themed_icons --
+target/themed-icons` writes the four PNGs, which is the only way to look at
+them without a launch. The on-screen result has not been seen on this machine.
 `tauri icon` is not byte-deterministic, so regenerating an unchanged draft
 rewrites the PNGs in `src-tauri/icons/` with identical pixels and different
 bytes; commit them anyway, since the bundle builds from what is checked in.
@@ -161,7 +196,7 @@ Measured on 16 Nov 2026, macOS 27.0.1, Apple Silicon, rustc 1.99.1, with
 | rebuild after an icon or config change | — | 1 min 31 s |
 | `dictate.app` | 17.28 MiB (17,688 KiB on disk) | |
 | `Contents/MacOS/dictate` | 17.21 MiB (18,046,544 bytes) | |
-| `dictate-0.1.0-arm64.dmg` | 7.26 MiB (7,612,487 bytes) | |
+| `dictate-0.1.0-arm64.dmg` | 7.26 MiB (7,611,570 bytes) | |
 
 The app is arm64 only: `lipo -archs` prints `arm64`. Its Info.plist carries
 `com.kelechiodom.dictate`, `LSMinimumSystemVersion 15.0` and the microphone
