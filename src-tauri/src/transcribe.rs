@@ -23,7 +23,6 @@ pub struct Segment {
     pub end_ms: u64,
     pub text: String,
 }
-
 /// Transcribe 16 kHz mono audio with the GGML model at `model`.
 pub fn transcribe(samples: &[f32], model: &Path) -> Result<String, Problem> {
     validate(samples)?;
@@ -38,13 +37,90 @@ pub fn transcribe(samples: &[f32], model: &Path) -> Result<String, Problem> {
 ///
 /// `-ml 1 -sow` makes whisper-cli emit one segment per word, and `-ojf` writes
 /// each segment's offsets in ms, so every JSON segment becomes one `Word`.
+///
+/// whisper-cli pulls word times towards the start of its window when the
+/// audio opens with silence (4 s of silence made the first word 4 s early), and
+/// less so after long pauses. So the audio is cut into runs of speech with
+/// `speech_spans`, each run is transcribed alone, and its offset is added back.
 pub fn transcribe_timed(samples: &[f32], model: &Path) -> Result<Vec<Word>, Problem> {
     validate(samples)?;
     let _guard = lock()?;
     let cli = ready(model)?;
-    let json =
-        run_whisper(&cli, model, samples, &["-ojf", "-ml", "1", "-sow"], "json").map_err(failed)?;
-    parse_words(&json).map_err(failed)
+    let mut words = Vec::new();
+    for span in speech_spans(samples) {
+        let offset_ms = span.start as u64 * 1000 / SAMPLE_RATE as u64;
+        let json = run_whisper(
+            &cli,
+            model,
+            &samples[span],
+            &["-ojf", "-ml", "1", "-sow"],
+            "json",
+        )
+        .map_err(failed)?;
+        words.extend(
+            parse_words(&json)
+                .map_err(failed)?
+                .into_iter()
+                .map(|word| Word {
+                    start_ms: word.start_ms + offset_ms,
+                    end_ms: word.end_ms + offset_ms,
+                    text: word.text,
+                }),
+        );
+    }
+    Ok(words)
+}
+
+const SAMPLE_RATE: usize = 16_000;
+/// Energy is measured over windows this long.
+const VAD_WINDOW_MS: usize = 20;
+/// A quiet stretch at least this long splits the audio into separate runs.
+pub const SPLIT_PAUSE_MS: usize = 1_500;
+/// Audio kept before and after each run, so whisper hears the word edges.
+const SPAN_PAD_MS: usize = 250;
+/// A run with less voiced audio than this is a click or a breath, not speech.
+const MIN_VOICED_MS: usize = 100;
+/// A window is voiced above this many times the noise floor (the quietest
+/// tenth of windows), clamped so pure digital silence and a take that is all
+/// speech both get a sensible threshold.
+const VOICE_OVER_FLOOR: f32 = 4.0;
+const VOICE_RMS_MIN: f32 = 0.005;
+const VOICE_RMS_MAX: f32 = 0.02;
+
+/// Sample ranges that hold speech, split at pauses of `SPLIT_PAUSE_MS` or
+/// more and padded by `SPAN_PAD_MS`. A simple energy detector: 16 kHz mono in.
+pub fn speech_spans(samples: &[f32]) -> Vec<std::ops::Range<usize>> {
+    let window = SAMPLE_RATE * VAD_WINDOW_MS / 1000;
+    let rms: Vec<f32> = samples
+        .chunks(window)
+        .map(|chunk| (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt())
+        .collect();
+    if rms.is_empty() {
+        return Vec::new();
+    }
+    let mut sorted = rms.clone();
+    sorted.sort_by(f32::total_cmp);
+    let floor = sorted[sorted.len() / 10];
+    let threshold = (floor * VOICE_OVER_FLOOR).clamp(VOICE_RMS_MIN, VOICE_RMS_MAX);
+
+    let split_windows = SPLIT_PAUSE_MS / VAD_WINDOW_MS;
+    let mut runs: Vec<(usize, usize, usize)> = Vec::new();
+    for (index, _) in rms.iter().enumerate().filter(|(_, r)| **r >= threshold) {
+        match runs.last_mut() {
+            Some((_, last, voiced)) if index - *last < split_windows => {
+                *last = index;
+                *voiced += 1;
+            }
+            _ => runs.push((index, index, 1)),
+        }
+    }
+    let pad = SAMPLE_RATE * SPAN_PAD_MS / 1000;
+    runs.into_iter()
+        .filter(|&(_, _, voiced)| voiced * VAD_WINDOW_MS >= MIN_VOICED_MS)
+        .map(|(first, last, _)| {
+            (first * window).saturating_sub(pad)..((last + 1) * window + pad).min(samples.len())
+        })
+        .collect()
 }
 
 /// Splits after a word ending a sentence, or at a pause of `SEGMENT_PAUSE_MS`
@@ -54,7 +130,7 @@ pub fn segments(words: &[Word]) -> Vec<Segment> {
     let mut current: Vec<&Word> = Vec::new();
     for (index, word) in words.iter().enumerate() {
         current.push(word);
-        let ends_sentence = word.text.ends_with(['.', '!', '?']);
+        let ends_sentence = ends_sentence(&word.text);
         let pause_follows = words
             .get(index + 1)
             .is_some_and(|next| next.start_ms.saturating_sub(word.end_ms) >= SEGMENT_PAUSE_MS);
@@ -74,6 +150,57 @@ pub fn segments(words: &[Word]) -> Vec<Segment> {
     segments
 }
 
+/// Abbreviations that end in a full stop without ending a sentence. Compared
+/// lowercased, with surrounding quotes and brackets removed.
+const ABBREVIATIONS: &[&str] = &[
+    "e.g.", "i.e.", "etc.", "vs.", "approx.", "mr.", "mrs.", "ms.", "dr.", "st.", "no.", "fig.",
+    "cf.", "a.m.", "p.m.",
+];
+
+fn ends_sentence(word: &str) -> bool {
+    let bare = word
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '“' | '”' | '‘' | '’' | '(' | ')'))
+        .to_lowercase();
+    bare.ends_with(['!', '?']) || (bare.ends_with('.') && !ABBREVIATIONS.contains(&bare.as_str()))
+}
+
+#[derive(serde::Deserialize)]
+struct WhisperJson {
+    transcription: Vec<WhisperSegment>,
+}
+
+#[derive(serde::Deserialize)]
+struct WhisperSegment {
+    offsets: WhisperOffsets,
+    text: String,
+}
+
+#[derive(serde::Deserialize)]
+struct WhisperOffsets {
+    from: u64,
+    to: u64,
+}
+
+/// Drops empty segments and whisper's bracketed non-speech markers such as
+/// `[BLANK_AUDIO]`, which carry times but no words.
+fn parse_words(json: &str) -> Result<Vec<Word>, String> {
+    let parsed: WhisperJson =
+        serde_json::from_str(json).map_err(|e| format!("Parse whisper-cli JSON: {e}"))?;
+    Ok(parsed
+        .transcription
+        .into_iter()
+        .filter_map(|segment| {
+            let text = segment.text.trim();
+            let non_speech = text.starts_with('[') && text.ends_with(']');
+            (!text.is_empty() && !non_speech).then(|| Word {
+                start_ms: segment.offsets.from,
+                end_ms: segment.offsets.to,
+                text: text.to_string(),
+            })
+        })
+        .collect())
+}
+
 fn validate(samples: &[f32]) -> Result<(), Problem> {
     if samples.is_empty() || samples.iter().any(|sample| !sample.is_finite()) {
         return Err(failed("Expected nonempty, finite 16 kHz mono audio"));
@@ -91,6 +218,7 @@ fn lock() -> Result<std::sync::MutexGuard<'static, ()>, Problem> {
     })
 }
 
+/// whisper-cli, once both it and the model file are present.
 fn ready(model: &Path) -> Result<PathBuf, Problem> {
     let cli = whisper_cli()?;
     if !model.is_file() {
@@ -103,8 +231,9 @@ fn failed(cause: impl std::fmt::Display) -> Problem {
     Problem::new("Transcription failed", "Hold the shortcut and try again.").because(cause)
 }
 
-/// Validates the audio, writes it as a WAV, runs whisper-cli with the shared
-/// flags plus `output_args`, and returns the output file with `extension`.
+/// Writes the audio as a WAV, runs whisper-cli with the shared flags plus
+/// `output_args`, and returns the output file with `extension`. Callers hold
+/// the `TRANSCRIPTION` guard.
 fn run_whisper(
     cli: &Path,
     model: &Path,
@@ -186,43 +315,6 @@ pub fn missing_model(path: &Path) -> Problem {
     .because(format!("no file at {}", path.display()))
 }
 
-#[derive(serde::Deserialize)]
-struct WhisperJson {
-    transcription: Vec<WhisperSegment>,
-}
-
-#[derive(serde::Deserialize)]
-struct WhisperSegment {
-    offsets: WhisperOffsets,
-    text: String,
-}
-
-#[derive(serde::Deserialize)]
-struct WhisperOffsets {
-    from: u64,
-    to: u64,
-}
-
-/// Drops empty segments and whisper's bracketed non-speech markers such as
-/// `[BLANK_AUDIO]`, which carry times but no words.
-fn parse_words(json: &str) -> Result<Vec<Word>, String> {
-    let parsed: WhisperJson =
-        serde_json::from_str(json).map_err(|e| format!("Parse whisper-cli JSON: {e}"))?;
-    Ok(parsed
-        .transcription
-        .into_iter()
-        .filter_map(|segment| {
-            let text = segment.text.trim();
-            let non_speech = text.starts_with('[') && text.ends_with(']');
-            (!text.is_empty() && !non_speech).then(|| Word {
-                start_ms: segment.offsets.from,
-                end_ms: segment.offsets.to,
-                text: text.to_string(),
-            })
-        })
-        .collect())
-}
-
 fn write_wav(path: &Path, samples: &[f32]) -> Result<(), String> {
     let spec = hound::WavSpec {
         channels: 1,
@@ -290,32 +382,33 @@ mod tests {
             eprintln!("SKIP missing model: whisper-cli is checked first");
             return;
         }
-        let problem = transcribe(&[0.1], Path::new("/nonexistent/ggml-base.en.bin")).unwrap_err();
-        assert_eq!(problem.title, "Speech model missing");
-        assert!(problem.fix.contains("Settings › Models"));
-        assert!(
-            problem
-                .detail
-                .unwrap()
-                .contains("/nonexistent/ggml-base.en.bin")
-        );
+        let _turn = whisper_turn();
+        let model = Path::new("/nonexistent/ggml-base.en.bin");
+        for problem in [
+            transcribe(&[0.1], model).unwrap_err(),
+            transcribe_timed(&[0.1], model).unwrap_err(),
+        ] {
+            assert_eq!(problem.title, "Speech model missing");
+            assert!(problem.fix.contains("Settings › Models"));
+            assert!(
+                problem
+                    .detail
+                    .unwrap()
+                    .contains("/nonexistent/ggml-base.en.bin")
+            );
+        }
     }
 
     #[test]
     fn rejects_empty_and_nonfinite_audio() {
         for samples in [&[][..], &[f32::NAN], &[f32::INFINITY]] {
-            let problem = transcribe(samples, &test_model()).unwrap_err();
-            assert_eq!(problem.title, "Transcription failed");
-            assert!(problem.detail.unwrap().contains("finite 16 kHz mono"));
-        }
-    }
-
-    #[test]
-    fn timed_transcription_rejects_empty_and_nonfinite_audio() {
-        for samples in [&[][..], &[f32::NAN], &[f32::INFINITY]] {
-            let problem = transcribe_timed(samples, &test_model()).unwrap_err();
-            assert_eq!(problem.title, "Transcription failed");
-            assert!(problem.detail.unwrap().contains("finite 16 kHz mono"));
+            for problem in [
+                transcribe(samples, &test_model()).unwrap_err(),
+                transcribe_timed(samples, &test_model()).unwrap_err(),
+            ] {
+                assert_eq!(problem.title, "Transcription failed");
+                assert!(problem.detail.unwrap().contains("finite 16 kHz mono"));
+            }
         }
     }
 
@@ -388,6 +481,28 @@ mod tests {
     }
 
     #[test]
+    fn segments_do_not_split_after_common_abbreviations() {
+        let words = [
+            word(0, 300, "Use"),
+            word(300, 600, "a"),
+            word(600, 900, "verb,"),
+            word(900, 1200, "e.g."),
+            word(1200, 1500, "Save,"),
+            word(1500, 1800, "not"),
+            word(1800, 2100, "OK"),
+            word(2100, 2400, "etc."),
+            word(2400, 2700, "Approx."),
+            word(2700, 3000, "done."),
+            word(3000, 3300, "Next"),
+        ];
+        let texts: Vec<String> = segments(&words).into_iter().map(|s| s.text).collect();
+        assert_eq!(
+            texts,
+            ["Use a verb, e.g. Save, not OK etc. Approx. done.", "Next"]
+        );
+    }
+
+    #[test]
     fn segments_split_at_a_pause_of_700_ms_or_more() {
         let words = [
             word(0, 300, "move"),
@@ -399,12 +514,79 @@ mod tests {
         assert_eq!(texts, ["move this", "over there"]);
     }
 
+    fn tone(ms: u64) -> Vec<f32> {
+        (0..ms * 16)
+            .map(|i| (i as f32 * 0.07).sin() * 0.1)
+            .collect()
+    }
+
+    fn spans_ms(samples: &[f32]) -> Vec<(u64, u64)> {
+        speech_spans(samples)
+            .into_iter()
+            .map(|span| (span.start as u64 / 16, span.end as u64 / 16))
+            .collect()
+    }
+
+    #[test]
+    fn speech_spans_skip_leading_and_trailing_silence() {
+        let mut samples = near_silence(4_000);
+        samples.extend(tone(2_000));
+        samples.extend(near_silence(3_000));
+        assert_eq!(spans_ms(&samples), [(3_750, 6_250)]);
+    }
+
+    #[test]
+    fn speech_spans_split_only_at_long_pauses() {
+        let mut samples = tone(1_000);
+        samples.extend(near_silence(1_000));
+        samples.extend(tone(1_000));
+        samples.extend(near_silence(SPLIT_PAUSE_MS as u64 + 500));
+        samples.extend(tone(1_000));
+        assert_eq!(spans_ms(&samples), [(0, 3_250), (4_750, 6_000)]);
+    }
+
+    #[test]
+    fn speech_spans_ignore_silence_and_clicks() {
+        assert_eq!(spans_ms(&[]), []);
+        assert_eq!(spans_ms(&vec![0.0; 32_000]), []);
+        let mut samples = near_silence(2_000);
+        samples.extend(tone(40));
+        samples.extend(near_silence(2_000));
+        assert_eq!(spans_ms(&samples), []);
+    }
+
     #[test]
     fn no_words_make_no_segments() {
         assert_eq!(segments(&[]), []);
     }
 
-    fn generated_speech(sentence: &str) -> Vec<f32> {
+    /// `transcribe` refuses to run twice at once, so the tests that call
+    /// whisper-cli take turns instead of failing each other.
+    fn whisper_turn() -> std::sync::MutexGuard<'static, ()> {
+        static TURN: Mutex<()> = Mutex::new(());
+        TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Speaks `text` with macOS `say` and returns it as 16 kHz mono f32, or
+    /// `None` after printing why the integration test is skipped.
+    fn generated_speech(test: &str, text: &str) -> Option<Vec<f32>> {
+        if let Err(error) = whisper_cli() {
+            eprintln!("SKIP {test}: {error}");
+            return None;
+        }
+        let model = test_model();
+        if !model.is_file() {
+            eprintln!("SKIP {test}: no model at {}", model.display());
+            return None;
+        }
+        if !cfg!(target_os = "macos") {
+            eprintln!("SKIP {test}: requires macOS say and afconvert");
+            return None;
+        }
+        Some(say(text))
+    }
+
+    fn say(text: &str) -> Vec<f32> {
         let temp = tempfile::tempdir().unwrap();
         let aiff = temp.path().join("speech.aiff");
         let wav = temp.path().join("speech.wav");
@@ -412,7 +594,7 @@ mod tests {
             Command::new("say")
                 .args(["-v", "Samantha", "-o"])
                 .arg(&aiff)
-                .arg(sentence)
+                .arg(text)
                 .status()
                 .unwrap()
                 .success()
@@ -433,36 +615,20 @@ mod tests {
             .collect()
     }
 
-    /// Skips the integration tests the same way `transcribe` reports problems:
-    /// no whisper-cli, no model, or not on macOS.
-    fn speech_fixture(test: &str) -> Option<PathBuf> {
-        let model = test_model();
-        if let Err(error) = whisper_cli() {
-            eprintln!("SKIP {test}: {error}");
-            return None;
-        }
-        if !model.is_file() {
-            eprintln!("SKIP {test}: no model at {}", model.display());
-            return None;
-        }
-        if !cfg!(target_os = "macos") {
-            eprintln!("SKIP {test}: requires macOS say and afconvert");
-            return None;
-        }
-        Some(model)
-    }
-
     #[test]
     fn generated_speech_transcribes_through_whisper_cli() {
-        let Some(model) = speech_fixture("generated speech transcription") else {
+        let _turn = whisper_turn();
+        let Some(samples) = generated_speech(
+            "generated speech transcription",
+            "The quick brown fox jumps over the lazy dog.",
+        ) else {
             return;
         };
-        let samples = generated_speech("The quick brown fox jumps over the lazy dog.");
         let start = std::time::Instant::now();
-        let text = transcribe(&samples, &model).unwrap();
+        let text = transcribe(&samples, &test_model()).unwrap();
         eprintln!(
             "model={} samples={} transcription_ms={} text={text:?}",
-            model.display(),
+            test_model().display(),
             samples.len(),
             start.elapsed().as_millis()
         );
@@ -474,6 +640,93 @@ mod tests {
             .to_lowercase();
         assert_eq!(words, "the quick brown fox jumps over the lazy dog");
     }
+
+    /// Room-noise stand-in: deterministic noise at about -50 dBFS.
+    fn near_silence(ms: u64) -> Vec<f32> {
+        let mut state: u32 = 0x9E37_79B9;
+        (0..ms * 16)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                (state as f32 / u32::MAX as f32 - 0.5) * 0.006
+            })
+            .collect()
+    }
+
+    /// Where the speech in a clean `say` clip really starts, in ms: the first
+    /// 10 ms window louder than -40 dBFS.
+    fn onset_ms(samples: &[f32]) -> u64 {
+        let window = 160;
+        let first = samples
+            .chunks(window)
+            .position(|chunk| {
+                (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt() > 0.01
+            })
+            .expect("the clip has speech");
+        (first * window) as u64 / 16
+    }
+
+    fn report_onset(label: &str, words: &[Word], expected_ms: u64) -> u64 {
+        let first = words.first().expect("whisper heard words");
+        let error = first.start_ms.abs_diff(expected_ms);
+        eprintln!(
+            "{label}: first word {:?} at {} ms, true onset {expected_ms} ms, error {error} ms",
+            first.text, first.start_ms
+        );
+        error
+    }
+
+    #[test]
+    fn leading_silence_keeps_word_times_on_the_audio_clock() {
+        let _turn = whisper_turn();
+        let test = "leading silence word times";
+        let Some(speech) = generated_speech(test, "Move the button. Then make it blue.") else {
+            return;
+        };
+        let mut samples = near_silence(4_000);
+        samples.extend(&speech);
+        samples.extend(near_silence(4_000));
+        let expected = 4_000 + onset_ms(&speech);
+
+        let words = transcribe_timed(&samples, &test_model()).unwrap();
+        let error = report_onset(test, &words, expected);
+        assert!(error <= ONSET_TOLERANCE_MS, "words: {words:?}");
+        let speech_end = 4_000 + speech.len() as u64 / 16;
+        assert!(
+            words.last().unwrap().end_ms <= speech_end + ONSET_TOLERANCE_MS,
+            "words: {words:?}"
+        );
+    }
+
+    #[test]
+    fn a_long_pause_mid_take_keeps_later_words_on_time() {
+        let _turn = whisper_turn();
+        let test = "mid-take pause word times";
+        let Some(first) = generated_speech(test, "Move the button.") else {
+            return;
+        };
+        let Some(second) = generated_speech(test, "Then make it blue.") else {
+            return;
+        };
+        let mut samples = near_silence(1_000);
+        samples.extend(&first);
+        samples.extend(near_silence(4_000));
+        let second_start = samples.len() as u64 / 16;
+        samples.extend(&second);
+        samples.extend(near_silence(1_000));
+
+        let words = transcribe_timed(&samples, &test_model()).unwrap();
+        report_onset(test, &words, 1_000 + onset_ms(&first));
+        let then = words
+            .iter()
+            .position(|w| w.text.to_lowercase().starts_with("then"))
+            .unwrap_or_else(|| panic!("no \"then\" in {words:?}"));
+        let error = report_onset(test, &words[then..], second_start + onset_ms(&second));
+        assert!(error <= ONSET_TOLERANCE_MS, "words: {words:?}");
+    }
+
+    const ONSET_TOLERANCE_MS: u64 = 300;
 
     const MINUTE_OF_SPEECH: &str = "Here is the settings page I want to change. \
 The save button sits too close to the cancel button, so people press the wrong one. \
@@ -495,18 +748,19 @@ That is everything for this page, thank you.";
 
     #[test]
     fn generated_minute_gets_increasing_word_times_through_whisper_cli() {
-        let Some(model) = speech_fixture("generated speech timed transcription") else {
+        let _turn = whisper_turn();
+        let test = "generated speech timed transcription";
+        let Some(samples) = generated_speech(test, MINUTE_OF_SPEECH) else {
             return;
         };
-        let samples = generated_speech(MINUTE_OF_SPEECH);
         let audio_ms = samples.len() as u64 * 1000 / 16_000;
         let start = std::time::Instant::now();
-        let words = transcribe_timed(&samples, &model).unwrap();
+        let words = transcribe_timed(&samples, &test_model()).unwrap();
         let elapsed = start.elapsed();
         let rebuilt = segments(&words);
         eprintln!(
             "model={} audio_ms={audio_ms} transcribe_timed_ms={} words={} segments={} last_word_end_ms={}",
-            model.display(),
+            test_model().display(),
             elapsed.as_millis(),
             words.len(),
             rebuilt.len(),
@@ -546,7 +800,7 @@ That is everything for this page, thank you.";
         let dir = PathBuf::from(std::env::var_os("DICTATE_MEASURE_MODELS_DIR").unwrap());
         let sentence = "Please move the Thursday design review to Friday morning, \
                         and send Priya the updated budget before lunch.";
-        let samples = generated_speech(sentence);
+        let samples = say(sentence);
         println!(
             "fixture_samples={} seconds={:.2}",
             samples.len(),

@@ -423,3 +423,79 @@ cargo test --manifest-path src-tauri/Cargo.toml generated_minute -- --nocapture
 DICTATE_WHISPER_MODEL="$PWD/models/ggml-small.en.bin" cargo test --manifest-path src-tauri/Cargo.toml generated_minute -- --nocapture
 cargo run --manifest-path src-tauri/Cargo.toml --example transcribe_timed -- speech.wav
 ```
+
+### Word times after silence — 15 November 2026
+
+The review of PR #19 found that whisper-cli pulls word times towards the start
+of its window when the audio opens with silence. `transcribe_timed` now cuts
+the audio into runs of speech with a simple energy detector
+(`transcribe::speech_spans`: 20 ms RMS windows, voiced above 4× the quietest
+tenth of windows, clamped to 0.005–0.02; runs split at quiet stretches of
+1.5 s or more, padded by 250 ms), transcribes each run alone and adds its
+offset back. Calls to whisper-cli hold the transcription lock for the whole
+take.
+
+Fixtures are built in the tests from `say -v Samantha` plus generated noise at
+about -50 dBFS. True onset = padding + the first 10 ms window of the `say` clip
+above -40 dBFS. Target: the first word within 300 ms of the true onset.
+
+| Fixture | Word | True onset | Before (base.en) | After (base.en) | After (small.en) |
+|---|---|---:|---:|---:|---:|
+| 4 s silence, "Move the button. Then make it blue.", 4 s silence | Move | 4,000 ms | 0 ms (**−4,000**) | 4,000 ms (0) | 4,000 ms (0) |
+| 1 s silence, "Move the button.", 4 s silence, "Then make it blue.", 1 s | Move | 1,000 ms | 0 ms (**−1,000**) | 1,000 ms (0) | 1,000 ms (0) |
+| same, after the 4 s gap | Then | 6,024 ms | 5,800 ms (−224) | 6,030 ms (+6) | 6,030 ms (+6) |
+
+The 60 s fixture is unchanged: base.en 1,033 ms, 205 words, last word at
+61,760 ms; small.en 2,080 ms. Each extra run costs one more whisper-cli start
+(about 150 ms with base.en), so a take with many long pauses gets slower. The
+padding bounds the leftover error: if whisper snaps a run's first word to the
+start of the run, the time is at most 250 ms early.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --lib transcribe::tests -- --nocapture --test-threads 1
+```
+
+## Annotate frames and contact sheet — 15 November 2026
+
+`frames::render` pulls each key frame out of `recording.mp4` with
+`AVAssetImageGenerator` (through `objc2-av-foundation`, async call, zero time
+tolerance, all frames requested at once), draws the ink with `tiny-skia`, and
+writes `frames-full/frame-NN.png`, `frames/frame-NN.png` (long edge ≤ 1568 px)
+and `contact-sheet.png` (long edge ≤ 2400 px). Frames are inked, scaled and
+encoded in parallel, one thread per frame.
+
+Fixture (`tests/annotate_frames.rs`): a 60 s, 2560×1600, 15 fps H.264 MP4
+written by the test with AVAssetWriter (no screen recording, no ffmpeg). Each
+video frame carries its index as a barcode. Four circled marks on a second
+display at origin (−1512, −200), plus one speech-only stretch: 5 key frames.
+Apple M4 Pro, debug test build with tiny-skia and png optimised (Cargo
+`profile.dev.package`).
+
+| Measure | Run 1 | Run 2 | Target |
+|---|---:|---:|---|
+| Stop to package (`build` + `write_package` + `frames::render`) | 264 ms | 251 ms | < 5 s for 60 s and 4 marks |
+| Frame extraction, 5 frames | 135 ms | 121 ms | R7: < 1 s for 12 |
+| Ink + scale + PNG, 5 frames in parallel | 63 ms | 64 ms | — |
+| Contact sheet (2398×1020) | 63 ms | 64 ms | — |
+| Delivered minus requested video time | −47, −13, −27, −47, −47 ms | same | R7: within 1/fps (66.7 ms) |
+
+Every frame's barcode matched the expected video frame, and each frame's red
+ink sat within 1% of its mark box on all four sides; the speech frame had no
+ink. The negative time errors are expected: the generator returns the frame on
+screen at that time, which started up to one frame interval earlier.
+
+The fixture's flat colours compress unusually well, so PNG cost was also
+measured on a real 2560×1662 screen capture (the reference app's
+`frames-full/frame-01.png`, release build): 12 full + 12 downscaled frames
+encoded in parallel in 84–94 ms, about 10 ms and 2.2 MB per full frame.
+
+Not measured here: extraction from a real ScreenCaptureKit MP4 (its keyframe
+interval may differ from AVAssetWriter's) and 12 frames from one file. Whisper
+time is not in the stop-to-package number; it adds about 1.0 s (base.en) or
+2.1 s (small.en) for a 60 s take (see "Annotate timed transcription"), so the
+whole stop-to-package path is about 1.3–2.4 s.
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --test annotate_frames -- --nocapture
+DICTATE_SAMPLE_PACKAGE="$PWD/target/annotate-sample" cargo test --manifest-path src-tauri/Cargo.toml --test annotate_frames
+```

@@ -28,15 +28,21 @@ pub const CIRCLE_CLOSE_FRACTION: f64 = 0.15;
 /// A mark's frame is taken this long before it ends: the ink is done, and the
 /// screen has not moved on yet.
 pub const FRAME_LEAD_MS: u64 = 100;
-/// Marks that end at most this far apart share one frame.
+/// Marks that end at most this long after the first mark in a frame ends share
+/// that frame. Measured from the first mark, so a run of marks cannot chain
+/// into one long frame.
 pub const MARK_MERGE_MS: u64 = 1_500;
+/// Words that start up to this long after a frame still belong to it: people
+/// draw first and then say what the mark means. Owner's call, 15 Nov 2026;
+/// tune here.
+pub const SAID_GRACE_MS: u64 = 1_500;
 /// A speech segment gets its own frame when it ends more than this far from
 /// every other frame.
 pub const SPEECH_FRAME_GAP_MS: u64 = 4_000;
 pub const MAX_FRAMES: usize = 12;
 
 /// Stored point coordinates are fractions ×10,000.
-const POINT_SCALE: f64 = 10_000.0;
+pub const POINT_SCALE: f64 = 10_000.0;
 
 /// What the recorder hands over when a session stops.
 #[derive(Debug, Clone)]
@@ -53,6 +59,8 @@ pub struct Session {
     /// On the audio clock, as `transcribe::transcribe_timed` returns them.
     /// `build` moves them to session time with `audio.offset_ms`.
     pub words: Vec<Word>,
+    /// On the session clock already: the overlay stamps strokes with ms since
+    /// the session started, so `build` does not shift them.
     pub strokes: Vec<Stroke>,
     pub missing_permissions: Vec<String>,
 }
@@ -84,6 +92,27 @@ pub struct Display {
     /// In points, in global display space.
     pub frame: Rect,
     pub scale: f64,
+}
+
+impl Display {
+    /// A point in global display space (points, as `CGEvent::location` gives
+    /// it) as a stored stroke point: fractions of this display ×10,000,
+    /// top-left origin, clamped to the display. Works for displays whose
+    /// origin is not (0, 0), such as one left of or above the main display.
+    pub fn stroke_point(&self, global_x: f64, global_y: f64) -> (u32, u32) {
+        let fraction = |value: f64, origin: f64, size: f64| {
+            let f = if size > 0.0 {
+                (value - origin) / size
+            } else {
+                0.0
+            };
+            (f.clamp(0.0, 1.0) * POINT_SCALE).round() as u32
+        };
+        (
+            fraction(global_x, self.frame.x, self.frame.w),
+            fraction(global_y, self.frame.y, self.frame.h),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,11 +199,15 @@ pub struct Frame {
     pub n: usize,
     pub t: u64,
     pub reason: FrameReason,
-    /// Ids of the marks this frame shows. Empty for a speech frame.
+    /// Ids of the marks this frame shows. The frame image draws the ink of
+    /// every stroke in these marks, whenever it was drawn, and no other ink:
+    /// a frame merged to fit `MAX_FRAMES` still shows each mark it lists.
+    /// Empty for a speech frame, which has no ink.
     pub marks: Vec<String>,
     pub file: String,
     pub full: String,
-    /// The words that started after the previous frame, up to this one.
+    /// The words that started after the previous frame's cut-off, up to this
+    /// frame's time + `SAID_GRACE_MS` (or the next frame's time, if sooner).
     pub said: String,
 }
 
@@ -301,11 +334,21 @@ pub fn choose_frames(
     drop_speech_frames_over_limit(&mut candidates);
     candidates.sort_by_key(|c| c.t);
 
+    let cut_offs: Vec<u64> = candidates
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let grace_end = c.t + SAID_GRACE_MS;
+            candidates
+                .get(i + 1)
+                .map_or(grace_end, |next| grace_end.min(next.t))
+        })
+        .collect();
     let mut said: Vec<Vec<&str>> = vec![Vec::new(); candidates.len()];
     for word in words {
-        let index = candidates
+        let index = cut_offs
             .iter()
-            .position(|c| word.start_ms <= c.t)
+            .position(|&cut_off| word.start_ms <= cut_off)
             .unwrap_or(candidates.len().saturating_sub(1));
         if let Some(bucket) = said.get_mut(index) {
             bucket.push(&word.text);
@@ -321,8 +364,8 @@ pub fn choose_frames(
             t: candidate.t,
             reason: candidate.reason,
             marks: candidate.marks,
-            file: format!("frames/{:02}.png", position + 1),
-            full: format!("frames-full/{:02}.png", position + 1),
+            file: format!("frames/frame-{:02}.png", position + 1),
+            full: format!("frames-full/frame-{:02}.png", position + 1),
             said: words.join(" "),
         })
         .collect()
@@ -388,18 +431,20 @@ struct Candidate {
 }
 
 /// One frame per mark, merging marks that end within `MARK_MERGE_MS` of the
-/// previous one. If that still leaves more than `MAX_FRAMES`, the two closest
-/// neighbouring frames are merged until it fits: a mark is never dropped.
+/// first mark in the frame. If that still leaves more than `MAX_FRAMES`, the
+/// two closest neighbouring frames are merged until it fits: a mark is never
+/// dropped. A merged frame takes the later time and lists both frames' marks,
+/// and its image draws the ink of every mark it lists (see `Frame::marks`).
 fn mark_frames(marks: &[Mark]) -> Vec<Candidate> {
     let mut by_end: Vec<&Mark> = marks.iter().collect();
     by_end.sort_by_key(|mark| mark.t1);
 
     let mut frames: Vec<Candidate> = Vec::new();
-    let mut previous_end: Option<u64> = None;
+    let mut frame_first_end: Option<u64> = None;
     for mark in by_end {
         let t = mark.t1.saturating_sub(FRAME_LEAD_MS).max(mark.t0);
-        if let Some(end) = previous_end
-            && mark.t1 - end <= MARK_MERGE_MS
+        if let Some(first_end) = frame_first_end
+            && mark.t1 - first_end <= MARK_MERGE_MS
             && let Some(frame) = frames.last_mut()
         {
             frame.t = t;
@@ -410,8 +455,8 @@ fn mark_frames(marks: &[Mark]) -> Vec<Candidate> {
                 reason: FrameReason::Mark,
                 marks: vec![mark.id.clone()],
             });
+            frame_first_end = Some(mark.t1);
         }
-        previous_end = Some(mark.t1);
     }
 
     while frames.len() > MAX_FRAMES {
@@ -722,6 +767,22 @@ mod tests {
                 frames: vec![(11_400, M, vec!["m1", "m2"])],
             },
             Case {
+                name: "a chain of marks 1.4 s apart is measured from the frame's first mark",
+                marks: (0..8)
+                    .map(|i| {
+                        let end = 1_000 + i * 1_400;
+                        mark(&format!("m{}", i + 1), end - 500, end)
+                    })
+                    .collect(),
+                segments: vec![],
+                frames: vec![
+                    (2_300, M, vec!["m1", "m2"]),
+                    (5_100, M, vec!["m3", "m4"]),
+                    (7_900, M, vec!["m5", "m6"]),
+                    (10_700, M, vec!["m7", "m8"]),
+                ],
+            },
+            Case {
                 name: "marks ending 1.6 s apart get a frame each",
                 marks: vec![mark("m1", 1_000, 10_000), mark("m2", 10_200, 11_600)],
                 segments: vec![],
@@ -836,18 +897,30 @@ mod tests {
         let marks = [mark("m1", 1_000, 5_100), mark("m2", 8_000, 10_100)];
         let cases = [
             Case {
-                name: "words split at each frame time",
+                name: "words split at each frame time plus the grace window",
                 words: words(&[
                     (500, "look"),
                     (4_000, "here"),
-                    (6_000, "and"),
+                    (7_000, "and"),
                     (9_000, "there"),
                 ]),
                 said: vec!["look here", "and there"],
             },
             Case {
-                name: "a word starting exactly at a frame belongs to that frame",
-                words: words(&[(5_000, "now"), (5_001, "next")]),
+                name: "speech just after drawing belongs to that mark",
+                words: words(&[
+                    (5_600, "this"),
+                    (5_850, "toggle"),
+                    (6_100, "is"),
+                    (6_350, "wrong."),
+                    (8_200, "and"),
+                    (8_450, "this"),
+                ]),
+                said: vec!["this toggle is wrong.", "and this"],
+            },
+            Case {
+                name: "a word starting exactly at the cut-off belongs to the earlier frame",
+                words: words(&[(6_500, "now"), (6_501, "next")]),
                 said: vec!["now", "next"],
             },
             Case {
@@ -871,6 +944,23 @@ mod tests {
             let said: Vec<&str> = frames.iter().map(|f| f.said.as_str()).collect();
             assert_eq!(said, case.said, "{}", case.name);
         }
+    }
+
+    #[test]
+    fn the_grace_window_stops_at_the_next_frame() {
+        let marks = [
+            mark("m1", 500, 1_000),
+            mark("m2", 1_900, 2_400),
+            mark("m3", 3_300, 3_800),
+        ];
+        let frames = choose_frames(
+            &marks,
+            &[],
+            &words(&[(3_600, "first"), (3_750, "second")]),
+            20_000,
+        );
+        let got: Vec<(u64, &str)> = frames.iter().map(|f| (f.t, f.said.as_str())).collect();
+        assert_eq!(got, [(2_300, "first"), (3_700, "second")]);
     }
 
     #[test]
@@ -1005,8 +1095,8 @@ Positions are fractions of the screen, x left→right, y top→bottom. Full data
         );
         assert_eq!(value["marks"][0]["shape"], "circle");
         assert_eq!(value["frames"][0]["reason"], "mark");
-        assert_eq!(value["frames"][0]["file"], "frames/01.png");
-        assert_eq!(value["frames"][0]["full"], "frames-full/01.png");
+        assert_eq!(value["frames"][0]["file"], "frames/frame-01.png");
+        assert_eq!(value["frames"][0]["full"], "frames-full/frame-01.png");
         assert_eq!(value["contactSheet"], CONTACT_SHEET);
     }
 
