@@ -238,6 +238,12 @@ async function openSettings(
               return ["Built-in Microphone", "USB Microphone"];
             if (command === "microphone_level") return 0.12;
             if (command === "plugin:app|version") return "0.1.0";
+            if (command === "update_status") return { kind: "idle" };
+            if (command === "check_for_updates") {
+              const update = { kind: "upToDate" };
+              emit("update-state", update);
+              return update;
+            }
             if (command === "list_history")
               return { entries: [], hasMore: false };
             if (command === "list_annotations") return [];
@@ -1488,7 +1494,7 @@ test("settings page transitions target the main pane", async ({ page }) => {
   ).resolves.toBe("settings-page");
 });
 
-test("settings polish: sidebar order, Appearance page, resting buttons, two weights, releases link", async ({
+test("settings polish: sidebar order, Appearance page, resting buttons, two weights, update check", async ({
   page,
 }) => {
   await openSettings(page);
@@ -1538,11 +1544,24 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     .poll(() =>
       page.evaluate(() =>
         (window as unknown as { __commands: string[] }).__commands.includes(
-          "open_location",
+          "check_for_updates",
         ),
       ),
     )
     .toBe(true);
+  await expect(
+    page.getByRole("heading", { name: "About", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Check now", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      (window as unknown as { __commands: string[] }).__commands.includes(
+        "open_location",
+      ),
+    ),
+  ).toBe(false);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await expect(
     page

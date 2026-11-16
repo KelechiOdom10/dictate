@@ -14,7 +14,7 @@ Constraints that shaped it:
 - **No notarisation.** That needs a paid Developer ID. A self-signed
   certificate gives a stable identity for the privacy database, and the second
   Mac still does the one-time Gatekeeper bypass in the README.
-- **No auto-update.** Out of scope; it needs a public download location.
+- **Updates are automatic** once the one-time setup under [Automatic updates](#automatic-updates) is done.
 
 ## The commands
 
@@ -253,3 +253,138 @@ The app is arm64 only: `lipo -archs` prints `arm64`. Its Info.plist carries
 usage string. No model weights are in the bundle; Parakeet downloads 697 MiB
 (731,357,568 bytes) to `~/Library/Application Support/com.kelechiodom.dictate/models/`
 on first use.
+
+## Automatic updates
+
+The second Mac gets new builds without doing anything. On launch (after ten
+seconds) and on **Settings › About › Check for updates**, dictate fetches
+`https://dictate.kellycooks.dev/updates/latest.json`. A newer version is
+downloaded, checked against the update public key, and installed with a
+relaunch, but only when no dictation take and no Annotate session is active.
+Until then Settings says so: "0.2.0 is downloaded. It installs and restarts
+dictate when you aren't dictating or using Annotate." The install holds the
+app's runtime lock, so a shortcut press cannot start a take halfway through it.
+
+It fails soft. If the endpoint is unreachable, times out (15 s) or returns
+something invalid, a launch check logs a warning and shows nothing; only a
+check you asked for shows the error. Development builds (`pnpm tauri dev`)
+never check, so a running dev server cannot replace itself.
+
+### One-time setup (you, once)
+
+1. **Make the update key.** This is a minisign key pair, separate from the
+   code-signing certificate. It only proves an update came from you.
+
+   ```sh
+   pnpm update:key
+   ```
+
+   It prompts for a password, writes the private key to
+   `~/.config/dictate/update.key` (outside the repo; override with
+   `DICTATE_UPDATE_KEY`) and puts the public key in
+   `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. Commit that
+   one change. The repo ships with a placeholder there, so until you do this
+   the app's update check fails soft with an error and the publish scripts
+   refuse to run.
+
+   Back up the private key file and the password somewhere that is not this
+   Mac. The public key is baked into every installed build: lose either half
+   and no installed copy can ever accept an update, and the second Mac has to
+   reinstall from a DMG.
+
+2. **Tell the site where `/updates/` lives.** The site project is separate
+   from this repo, so point at its folder:
+
+   ```sh
+   export DICTATE_SITE_UPDATES_DIR=~/code/dictate-site/public/updates
+   export DICTATE_SITE_DEPLOY='cd ~/code/dictate-site && pnpm exec wrangler pages deploy public'   # optional
+   ```
+
+   With no deploy command, the script copies the files and tells you to deploy
+   the site. The site must ship its whole folder each time (a Pages deploy
+   replaces the previous one), which is why the script copies into the site
+   project rather than uploading `/updates/` alone. dictate never holds Cloudflare
+   credentials; `wrangler` uses your own login.
+
+### Releasing (every time)
+
+```sh
+export DICTATE_SIGNING_IDENTITY="dictate local signing"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='…'     # the update key's password
+pnpm release:publish patch "What changed, one line"   # or minor | major | 1.2.3
+```
+
+Run it on a clean `main`. It bumps the version (`package.json`,
+`tauri.conf.json`, `Cargo.toml`, `Cargo.lock`), commits `release: vX.Y.Z`,
+creates the annotated tag `vX.Y.Z` (the message becomes the update notes),
+runs `pnpm release:mac` (build, certificate re-sign, DMG), builds and signs the
+updater tarball, verifies that signature against the public key in the config,
+writes `latest.json`, and copies everything into the site's `updates/`
+folder. When it finishes, push `git push origin main vX.Y.Z`.
+
+**Why a tag, and why it runs here.** A release is a tag, not a push: building
+on every push to `main` would publish a release per commit and rewrite what
+everyone is running. And it runs on this Mac, not in CI, because the build has
+to be signed by the self-signed certificate in your keychain; a CI runner would
+need that certificate exported into a secret. `scripts/publish-update.sh`
+enforces the tag: it refuses unless `HEAD` is exactly `vX.Y.Z` for the
+built app's version and the tree is clean. If the upload step fails, fix it
+and run `scripts/publish-update.sh` again; no new bump is needed.
+
+What lands in `/updates/`, one release at a time:
+
+| File | For |
+|---|---|
+| `latest.json` | The manifest the app reads: version, notes, URL, signature |
+| `dictate-X.Y.Z-arm64.app.tar.gz` | What the updater installs |
+| `dictate-X.Y.Z-arm64.dmg` | A first install, or a manual reinstall |
+
+Tauri's updater on macOS installs a `.app.tar.gz`, not a DMG, so both are
+served. The tarball is built after the certificate re-sign in
+`make-release.sh`, which is why it carries the signed bundle. (Tauri's own
+`createUpdaterArtifacts` would tar the app before that re-sign, so it is not
+used.)
+
+### What this does and does not give you
+
+- **The update signature is independent of notarisation.** It is checked inside
+  the app, so an update installs with no Gatekeeper prompt. The first install
+  from the DMG still needs **Open Anyway** (README), because the app is not
+  notarised.
+- **Microphone, Accessibility and Screen Recording permissions survive
+  updates, as long as the signing identity does.** The bundle identifier
+  stays `com.kelechiodom.dictate` and every release is signed with the same
+  self-signed certificate, so the designated requirement is unchanged. That is
+  exactly why the certificate matters: an ad-hoc build has a new identity each
+  time and would ask again after every update. `release:publish` refuses to run
+  without `DICTATE_SIGNING_IDENTITY`. Lose the certificate (see step 5 above)
+  and the second Mac re-grants once. This is expected from how TCC works, and
+  has not been observed here yet.
+- **Anyone who can write to `/updates/` still needs your private key** to
+  produce an update the app accepts. A tampered download or a hijacked host
+  cannot install.
+- **Rollback is a re-release.** There is no downgrade; publish a higher version.
+
+### What is proven, and what needs two machines
+
+Proven on this Mac:
+
+- `cargo test --lib update::`: install is allowed only when dictation is idle
+  and Annotate is idle (every busy phase of each blocks it), and the wait loop
+  runs the install exactly once after a busy stretch.
+- `cargo test --test updater`: a local HTTP endpoint serves a well-formed
+  manifest, its artifact verifies against the public key, and a corrupted
+  signature, a tampered payload and a signature from another key are all
+  rejected (the same minisign check the updater plugin runs).
+- `scripts/publish-update.sh` end to end against a stand-in bundle with a
+  throwaway key: tag guard, tarball, signature, self-check, manifest, copy.
+
+Not provable here, needs the second Mac and a real `0.1.x` to `0.1.y` pair:
+
+- The download, install and relaunch through the real plugin against the live
+  site, and that a build installed from the DMG then updates itself.
+- That the Microphone and Accessibility grants are still there afterwards.
+- The deferral in the running app: start dictating or Annotate while an update
+  is waiting and see that it installs only afterwards.
+- Cloudflare serving `/updates/latest.json` and the tarball with the right
+  content types.

@@ -86,3 +86,11 @@ fi
 echo
 echo "==> packing dmg"
 "$ROOT/scripts/make-dmg.sh" "$APP"
+
+# `pnpm release:publish` sets this: also build the updater tarball, sign it with
+# the update key and write latest.json (scripts/publish-update.sh).
+if [[ "${DICTATE_PUBLISH_UPDATE:-}" == "1" ]]; then
+  echo
+  echo "==> publishing update"
+  "$ROOT/scripts/publish-update.sh" "$APP"
+fi

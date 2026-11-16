@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings } from "./settings";
-import { openLocation } from "./about";
+import { checkForUpdates } from "./update";
 import {
   SettingsTheme,
   shownDark,
@@ -152,9 +152,11 @@ export default function SettingsWindow({
                 <Text type="supporting">Version {version.data ?? "…"}</Text>
                 <Link
                   as="button"
-                  isExternalLink
                   type="supporting"
-                  onClick={() => void openLocation("releases")}
+                  onClick={() => {
+                    open("About");
+                    void checkForUpdates();
+                  }}
                 >
                   Check for updates
                 </Link>
