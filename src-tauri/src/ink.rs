@@ -8,6 +8,9 @@
 //!   stops the session instead.
 //! - **Pen mode.** The pen on the floating bar makes the overlay take the
 //!   mouse, so a drag draws. Esc, the pen again, or a timeout backstop end it.
+//! - **Shift to draw.** Holding Shift alone does the same for as long as it is
+//!   held. The pointer poll also opens the drag when the button is already
+//!   down, so the first stroke starts even if the panel never saw the press.
 //!
 //! Only one of the two records at a time. A press of the shortcut while a
 //! drag is open (or a drag that starts while the shortcut is held) would
@@ -121,6 +124,7 @@ pub enum Pen {
     On {
         since_ms: u64,
     },
+    Shift,
 }
 
 impl Pen {
@@ -132,7 +136,7 @@ impl Pen {
     /// Esc is a global shortcut only while pen mode is on, so it never steals
     /// Esc from other apps the rest of the time.
     pub fn wants_escape(self) -> bool {
-        !self.click_through()
+        matches!(self, Pen::On { .. })
     }
 }
 
@@ -148,11 +152,20 @@ pub enum PenInput {
         now_ms: u64,
     },
     SessionEnded,
+    /// Shift alone went down or up.
+    Shift {
+        down: bool,
+    },
 }
 
 pub fn pen(pen: Pen, input: PenInput) -> Pen {
     match (pen, input) {
-        (Pen::Off, PenInput::Button { now_ms }) => Pen::On { since_ms: now_ms },
+        (Pen::Off | Pen::Shift, PenInput::Button { now_ms }) => Pen::On { since_ms: now_ms },
+        (Pen::Off, PenInput::Shift { down: true }) => Pen::Shift,
+        (
+            Pen::Shift,
+            PenInput::Shift { down: false } | PenInput::Escape | PenInput::SessionEnded,
+        ) => Pen::Off,
         (Pen::On { .. }, PenInput::Button { .. } | PenInput::Escape | PenInput::SessionEnded) => {
             Pen::Off
         }
@@ -188,6 +201,13 @@ pub enum Release {
     /// A hold that a pen drag overlapped: the drag has the path, so stroke
     /// `id` is dropped and the session goes on.
     Shadowed { id: u64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ShiftButton {
+    None,
+    Opened(InkPoint),
+    Closed(u64),
 }
 
 /// Ink for one session.
@@ -303,6 +323,23 @@ impl Ink {
             }
         }
         moved.into_iter().map(|id| self.point(id, x, y)).collect()
+    }
+
+    /// One poll of the mouse button while Shift draws. A press the panel never
+    /// saw still opens the drag, and a release it never saw still closes it.
+    pub fn shift_button(&mut self, t: u64, down: bool, x: f64, y: f64) -> ShiftButton {
+        if self.pen != Pen::Shift {
+            return ShiftButton::None;
+        }
+        match (down, self.dragged.is_some()) {
+            (true, false) => self
+                .pen_down(t, x, y)
+                .map_or(ShiftButton::None, ShiftButton::Opened),
+            (false, true) => self
+                .pen_up(t)
+                .map_or(ShiftButton::None, ShiftButton::Closed),
+            _ => ShiftButton::None,
+        }
     }
 
     /// Moves pen mode. Leaving it closes a drag that is still open.
@@ -602,6 +639,72 @@ mod tests {
         assert_eq!(top.y, -1080.0 + BAR_MARGIN);
         assert_eq!((top.w, top.h), (BAR_WIDTH, BAR_HEIGHT));
         assert!(top.y < bar_frame(&display, OverlayPosition::Bottom).y);
+    }
+
+    #[test]
+    fn shift_draws_for_as_long_as_it_is_held_without_a_backstop_or_escape() {
+        let shift = pen(Pen::Off, PenInput::Shift { down: true });
+        assert_eq!(shift, Pen::Shift);
+        assert!(!shift.click_through() && !shift.wants_escape());
+        assert_eq!(
+            pen(
+                shift,
+                PenInput::Tick {
+                    now_ms: PEN_TIMEOUT_MS * 10
+                }
+            ),
+            Pen::Shift
+        );
+        assert_eq!(pen(shift, PenInput::Shift { down: false }), Pen::Off);
+        assert_eq!(pen(shift, PenInput::SessionEnded), Pen::Off);
+        let on = Pen::On { since_ms: 1 };
+        assert_eq!(pen(on, PenInput::Shift { down: true }), on);
+        assert_eq!(pen(on, PenInput::Shift { down: false }), on);
+        assert_eq!(
+            pen(shift, PenInput::Button { now_ms: 9 }),
+            Pen::On { since_ms: 9 }
+        );
+    }
+
+    #[test]
+    fn a_shift_drag_starts_from_the_poll_even_when_the_panel_missed_the_press() {
+        let mut ink = Ink::new(main());
+        assert_eq!(ink.shift_button(0, true, 10.0, 10.0), ShiftButton::None);
+        ink.set_pen(PenInput::Shift { down: true }, 0);
+        let ShiftButton::Opened(first) = ink.shift_button(8, true, 10.0, 10.0) else {
+            panic!("the first poll with the button down opens the stroke");
+        };
+        assert_eq!(ink.shift_button(16, true, 10.0, 10.0), ShiftButton::None);
+        assert_eq!(ink.pen_down(20, 10.0, 10.0), None, "the late panel press");
+        assert_eq!(ink.sample(24, 60.0, 40.0).len(), 1);
+        assert_eq!(
+            ink.shift_button(32, false, 60.0, 40.0),
+            ShiftButton::Closed(first.id)
+        );
+        assert_eq!(ink.finish(40).len(), 1);
+    }
+
+    #[test]
+    fn letting_go_of_shift_mid_drag_keeps_the_stroke_and_returns_the_clicks() {
+        let mut ink = Ink::new(main());
+        ink.set_pen(PenInput::Shift { down: true }, 0);
+        let first = ink.pen_down(8, 10.0, 10.0).unwrap();
+        ink.sample(16, 80.0, 10.0);
+        let (after, closed) = ink.set_pen(PenInput::Shift { down: false }, 24);
+        assert!(after.click_through());
+        assert_eq!(closed, Some(first.id));
+        assert_eq!(ink.shift_button(32, true, 80.0, 10.0), ShiftButton::None);
+        assert_eq!(ink.finish(40).len(), 1);
+    }
+
+    #[test]
+    fn the_pen_buttons_own_drags_are_left_to_the_panel() {
+        let mut ink = Ink::new(main());
+        ink.set_pen(PenInput::Button { now_ms: 0 }, 0);
+        assert_eq!(ink.shift_button(8, true, 10.0, 10.0), ShiftButton::None);
+        assert!(ink.pen_down(8, 10.0, 10.0).is_some());
+        assert_eq!(ink.shift_button(16, false, 10.0, 10.0), ShiftButton::None);
+        assert!(ink.drawing());
     }
 
     #[test]

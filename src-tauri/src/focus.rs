@@ -220,6 +220,34 @@ pub fn pointer() -> Option<(f64, f64)> {
     Some((point.x, point.y))
 }
 
+/// Whether Shift is the only modifier held, and whether the left button is
+/// down, from the session's combined input state.
+#[cfg(target_os = "macos")]
+pub fn shift_and_button() -> Option<(bool, bool)> {
+    use core_graphics::event::{CGEvent, CGEventFlags, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGEventSourceButtonState(state: CGEventSourceStateID, button: CGMouseButton) -> bool;
+    }
+    let state = CGEventSourceStateID::CombinedSessionState;
+    let flags = CGEvent::new(CGEventSource::new(state).ok()?)
+        .ok()?
+        .get_flags();
+    let held = flags
+        & (CGEventFlags::CGEventFlagShift
+            | CGEventFlags::CGEventFlagCommand
+            | CGEventFlags::CGEventFlagControl
+            | CGEventFlags::CGEventFlagAlternate);
+    let button = unsafe { CGEventSourceButtonState(state, CGMouseButton::Left) };
+    Some((held == CGEventFlags::CGEventFlagShift, button))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn shift_and_button() -> Option<(bool, bool)> {
+    None
+}
+
 /// The display holding the focused window's centre, else the pointer.
 fn selected_display(
     displays: &[crate::package::Display],

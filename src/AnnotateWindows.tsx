@@ -115,9 +115,9 @@ export function inkHandlers(
 }
 
 /**
- * The ink panel. Pointer events only arrive in pen mode, because Rust keeps
- * the panel click-through otherwise. Rust reads the pointer itself, so the
- * page only says when a drag starts and ends.
+ * The ink panel. Pointer events only arrive in pen mode or while Shift is
+ * held alone, because Rust keeps the panel click-through otherwise. Rust
+ * reads the pointer itself, so the page only says when a drag starts and ends.
  */
 export function InkWindow() {
   useTransparentWindow();

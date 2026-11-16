@@ -26,8 +26,8 @@ use tauri::{App, AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_nspanel::{ManagerExt, WebviewWindowExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut};
 
-use crate::focus::pointer;
-use crate::ink::{self, Ink, Pen, PenInput, Release};
+use crate::focus::{pointer, shift_and_button};
+use crate::ink::{self, Ink, Pen, PenInput, Release, ShiftButton};
 use crate::package::{Display, Stroke};
 use crate::settings::OverlayPosition;
 
@@ -453,15 +453,22 @@ fn backstop(app: AppHandle, since_ms: u64) {
     }
 }
 
-/// Samples the pointer at about 120 Hz while a stroke is open, until this
-/// session ends.
+/// Samples the pointer at about 120 Hz while a stroke is open, and watches
+/// Shift and the mouse button for Shift to draw, until this session ends.
 fn poll(app: AppHandle, session: i64) {
+    let mut shift = false;
     loop {
         std::thread::sleep(ink::POLL_INTERVAL);
-        let drawing = with_live(&app, |live| {
-            (live.started_at_ms == session).then(|| live.ink.drawing())
+        let (held, button) = shift_and_button().unwrap_or_default();
+        if held != shift {
+            shift = held;
+            pen(&app, |_| PenInput::Shift { down: held });
+        }
+        let active = with_live(&app, |live| {
+            (live.started_at_ms == session)
+                .then(|| live.ink.drawing() || live.ink.pen() == Pen::Shift)
         });
-        match drawing {
+        match active {
             Some(Some(true)) => {}
             Some(Some(false)) => continue,
             _ => return,
@@ -469,11 +476,17 @@ fn poll(app: AppHandle, session: i64) {
         let Some((x, y)) = pointer() else {
             continue;
         };
-        let points = with_live(&app, |live| {
+        let (edge, points) = with_live(&app, |live| {
             let now = live.now();
-            live.ink.sample(now, x, y)
+            let edge = live.ink.shift_button(now, button, x, y);
+            (edge, live.ink.sample(now, x, y))
         })
-        .unwrap_or_default();
+        .unwrap_or((ShiftButton::None, Vec::new()));
+        match edge {
+            ShiftButton::Opened(point) => emit(&app, INK, "ink-point", point),
+            ShiftButton::Closed(id) => emit(&app, INK, "ink-end", id),
+            ShiftButton::None => {}
+        }
         for point in points {
             emit(&app, INK, "ink-point", point);
         }

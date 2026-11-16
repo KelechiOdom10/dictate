@@ -89,7 +89,7 @@ export default function AnnotatePage() {
       >
         <Row
           label="Annotate"
-          help="Tap the shortcut to record your screen and voice, hold it to draw, tap again to copy."
+          help="Tap the shortcut to record your screen and voice, hold it or hold Shift and drag to draw, tap again to copy."
         >
           <Switch
             label="Annotate"
