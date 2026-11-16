@@ -1292,3 +1292,12 @@ test("settings controls share one pill shape", async ({ page }) => {
     [],
   );
 });
+
+test("settings page transitions target the main pane", async ({ page }) => {
+  await openSettings(page);
+  await expect(
+    page
+      .getByRole("main")
+      .evaluate((main) => getComputedStyle(main).viewTransitionName),
+  ).resolves.toBe("settings-page");
+});

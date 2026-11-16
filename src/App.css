@@ -45,7 +45,7 @@ html.overlay-window,
     transition: none;
   }
 }
-.astryx-app-shell main {
+#astryx-app-shell-main {
   view-transition-name: settings-page;
 }
 ::view-transition-old(settings-page) {
