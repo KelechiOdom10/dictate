@@ -3,7 +3,7 @@
 // change them with `astryx experimental theme editor set capy ...`. Add your own changes below: they win over the settings.
 import { defineTheme } from "@astryxdesign/core/theme";
 import { capySettings } from "./capy.settings";
-import { pillButtons, roleTokens } from "../roles";
+import { controlStyles, roleTokens } from "../roles";
 
 export const capyTheme = defineTheme({
   extends: capySettings,
@@ -38,5 +38,5 @@ export const capyTheme = defineTheme({
       accentMuted: "#1f223f",
     },
   ),
-  components: pillButtons,
+  components: controlStyles,
 });

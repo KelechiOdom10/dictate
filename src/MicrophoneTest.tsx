@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { Button } from "@astryxdesign/core/Button";
+import { HStack } from "@astryxdesign/core/HStack";
+import { Text } from "@astryxdesign/core/Text";
 import { LevelMeter, SettingsRow } from "./ui";
 
 type Props = {
@@ -52,16 +54,19 @@ export default function MicrophoneTest({
   return (
     <SettingsRow
       label="Input level"
-      help={
-        testing ? "Listening · audio is not saved" : "Check your input level"
-      }
+      help={testing ? "Listening · audio is not saved" : undefined}
     >
-      <LevelMeter level={testing ? level : 0} />
-      <Button
-        label={testing ? "Stop test" : "Test microphone"}
-        isDisabled={disabled}
-        onClick={() => void onToggle()}
-      />
+      <HStack gap={4} vAlign="center">
+        <HStack gap={2} vAlign="center">
+          <Text type="supporting">Level</Text>
+          <LevelMeter level={testing ? level : 0} label="Live input level" />
+        </HStack>
+        <Button
+          label={testing ? "Stop test" : "Test microphone"}
+          isDisabled={disabled}
+          onClick={() => void onToggle()}
+        />
+      </HStack>
     </SettingsRow>
   );
 }

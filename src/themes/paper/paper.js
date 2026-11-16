@@ -348,10 +348,18 @@ export const paperTheme = {
         "color": "var(--color-on-error-muted)"
       },
       "base": {
-        "borderRadius": "var(--radius-pill, 9999px)"
+        "borderRadius": "var(--radius-element)",
+        "columnGap": "var(--spacing-1)"
       },
       "variant:secondary": {
-        "boxShadow": "inset 0 0 0 1px var(--color-border-emphasized)"
+        "boxShadow": "none",
+        "backgroundColor": "color-mix(in oklch, var(--color-neutral), transparent 8%)",
+        ":hover": {
+          "boxShadow": "inset 0 0 0 1px var(--color-border)"
+        },
+        ":focus-visible": {
+          "boxShadow": "inset 0 0 0 1px var(--color-border-emphasized)"
+        }
       }
     },
     "badge": {
@@ -398,6 +406,10 @@ export const paperTheme = {
       "variant:gray": {
         "backgroundColor": "var(--color-background-gray)",
         "color": "var(--color-text-gray)"
+      },
+      "base": {
+        "paddingInline": "var(--spacing-2)",
+        "columnGap": "var(--spacing-1)"
       }
     },
     "segmented-control": {
@@ -407,7 +419,9 @@ export const paperTheme = {
     },
     "segmented-control-item": {
       "base": {
-        "--color-text-secondary": "light-dark(#4b463e, #cac6be)"
+        "--color-text-secondary": "light-dark(#4b463e, #cac6be)",
+        "paddingInline": "var(--spacing-2)",
+        "columnGap": "var(--spacing-1)"
       },
       "size:sm": {
         "height": "calc(var(--size-element-sm) - 8px)"
@@ -434,7 +448,8 @@ export const paperTheme = {
     },
     "card": {
       "base": {
-        "padding": "var(--spacing-3)"
+        "padding": "var(--spacing-3)",
+        "borderColor": "color-mix(in oklch, var(--color-border), transparent 45%)"
       }
     },
     "section": {
@@ -444,12 +459,30 @@ export const paperTheme = {
     },
     "selector": {
       "base": {
-        "borderRadius": "9999px"
+        "borderRadius": "var(--radius-element)",
+        "paddingInline": "var(--spacing-2)",
+        "columnGap": "var(--spacing-1)"
+      }
+    },
+    "text-input": {
+      "base": {
+        "borderColor": "transparent",
+        ":hover": {
+          "borderColor": "var(--color-border)"
+        },
+        ":focus-within": {
+          "borderColor": "var(--color-border-emphasized)"
+        }
       }
     },
     "side-nav-item": {
       "base": {
         "marginBlockEnd": "var(--spacing-1)"
+      }
+    },
+    "side-nav": {
+      "base": {
+        "backgroundColor": "var(--color-background-muted)"
       }
     }
   },

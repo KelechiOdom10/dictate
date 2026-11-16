@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Download, Trash2 } from "lucide-react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -13,6 +12,7 @@ import {
   MetadataListItem,
 } from "@astryxdesign/core/MetadataList";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
 import { VStack } from "@astryxdesign/core/VStack";
 
@@ -40,6 +40,42 @@ export type ModelStatus =
       onDelete: () => void;
     }
   | { kind: "error"; message: string; onRetry: () => void };
+function Metrics({
+  name,
+  ratings,
+  size,
+}: {
+  name: string;
+  ratings: ModelRating[];
+  size: string;
+}) {
+  return (
+    <MetadataList
+      columns={3}
+      label={{ position: "start", width: "var(--spacing-12)" }}
+    >
+      {ratings.map((rating) => (
+        <MetadataListItem key={rating.label} label={rating.label}>
+          <HStack gap={1} vAlign="center">
+            <meter
+              className="ui-rating"
+              min={0}
+              max={1}
+              value={rating.value}
+              aria-label={`${name} ${rating.label.toLowerCase()}`}
+              aria-valuetext={rating.text}
+            />
+            <Text type="supporting">{rating.text}</Text>
+          </HStack>
+        </MetadataListItem>
+      ))}
+      <MetadataListItem label="Size">
+        <Text type="supporting">{size}</Text>
+      </MetadataListItem>
+    </MetadataList>
+  );
+}
+
 export function ModelCard({
   name,
   description,
@@ -120,7 +156,9 @@ export function ModelCard({
         );
       case "installed":
         return status.active ? (
-          <Text type="supporting">Used for every dictation</Text>
+          <Text type="supporting" maxLines={1}>
+            Used for every dictation
+          </Text>
         ) : (
           <>
             <Button
@@ -146,7 +184,15 @@ export function ModelCard({
       case "error":
         return (
           <>
-            <Banner status="error" title={status.message} collapsible={false} />
+            <StatusDot variant="error" label="Download failed" />
+            <Text
+              role="status"
+              type="supporting"
+              maxLines={1}
+              hasTruncateTooltip
+            >
+              {status.message}
+            </Text>
             <Button
               isDisabled={disabled}
               label={`Retry ${name} download`}
@@ -192,28 +238,14 @@ export function ModelCard({
                 </Link>
               )}
             </VStack>
-            <MetadataList columns={3}>
-              {ratings.map((rating) => (
-                <MetadataListItem key={rating.label} label={rating.label}>
-                  <HStack gap={2} vAlign="center">
-                    <meter
-                      className="ui-rating"
-                      min={0}
-                      max={1}
-                      value={rating.value}
-                      aria-label={`${name} ${rating.label.toLowerCase()}`}
-                      aria-valuetext={rating.text}
-                    />
-                    <Text>{rating.text}</Text>
-                  </HStack>
-                </MetadataListItem>
-              ))}
-              <MetadataListItem label="Size">
-                <Text>{size}</Text>
-              </MetadataListItem>
-            </MetadataList>
+            <Metrics name={name} ratings={ratings} size={size} />
           </VStack>
-          <HStack gap={2} hAlign="end" vAlign="center">
+          <HStack
+            className="ui-model-actions"
+            gap={2}
+            hAlign="end"
+            vAlign="center"
+          >
             {actions}
           </HStack>
         </VStack>

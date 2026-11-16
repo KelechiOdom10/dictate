@@ -153,7 +153,7 @@ export default function General({
               ? "No speech model yet. Download one to start dictating."
               : activeMissing
                 ? `${activeName} isn’t installed. Choose another model.`
-                : "Used for every dictation."
+                : undefined
           }
         >
           {noneInstalled ? (
@@ -192,7 +192,7 @@ export default function General({
           )}
         </Row>
         {!noneInstalled && (
-          <Row label="Models" help="Download, switch or remove speech models.">
+          <Row label="Models">
             <Button
               size="sm"
               variant="secondary"
@@ -206,7 +206,7 @@ export default function General({
         title="Audio input"
         icon={<Mic size={14} aria-hidden="true" />}
       >
-        <Row label="Microphone" help="Choose where dictate listens.">
+        <Row label="Microphone">
           <Selector
             label="Microphone"
             isLabelHidden
@@ -258,10 +258,7 @@ export default function General({
         title="Startup"
         icon={<Power size={14} aria-hidden="true" />}
       >
-        <Row
-          label="Launch at login"
-          help="Keep dictate ready in your menu bar."
-        >
+        <Row label="Launch at login">
           <Switch
             label="Launch at login"
             isLabelHidden

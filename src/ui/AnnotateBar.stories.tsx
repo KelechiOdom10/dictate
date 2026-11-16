@@ -1,7 +1,11 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
-import { AnnotateBar, AnnotateCopiedBar } from "./AnnotateBar";
+import {
+  AnnotateBar,
+  AnnotateCopiedBar,
+  AnnotateStartingBar,
+} from "./AnnotateBar";
 
 const meta = {
   title: "Components/AnnotateBar",
@@ -88,6 +92,18 @@ function CopiedDemo() {
     </div>
   );
 }
+
+export const Starting: Story = {
+  name: "Starting / shown the moment the shortcut is pressed",
+  render: () => <AnnotateStartingBar />,
+  play: async ({ canvasElement }) => {
+    const bar = within(canvasElement);
+    await expect(bar.getByRole("status")).toHaveTextContent("Starting…");
+    await expect(bar.queryByRole("button")).toBeNull();
+    const toolbar = bar.getByRole("toolbar", { name: "Annotate" });
+    await expect(toolbar.scrollWidth).toBeLessThanOrEqual(toolbar.clientWidth);
+  },
+};
 
 export const Copied: Story = {
   name: "Copied / with image",

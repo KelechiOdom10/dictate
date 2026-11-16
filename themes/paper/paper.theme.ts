@@ -3,7 +3,7 @@
 // change them with `astryx experimental theme editor set paper ...`. Add your own changes below: they win over the settings.
 import { defineTheme } from "@astryxdesign/core/theme";
 import { paperSettings } from "./paper.settings";
-import { pillButtons, roleTokens } from "../roles";
+import { controlStyles, roleTokens } from "../roles";
 
 export const paperTheme = defineTheme({
   extends: paperSettings,
@@ -38,5 +38,5 @@ export const paperTheme = defineTheme({
       accentMuted: "#33312d",
     },
   ),
-  components: pillButtons,
+  components: controlStyles,
 });

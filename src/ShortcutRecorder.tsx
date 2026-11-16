@@ -17,7 +17,7 @@ type Props = {
 export default function ShortcutRecorder({
   id = "shortcut",
   label = "Shortcut",
-  idleHelp = "Use this shortcut from any app.",
+  idleHelp = "",
   value,
   recording,
   disabled,
@@ -83,7 +83,8 @@ export default function ShortcutRecorder({
       help={
         conflict ||
         (startupConflict ? "Used by another app — pick another" : "") ||
-        (recording ? "Press a key combination. Escape cancels." : idleHelp)
+        (recording ? "Press a key combination. Escape cancels." : idleHelp) ||
+        undefined
       }
     >
       <Recorder

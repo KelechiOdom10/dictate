@@ -53,12 +53,54 @@ export function roleTokens(light: Side, dark: Side) {
   } satisfies DefinedTheme["tokens"];
 }
 
-export const pillButtons = {
-  button: {
-    base: { borderRadius: "var(--radius-pill, 9999px)" },
-    "variant:secondary": {
-      boxShadow: "inset 0 0 0 1px var(--color-border-emphasized)",
+// Shared shape for every control, so one edit moves all five themes: no
+// resting borders, a hairline on hover and focus, and compact pills. Colours
+// come from the role tokens above, never from a literal.
+export const controlStyles = {
+  card: {
+    base: {
+      borderColor: "color-mix(in oklch, var(--color-border), transparent 45%)",
     },
   },
+  button: {
+    base: {
+      borderRadius: "var(--radius-element)",
+      columnGap: "var(--spacing-1)",
+    },
+    "variant:secondary": {
+      boxShadow: "none",
+      backgroundColor: "color-mix(in oklch, var(--color-neutral), transparent 8%)",
+      ":hover": { boxShadow: "inset 0 0 0 1px var(--color-border)" },
+      ":focus-visible": {
+        boxShadow: "inset 0 0 0 1px var(--color-border-emphasized)",
+      },
+    },
+  },
+  selector: {
+    base: {
+      borderRadius: "var(--radius-element)",
+      paddingInline: "var(--spacing-2)",
+      columnGap: "var(--spacing-1)",
+    },
+  },
+  "text-input": {
+    base: {
+      borderColor: "transparent",
+      ":hover": { borderColor: "var(--color-border)" },
+      ":focus-within": { borderColor: "var(--color-border-emphasized)" },
+    },
+  },
+  badge: {
+    base: {
+      paddingInline: "var(--spacing-2)",
+      columnGap: "var(--spacing-1)",
+    },
+  },
+  "segmented-control-item": {
+    base: { paddingInline: "var(--spacing-2)", columnGap: "var(--spacing-1)" },
+  },
   "side-nav-item": { base: { marginBlockEnd: "var(--spacing-1)" } },
+  // The sidebar sits a step behind the page in every theme and mode, so the
+  // two surfaces never read as one flat sheet.
+  "side-nav": { base: { backgroundColor: "var(--color-background-muted)" } },
 };

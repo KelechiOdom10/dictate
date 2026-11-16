@@ -12,13 +12,13 @@ export function SettingsRow({
   children,
 }: {
   label: string;
-  help: ReactNode;
+  help?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <ListItem
       label={label}
-      description={<Text type="supporting">{help}</Text>}
+      description={help ? <Text type="supporting">{help}</Text> : undefined}
       endContent={children}
     />
   );

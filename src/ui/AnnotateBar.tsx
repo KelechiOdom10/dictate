@@ -62,6 +62,24 @@ export function AnnotateBar({
 }
 
 /**
+ * The bar the moment the shortcut is pressed, while the microphone and the
+ * screen capture start.
+ */
+export function AnnotateStartingBar() {
+  return (
+    <div className="ui-annotate-bar" role="toolbar" aria-label="Annotate">
+      <span
+        className="ui-record-dot ui-record-dot-starting"
+        aria-hidden="true"
+      />
+      <span role="status" className="ui-annotate-bar-label">
+        Starting…
+      </span>
+    </div>
+  );
+}
+
+/**
  * The bar after a session: the summary is already on the clipboard. "Copy
  * image" swaps it for the contact sheet, for chats that cannot open a path.
  */

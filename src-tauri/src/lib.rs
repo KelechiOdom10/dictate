@@ -1023,6 +1023,7 @@ fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String>
 }
 
 static ERROR_NOTICE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static ANNOTATE_STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Show a problem in the overlay, tray and Settings. Never call this while
 /// holding the `Runtime` lock: showing the overlay asks the focused app for
@@ -1413,6 +1414,11 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
     let model = models::path(&app.state::<Models>().dir, runtime.settings.speech_model);
     match next {
         annotate::Phase::Starting => {
+            let pressed = Instant::now();
+            log::info!(
+                "[annotate] timing shortcut_fired session={}",
+                ANNOTATE_STARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+            );
             if !model.is_file() {
                 drop(runtime);
                 report_error(app, &transcribe::missing_model(&model));
@@ -1427,6 +1433,8 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 report_error(app, &annotate::screen_permission_needed());
                 return;
             }
+            let display = annotate::recorded_display();
+            annotate_ui::show_starting(app, &display, pressed);
             let clock = Instant::now();
             let unix_ms = history::now_ms();
             surface::clear_error(app);
@@ -1437,6 +1445,7 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 Ok(fallback) => fallback,
                 Err(error) => {
                     drop(runtime);
+                    annotate_ui::cancel_starting(app);
                     report_error(app, &error);
                     return;
                 }
@@ -1446,7 +1455,7 @@ fn annotate_tap(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runtime>
                 clock,
                 unix_ms,
                 audio_offset_ms,
-                display: annotate::recorded_display(),
+                display,
                 frontmost_app: focus::frontmost_app_id(),
                 options: screen::CaptureOptions {
                     include_own_windows: runtime.settings.annotate_show_in_recordings,
@@ -1577,6 +1586,7 @@ fn finish_annotate_start(
             log::warn!("[annotate] release microphone: {stop}");
         }
         drop(runtime);
+        annotate_ui::cancel_starting(app);
         log::warn!("[annotate] screen start failed after screen_start_ms={screen_start_ms}");
         report_error(
             app,

@@ -3,7 +3,7 @@
 // change them with `astryx experimental theme editor set ember ...`. Add your own changes below: they win over the settings.
 import { defineTheme } from "@astryxdesign/core/theme";
 import { emberSettings } from "./ember.settings";
-import { pillButtons, roleTokens } from "../roles";
+import { controlStyles, roleTokens } from "../roles";
 
 export const emberTheme = defineTheme({
   extends: emberSettings,
@@ -38,5 +38,5 @@ export const emberTheme = defineTheme({
       accentMuted: "oklch(0.29 0.01 75)",
     },
   ),
-  components: pillButtons,
+  components: controlStyles,
 });

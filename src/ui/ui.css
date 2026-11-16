@@ -95,6 +95,9 @@ html {
   border-radius: var(--radius-pill);
   background: var(--recording);
 }
+.ui-record-dot-starting {
+  background: var(--overlay-muted);
+}
 .ui-timer {
   font-variant-numeric: tabular-nums;
 }
@@ -283,8 +286,8 @@ html {
 }
 meter.ui-rating {
   flex-shrink: 0;
-  width: 64px;
-  height: 6px;
+  width: 44px;
+  height: 4px;
   appearance: none;
   border: 0;
   background: var(--color-neutral);
@@ -293,6 +296,11 @@ meter.ui-rating {
 }
 meter.ui-rating + * {
   white-space: nowrap;
+}
+/* One height for every model card action row, so a card that starts
+   downloading or becomes the active model never moves the rows below it. */
+.ui-model-actions {
+  min-block-size: var(--spacing-8);
 }
 meter.ui-rating::-webkit-meter-bar {
   background: var(--color-neutral);

@@ -3,7 +3,7 @@
 // change them with `astryx experimental theme editor set zinc ...`. Add your own changes below: they win over the settings.
 import { defineTheme } from "@astryxdesign/core/theme";
 import { zincSettings } from "./zinc.settings";
-import { pillButtons, roleTokens } from "../roles";
+import { controlStyles, roleTokens } from "../roles";
 
 export const zincTheme = defineTheme({
   extends: zincSettings,
@@ -38,5 +38,5 @@ export const zincTheme = defineTheme({
       accentMuted: "#27272a",
     },
   ),
-  components: pillButtons,
+  components: controlStyles,
 });

@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from "react";
-import { Badge } from "@astryxdesign/core/Badge";
 import { Card } from "@astryxdesign/core/Card";
 import { HStack } from "@astryxdesign/core/HStack";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
@@ -37,12 +36,13 @@ function Preview({ id, mode }: { id: ThemeId; mode: "light" | "dark" }) {
       <Card padding={2} width={112}>
         <VStack gap={1}>
           <HStack gap={1} vAlign="center">
-            <StatusDot variant="accent" label="Accent" />
             <Text type="label">Aa</Text>
+            <StatusDot variant="accent" label="Accent" />
           </HStack>
-          <Text type="supporting">Ready</Text>
-          <HStack gap={1}>
-            <Badge label="Inserted" />
+          <HStack gap={1} vAlign="center">
+            <StatusDot variant="success" label="Positive" />
+            <StatusDot variant="warning" label="Caution" />
+            <Text type="supporting">Body text</Text>
           </HStack>
         </VStack>
       </Card>

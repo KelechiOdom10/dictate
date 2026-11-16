@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   AnnotateBar,
   AnnotateCopiedBar,
+  AnnotateStartingBar,
   InkCanvas,
   inkOpacity,
   type InkStroke,
@@ -21,6 +22,7 @@ const barSchema = z.object({
   recording: z.boolean(),
   startedAtMs: z.number(),
   pen: z.boolean(),
+  starting: z.boolean(),
   copied: z.boolean(),
   hasImage: z.boolean(),
 });
@@ -177,6 +179,12 @@ export function AnnotateBarWindow() {
           }
           onClose={() => void invoke("annotate_dismiss").catch(console.error)}
         />
+      </main>
+    );
+  if (state?.starting)
+    return (
+      <main className="annotate-bar-window">
+        <AnnotateStartingBar />
       </main>
     );
   if (!state?.recording) return null;

@@ -406,9 +406,11 @@ export const History: Story = {
       c.getByRole("region", { name: "Dictation" }),
     ).toHaveTextContent("Then hand it to review.");
     await userEvent.keyboard("{ArrowDown}");
-    await expect(
-      c.getByRole("button", { name: /No speech detected/ }),
-    ).toHaveFocus();
+    await waitFor(() =>
+      expect(
+        c.getByRole("button", { name: /No speech detected/ }),
+      ).toHaveFocus(),
+    );
     await expect(c.getByRole("button", { name: "Copy text" })).toHaveAttribute(
       "aria-disabled",
       "true",
@@ -908,6 +910,26 @@ export const About: Story = {
       c.getByRole("button", { name: "View on GitHub, source code" }),
     );
     await expect(opened).toEqual(["data", "logs", "source"]);
+  },
+};
+export const Appearance: Story = {
+  beforeEach: mockSettings,
+  render: () => <GeneralPage page="Appearance" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const themes = await c.findByRole("radiogroup", { name: "Theme" });
+    const scoped = within(themes);
+    expect(themes.querySelectorAll(".astryx-badge")).toHaveLength(0);
+    expect(scoped.queryByText("Ready")).toBeNull();
+    expect(scoped.queryByText("Inserted")).toBeNull();
+    expect(scoped.getAllByRole("radio")).toHaveLength(5);
+    for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
+      expect(
+        scoped.getByRole("radio", { name: new RegExp(name) }),
+      ).toBeInTheDocument();
+    expect(
+      themes.querySelectorAll(".astryx-status-dot").length,
+    ).toBeGreaterThan(5);
   },
 };
 export const Overlay: Story = {

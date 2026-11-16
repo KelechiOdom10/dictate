@@ -91,6 +91,15 @@ async function openSettings(
       const listeners = new Map<string, { id: number; handler: number }[]>();
       const commands: string[] = [];
       Object.defineProperty(window, "__commands", { value: commands });
+      // Lets a test move one model between states, the way a download does.
+      Object.defineProperty(window, "__setModelState", {
+        value: (id, state, active = false) => {
+          const model = models.find((candidate) => candidate.id === id);
+          if (!model) throw new Error("no model " + id);
+          model.state = state;
+          model.active = active;
+        },
+      });
       let nextId = 0;
       function emit(event: string, payload: unknown) {
         for (const listener of listeners.get(event) ?? []) {
@@ -1278,7 +1287,9 @@ for (const width of [720, 560, 390])
     expect(clipped).toEqual([]);
   });
 
-test("settings controls share one pill shape", async ({ page }) => {
+test("settings controls share one compact corner, not a pill", async ({
+  page,
+}) => {
   await openSettings(page);
   await expect(page.getByRole("switch")).toBeAttached();
   const shapes = await page.getByRole("main").evaluate((main) =>
@@ -1294,16 +1305,14 @@ test("settings controls share one pill shape", async ({ page }) => {
         const { height } = painted.getBoundingClientRect();
         return {
           name: el.getAttribute("aria-label") ?? el.textContent ?? "",
-          pill:
-            parseFloat(getComputedStyle(painted).borderTopLeftRadius) >=
-            height / 2 - 0.5,
+          radius: parseFloat(getComputedStyle(painted).borderTopLeftRadius),
+          half: height / 2,
         };
       }),
   );
   expect(shapes.length).toBeGreaterThan(3);
-  expect(shapes.filter(({ pill }) => !pill).map(({ name }) => name)).toEqual(
-    [],
-  );
+  expect([...new Set(shapes.map(({ radius }) => radius))]).toHaveLength(1);
+  for (const { radius, half } of shapes) expect(radius).toBeLessThan(half);
 });
 
 test("settings page transitions target the main pane", async ({ page }) => {
@@ -1339,9 +1348,13 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
   );
   for (let index = 1; index < tops.length; index++)
     expect(tops[index].top).toBeGreaterThan(tops[index - 1].bottom);
-  await expect(
-    page.getByRole("button", { name: "Manage models", exact: true }),
-  ).toHaveCSS("box-shadow", /inset/);
+  const manage = page.getByRole("button", {
+    name: "Manage models",
+    exact: true,
+  });
+  await expect(manage).toHaveCSS("box-shadow", "none");
+  await manage.hover();
+  await expect(manage).toHaveCSS("box-shadow", /inset/);
   const weights = await page
     .getByRole("main")
     .evaluate((main) => [
@@ -1368,4 +1381,140 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     .toBe(true);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await expect(page.getByRole("radiogroup", { name: "Theme" })).toBeVisible();
+});
+
+test("a model card keeps its height as its state changes, so the rows below never move", async ({
+  page,
+}) => {
+  await openSettings(page, { pendingPage: "Models" });
+  const card = page.locator('section[aria-label="Small English"]');
+  await expect(card).toBeVisible();
+  const below = page.locator('section[aria-label="Medium English"]');
+  const moved = async () => ({
+    height: Math.round((await card.boundingBox())!.height),
+    top: (await card.boundingBox())!.top,
+    belowTop: (await below.boundingBox())!.top,
+  });
+  const setState = async (state: unknown, active = false) => {
+    await page.evaluate(
+      ({ state, active }) => {
+        (
+          window as unknown as {
+            __setModelState: (id: string, s: unknown, a?: boolean) => void;
+          }
+        ).__setModelState("small.en", state, active);
+        window.postMessage(
+          { type: "dictate-test", event: "models-changed", payload: null },
+          "*",
+        );
+      },
+      { state, active },
+    );
+  };
+  const states: [unknown, RegExp, boolean?][] = [
+    [{ kind: "available" }, /Download Small English/],
+    [
+      {
+        kind: "downloading",
+        received: 40_000_000,
+        total: 466_000_000,
+        cancelling: false,
+      },
+      /Cancel Small English download/,
+    ],
+    [{ kind: "installed" }, /Use Small English/],
+    [{ kind: "installed" }, /Used for every dictation/, true],
+    [
+      { kind: "failed", message: "Download failed. Check your connection." },
+      /Retry Small English download/,
+    ],
+  ];
+  const seen = [];
+  for (const [state, label, active] of states) {
+    await setState(state, active ?? false);
+    await expect(
+      card
+        .getByRole("button", { name: label })
+        .or(card.getByText(label))
+        .first(),
+    ).toBeVisible();
+    seen.push(await moved());
+  }
+  expect([...new Set(seen.map(({ height }) => height))]).toHaveLength(1);
+  expect([...new Set(seen.map(({ belowTop }) => belowTop))]).toHaveLength(1);
+  expect([...new Set(seen.map(({ top }) => top))]).toHaveLength(1);
+});
+
+test("cards rest on a hairline and controls stay borderless until hover", async ({
+  page,
+}) => {
+  await openSettings(page);
+  const card = page.getByRole("main").locator(".astryx-card").first();
+  await expect(card).toBeVisible();
+  const border = await card.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { width: style.borderTopWidth, color: style.borderTopColor };
+  });
+  expect(parseFloat(border.width)).toBeLessThanOrEqual(1);
+  const alpha = /\/\s*([\d.]+)\s*\)/.exec(border.color);
+  expect(alpha ? Number(alpha[1]) : 1).toBeLessThan(0.6);
+  const field = page.getByRole("searchbox").first();
+  if (await field.count()) {
+    const painted = field.locator("xpath=..");
+    await expect(painted).toHaveCSS(
+      "border-top-color",
+      /rgba\(0, 0, 0, 0\)|transparent/,
+    );
+    await painted.hover();
+    await expect(painted).not.toHaveCSS(
+      "border-top-color",
+      /rgba\(0, 0, 0, 0\)|transparent/,
+    );
+  }
+});
+
+test("theme previews show the theme's own colours and no status words", async ({
+  page,
+}) => {
+  await openSettings(page, { pendingPage: "Appearance" });
+  const themes = page.getByRole("radiogroup", { name: "Theme" });
+  await expect(themes).toBeVisible();
+  await expect(themes.locator(".astryx-badge")).toHaveCount(0);
+  await expect(themes.getByText("Ready")).toHaveCount(0);
+  await expect(themes.getByText("Inserted")).toHaveCount(0);
+  const dots = await themes
+    .locator(".astryx-status-dot")
+    .evaluateAll((els) => [
+      ...new Set(els.map((el) => getComputedStyle(el).backgroundColor)),
+    ]);
+  expect(dots.length).toBeGreaterThan(1);
+});
+
+test("the sidebar sits a step behind the page in every theme and mode", async ({
+  page,
+}) => {
+  for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
+    for (const mode of ["light", "dark"]) {
+      await openSettings(page, {
+        stored: { theme, appearanceMode: mode },
+      });
+      await expect(page.getByRole("navigation")).toBeVisible();
+      const surfaces = await page.evaluate(() => {
+        const nav = document.querySelector(".astryx-side-nav")!;
+        const main =
+          document.querySelector("[role=main]") ??
+          document.querySelector("main") ??
+          document.body;
+        const pick = (el: Element) => getComputedStyle(el).backgroundColor;
+        return { nav: pick(nav), main: pick(main) };
+      });
+      expect(
+        surfaces.nav,
+        `${theme} ${mode} leaves the sidebar unpainted`,
+      ).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+      expect(surfaces.nav, `${theme} ${mode} paints one surface`).not.toBe(
+        surfaces.main,
+      );
+    }
+  }
 });

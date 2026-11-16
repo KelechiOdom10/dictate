@@ -3,7 +3,7 @@
 // change them with `astryx experimental theme editor set rose-pine ...`. Add your own changes below: they win over the settings.
 import { defineTheme } from "@astryxdesign/core/theme";
 import { rosePineSettings } from "./rose-pine.settings";
-import { pillButtons, roleTokens } from "../roles";
+import { controlStyles, roleTokens } from "../roles";
 
 export const rosePineTheme = defineTheme({
   extends: rosePineSettings,
@@ -38,5 +38,5 @@ export const rosePineTheme = defineTheme({
       accentMuted: "#26233a",
     },
   ),
-  components: pillButtons,
+  components: controlStyles,
 });
