@@ -3,7 +3,6 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { HStack } from "@astryxdesign/core/HStack";
 import { Text } from "@astryxdesign/core/Text";
-import { VStack } from "@astryxdesign/core/VStack";
 import { KeyboardShortcut, ShortcutRecorder } from "./ShortcutRecorder";
 const meta = { title: "Components/ShortcutRecorder" } satisfies Meta;
 export default meta;
