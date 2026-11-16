@@ -7,38 +7,53 @@ import "../styles/site.css";
 
 const requirement = `Apple silicon, macOS 15 or later, ${release.size}`;
 
-const themes = [
+const shotSizes = "(min-width: 64rem) 60rem, calc(100vw - 2.5rem)";
+
+const frameSizes = "(min-width: 56rem) 40rem, calc(100vw - 2.5rem)";
+
+const steps = [
+  { id: "record", name: "Record", text: "Tap Option-Shift-A to record your screen and voice." },
+  { id: "draw", name: "Draw", text: "Hold the shortcut and move the pointer. Ink follows, then fades." },
+  { id: "talk", name: "Talk", text: "Say what you are pointing at." },
+  { id: "copy", name: "Copy", text: "Tap again. A summary is on your clipboard, pointing at the package." },
+];
+
+const frames = [
   {
-    name: "Ember",
-    light: { plate: "oklch(0.985 0.003 75)", ink: "oklch(0.22 0.006 75)", live: "#DF5822" },
-    dark: { plate: "oklch(0.25 0.008 75)", ink: "oklch(0.95 0.006 75)", live: "#F67D51" },
+    id: "record",
+    at: "00:06",
+    caption: "Recording. The toolbar keeps time at the top of the screen.",
+    alt: "dictate's General settings, six seconds into a real take. The Annotate toolbar at the top reads 00:06.",
   },
   {
-    name: "Paper",
-    light: { plate: "#fbfaf7", ink: "#1c1b19", live: "#1c1b19" },
-    dark: { plate: "#252421", ink: "#f3f1ec", live: "#f3f1ec" },
+    id: "draw",
+    at: "0:21",
+    caption: "stroke across x 0.24–0.77, y 0.57–0.73",
+    alt: "The same window at 0:21, with a red ink loop drawn around the Input level row and the Test microphone button.",
   },
   {
-    name: "Capy",
-    light: { plate: "#f5f6fc", ink: "#1a1d38", live: "#a99cf5" },
-    dark: { plate: "#171a34", ink: "#d2daf6", live: "#a99cf5" },
-  },
-  {
-    name: "Rosé Pine",
-    light: { plate: "#fffaf3", ink: "#575279", live: "#c4a7e7" },
-    dark: { plate: "#26233a", ink: "#e0def4", live: "#c4a7e7" },
-  },
-  {
-    name: "Neutral",
-    light: { plate: "#ffffff", ink: "#18181b", live: "#18181b" },
-    dark: { plate: "#18181b", ink: "#f4f4f5", live: "#f4f4f5" },
+    id: "talk",
+    at: "0:54",
+    quote: true,
+    caption: "I'd rather it starts with like the segmented stuff already so that when you click test it just starts listening",
+    alt: "The window at 0:53, mid microphone test, with a second ink loop around Input level and its segmented meter.",
   },
 ];
 
-const swatch = (colors: { plate: string; ink: string; live: string }) =>
-  `--plate: ${colors.plate}; --ink: ${colors.ink}; --live: ${colors.live}`;
+const files = [
+  { name: "recording.mp4", size: "13.4 MB" },
+  { name: "audio.wav", size: "4.4 MB" },
+  { name: "frames/ (10)", size: "7.3 MB" },
+  { name: "frames-full/ (10)", size: "16.2 MB" },
+  { name: "contact-sheet.png", size: "1.4 MB" },
+  { name: "annotation.json", size: "45 KB" },
+  { name: "summary.md", size: "on your clipboard", pasted: true },
+];
 
-const shotSizes = "(min-width: 64rem) 60rem, calc(100vw - 2.5rem)";
+const summary = [
+  "#3 (0:21) stroke across x 0.24–0.77, y 0.57–0.73 — “microphone Right, clicking test microphone. Look”",
+  "#9 (0:54) stroke across x 0.24–0.75, y 0.60–0.73 (2 strokes) — “I'd rather it starts with like the segmented stuff already so that when you click”",
+];
 
 const settingsAlt =
   "dictate's General settings: the Option-Shift-Space shortcut in Hold to talk mode, Parakeet English as the speech model, and the microphone.";
@@ -183,65 +198,84 @@ const settingsAlt =
         </figure>
       </section>
 
-      <section class="wrap section shot" aria-labelledby="themes-title">
-        <div class="section-head">
-          <h2 id="themes-title">Five themes, light and dark</h2>
-          <p class="lead">Pick one under Appearance. Each has a light and a dark side.</p>
-        </div>
-        <ul class="themes">
-          {
-            themes.map((theme) => (
-              <li>
-                <span class="pair">
-                  <span class="swatch" style={swatch(theme.light)}>
-                    <Mark />
-                  </span>
-                  <span class="swatch" style={swatch(theme.dark)}>
-                    <Mark />
-                  </span>
-                </span>
-                {theme.name}
-              </li>
-            ))
-          }
-        </ul>
-      </section>
-
       <section class="wrap section annotate" aria-labelledby="annotate-title">
         <div class="annotate-copy">
           <h2 id="annotate-title">Annotate</h2>
-          <ol class="steps">
-            <li><strong>Record.</strong> Tap Option-Shift-A to record your screen and voice.</li>
-            <li><strong>Draw.</strong> Hold the shortcut and move the pointer. Ink follows, then fades.</li>
-            <li><strong>Talk.</strong> Say what you are pointing at.</li>
-            <li><strong>Copy.</strong> Tap again. A summary is on your clipboard, pointing at the package.</li>
-          </ol>
+          <div class="steps" role="tablist" aria-label="Annotate, step by step" aria-orientation="vertical">
+            {
+              steps.map((step, i) => (
+                <button
+                  class="step"
+                  type="button"
+                  role="tab"
+                  id={`step-${step.id}`}
+                  aria-controls={`panel-${step.id}`}
+                  aria-selected={i === 0 ? "true" : "false"}
+                  tabindex={i === 0 ? 0 : -1}
+                  data-step
+                >
+                  <span class="step-n" aria-hidden="true">{i + 1}</span>
+                  <span class="step-name">{step.name}</span>
+                  <span class="step-text">{step.text}</span>
+                </button>
+              ))
+            }
+          </div>
         </div>
-        <ol class="sequence annotate-states" aria-label="What the overlay shows during a take">
-          <li>
-            <span class="capsule"><span class="dot"></span>Annotating <span class="timer">00:10</span></span>
-            <span class="meta">While you record and draw</span>
-          </li>
-          <li>
-            <span class="capsule"><span class="spinner"></span>Packaging…</span>
-            <span class="meta">After the second tap</span>
-          </li>
-          <li class="final">
-            <span class="capsule capsule-copied"><Icon name="clipboard" />Copied — paste it anywhere</span>
-            <span class="meta">Ready to paste into an AI agent</span>
-          </li>
-        </ol>
-        <figure class="package">
-          <figcaption><Icon name="folder" /> One package per take</figcaption>
-          <ul>
-            <li>recording.mp4</li>
-            <li>audio.wav</li>
-            <li>frames/frame-01.png</li>
-            <li>contact-sheet.png</li>
-            <li>annotation.json</li>
-            <li class="pasted">summary.md <span>on your clipboard</span></li>
-          </ul>
-        </figure>
+
+        <div class="panels">
+          {
+            frames.map((frame, i) => (
+              <div
+                class="panel"
+                role="tabpanel"
+                id={`panel-${frame.id}`}
+                aria-labelledby={`step-${frame.id}`}
+                tabindex="0"
+                hidden={i > 0}
+              >
+                <figure>
+                  <img
+                    src={`/app/annotate-${frame.id}.webp`}
+                    srcset={`/app/annotate-${frame.id}-640.webp 640w, /app/annotate-${frame.id}.webp 1040w`}
+                    sizes={frameSizes}
+                    width="1040"
+                    height="976"
+                    alt={frame.alt}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <figcaption>
+                    <span class="at">{frame.at}</span>
+                    <span class={frame.quote ? "said" : undefined}>{frame.caption}</span>
+                  </figcaption>
+                </figure>
+              </div>
+            ))
+          }
+          <div class="panel panel-copy" role="tabpanel" id="panel-copy" aria-labelledby="step-copy" tabindex="0" hidden>
+            <p class="copied">
+              <span class="capsule capsule-copied"><Icon name="clipboard" />Copied — paste it anywhere</span>
+              <span class="meta">Packaged in 1.5 s</span>
+            </p>
+            <ul class="files">
+              {
+                files.map((file) => (
+                  <li class={file.pasted ? "pasted" : undefined}>
+                    {file.name}
+                    <span>{file.size}</span>
+                  </li>
+                ))
+              }
+            </ul>
+            <figure>
+              <figcaption class="at">summary.md</figcaption>
+              <ol class="summary">
+                {summary.map((line) => <li>{line}</li>)}
+              </ol>
+            </figure>
+          </div>
+        </div>
       </section>
     </main>
 
@@ -313,6 +347,36 @@ const settingsAlt =
         if (event.code === "Space" || event.key === "Alt" || event.key === "Shift") stop();
       });
       window.addEventListener("blur", stop);
+
+      const tabs = [...document.querySelectorAll<HTMLButtonElement>("[data-step]")];
+      const select = (next: HTMLButtonElement) => {
+        for (const tab of tabs) {
+          const on = tab === next;
+          tab.setAttribute("aria-selected", String(on));
+          tab.tabIndex = on ? 0 : -1;
+          document.getElementById(tab.getAttribute("aria-controls")!)!.hidden = !on;
+        }
+      };
+      for (const tab of tabs) {
+        tab.addEventListener("click", () => select(tab));
+        tab.addEventListener("keydown", (event) => {
+          const at = tabs.indexOf(tab);
+          const to =
+            event.key === "ArrowDown" || event.key === "ArrowRight"
+              ? (at + 1) % tabs.length
+              : event.key === "ArrowUp" || event.key === "ArrowLeft"
+                ? (at + tabs.length - 1) % tabs.length
+                : event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? tabs.length - 1
+                    : -1;
+          if (to < 0) return;
+          event.preventDefault();
+          select(tabs[to]);
+          tabs[to].focus();
+        });
+      }
 
       const saved = root.dataset.mode ?? "system";
       for (const input of document.querySelectorAll<HTMLInputElement>('input[name="mode"]')) {
