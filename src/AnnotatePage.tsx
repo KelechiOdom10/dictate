@@ -146,7 +146,7 @@ export default function AnnotatePage() {
             />
             <Button
               size="sm"
-              variant={allowed ? "ghost" : "primary"}
+              variant={allowed ? "secondary" : "primary"}
               label="Open System Settings"
               onClick={() => void openSystemSettings()}
             />

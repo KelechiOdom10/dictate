@@ -18,7 +18,7 @@ export const THEMES: {
     id: "ember",
     slug: "ember",
     name: "Ember",
-    description: "Warm brown, with an ember focus ring.",
+    description: "Warm brown and ink.",
   },
   {
     id: "paper",
@@ -30,7 +30,7 @@ export const THEMES: {
     id: "capy",
     slug: "capy",
     name: "Capy",
-    description: "Deep indigo, with a lavender focus ring.",
+    description: "Deep indigo with lavender accents.",
   },
   {
     id: "rosePine",

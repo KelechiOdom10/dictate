@@ -22,7 +22,6 @@ export const capyTheme = defineTheme({
       accent: "#1a1d38",
       onAccent: "#f5f6fc",
       accentMuted: "#e4e7f4",
-      focus: "#6c5ce0",
     },
     {
       body: "#11132a",
@@ -37,7 +36,6 @@ export const capyTheme = defineTheme({
       accent: "#d2daf6",
       onAccent: "#0a0b1e",
       accentMuted: "#1f223f",
-      focus: "#a99cf5",
     },
   ),
   components: pillButtons,

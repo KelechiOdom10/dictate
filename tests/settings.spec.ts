@@ -567,6 +567,10 @@ for (const theme of themeCases) {
   }) => {
     await page.emulateMedia({ colorScheme: "light" });
     await openSettings(page);
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Appearance", level: 1 }),
+    ).toBeVisible();
     const radio = page.getByRole("radio", {
       name: new RegExp(`^${theme.name}`),
     });
@@ -588,7 +592,7 @@ for (const theme of themeCases) {
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
     await page.getByRole("button", { name: "About", exact: true }).click();
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await expect(radio).toBeChecked();
     await expect(
       page.getByRole("radio", { name: "System", exact: true }),
@@ -1309,4 +1313,59 @@ test("settings page transitions target the main pane", async ({ page }) => {
       .getByRole("main")
       .evaluate((main) => getComputedStyle(main).viewTransitionName),
   ).resolves.toBe("settings-page");
+});
+
+test("settings polish: sidebar order, Appearance page, resting buttons, two weights, releases link", async ({
+  page,
+}) => {
+  await openSettings(page);
+  const nav = page
+    .getByRole("navigation")
+    .getByRole("button")
+    .filter({ hasNotText: "Check for updates" });
+  await expect(nav).toHaveText([
+    "General",
+    "Appearance",
+    "Models",
+    "Annotate",
+    "History",
+    "Output",
+    "Advanced",
+    "About",
+  ]);
+  await expect(page.getByRole("radiogroup", { name: "Theme" })).toHaveCount(0);
+  const tops = await nav.evaluateAll((items) =>
+    items.map((item) => item.getBoundingClientRect()),
+  );
+  for (let index = 1; index < tops.length; index++)
+    expect(tops[index].top).toBeGreaterThan(tops[index - 1].bottom);
+  await expect(
+    page.getByRole("button", { name: "Manage models", exact: true }),
+  ).toHaveCSS("box-shadow", /inset/);
+  const weights = await page
+    .getByRole("main")
+    .evaluate((main) => [
+      ...new Set(
+        [...main.querySelectorAll("*")]
+          .filter((element) =>
+            [...element.childNodes].some(
+              (node) => node.nodeType === 3 && node.textContent?.trim(),
+            ),
+          )
+          .map((element) => getComputedStyle(element).fontWeight),
+      ),
+    ]);
+  expect(weights.sort()).toEqual(["400", "600"]);
+  await page.getByRole("button", { name: /Check for updates/ }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as { __commands: string[] }).__commands.includes(
+          "open_location",
+        ),
+      ),
+    )
+    .toBe(true);
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  await expect(page.getByRole("radiogroup", { name: "Theme" })).toBeVisible();
 });

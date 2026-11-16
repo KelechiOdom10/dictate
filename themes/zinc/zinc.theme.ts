@@ -22,7 +22,6 @@ export const zincTheme = defineTheme({
       accent: "#18181b",
       onAccent: "#fafafa",
       accentMuted: "#e4e4e7",
-      focus: "#71717a",
     },
     {
       body: "#101012",
@@ -37,7 +36,6 @@ export const zincTheme = defineTheme({
       accent: "#f4f4f5",
       onAccent: "#09090b",
       accentMuted: "#27272a",
-      focus: "#a1a1aa",
     },
   ),
   components: pillButtons,

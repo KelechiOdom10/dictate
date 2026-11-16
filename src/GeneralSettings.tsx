@@ -14,7 +14,6 @@ import {
   type Settings,
 } from "./settings";
 import { SettingsRow as Row, SettingsGroup } from "./ui";
-import { AppearancePicker } from "./AppearancePicker";
 import { LoadError, Loading, SaveStatus } from "./SettingsStatus";
 import ShortcutRecorder from "./ShortcutRecorder";
 import { modelLabel, readModels, speechModelSchema } from "./models";
@@ -196,7 +195,7 @@ export default function General({
           <Row label="Models" help="Download, switch or remove speech models.">
             <Button
               size="sm"
-              variant="ghost"
+              variant="secondary"
               label="Manage models"
               onClick={onOpenModels}
             />
@@ -272,12 +271,6 @@ export default function General({
           />
         </Row>
       </SettingsGroup>
-      <AppearancePicker
-        theme={settings.theme}
-        mode={settings.appearanceMode}
-        disabled={busy}
-        onChange={(patch) => void save(patch)}
-      />
       <SaveStatus busy={busy} error={error} />
     </>
   );

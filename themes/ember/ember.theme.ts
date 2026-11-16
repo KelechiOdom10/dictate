@@ -22,7 +22,6 @@ export const emberTheme = defineTheme({
       accent: "oklch(0.22 0.006 75)",
       onAccent: "oklch(0.985 0.003 75)",
       accentMuted: "oklch(0.925 0.008 75)",
-      focus: "oklch(0.63 0.18 40)",
     },
     {
       body: "oklch(0.21 0.005 75)",
@@ -37,7 +36,6 @@ export const emberTheme = defineTheme({
       accent: "oklch(0.95 0.006 75)",
       onAccent: "oklch(0.21 0.005 75)",
       accentMuted: "oklch(0.29 0.01 75)",
-      focus: "oklch(0.72 0.16 40)",
     },
   ),
   components: pillButtons,

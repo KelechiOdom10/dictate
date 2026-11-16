@@ -429,18 +429,24 @@ enum Location {
     Data,
     Logs,
     Source,
+    Releases,
 }
 
 const SOURCE_URL: &str = "https://github.com/KelechiOdom10/dictate";
+const RELEASES_URL: &str = "https://github.com/KelechiOdom10/dictate/releases";
 
 #[tauri::command]
 fn open_location(app: AppHandle, location: Location) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let folder = match location {
-        Location::Source => {
+        Location::Source | Location::Releases => {
+            let url = match location {
+                Location::Releases => RELEASES_URL,
+                _ => SOURCE_URL,
+            };
             return app
                 .opener()
-                .open_url(SOURCE_URL, None::<&str>)
+                .open_url(url, None::<&str>)
                 .map_err(|e| e.to_string());
         }
         Location::Data => app.path().app_data_dir(),

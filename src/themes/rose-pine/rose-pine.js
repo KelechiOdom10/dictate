@@ -31,14 +31,14 @@ export const rosePineTheme = {
     "--font-size-3xl": "1.8125rem",
     "--font-size-4xl": "2.1875rem",
     "--font-size-5xl": "2.625rem",
-    "--text-heading-1-size": "var(--font-size-2xl)",
+    "--text-heading-1-size": "var(--font-size-xl)",
     "--text-heading-1-weight": "var(--font-weight-semibold)",
     "--text-heading-1-leading": "1.3333",
-    "--text-heading-2-size": "var(--font-size-xl)",
+    "--text-heading-2-size": "var(--font-size-lg)",
     "--text-heading-2-weight": "var(--font-weight-semibold)",
     "--text-heading-2-leading": "1.4",
-    "--text-heading-3-size": "var(--font-size-lg)",
-    "--text-heading-3-weight": "var(--font-weight-bold)",
+    "--text-heading-3-size": "var(--font-size-base)",
+    "--text-heading-3-weight": "var(--font-weight-semibold)",
     "--text-heading-3-leading": "1.4118",
     "--text-heading-4-size": "var(--font-size-base)",
     "--text-heading-4-weight": "var(--font-weight-bold)",
@@ -56,7 +56,7 @@ export const rosePineTheme = {
     "--text-large-weight": "var(--font-weight-semibold)",
     "--text-large-leading": "1.4118",
     "--text-label-size": "var(--font-size-base)",
-    "--text-label-weight": "var(--font-weight-medium)",
+    "--text-label-weight": "var(--font-weight-normal)",
     "--text-label-leading": "1.4286",
     "--text-code-size": "var(--font-size-base)",
     "--text-code-weight": "var(--font-weight-normal)",
@@ -215,7 +215,9 @@ export const rosePineTheme = {
     "--shadow-inset-success": "inset 0px 0px 0px 2px #2f7d334D",
     "--shadow-inset-warning": "inset 0px 0px 0px 2px #f8d36a4D",
     "--shadow-inset-error": "inset 0px 0px 0px 2px #de47454D",
-    "--focus-outline-color": "light-dark(#907aa9, #c4a7e7)"
+    "--focus-outline-color": "light-dark(#966dc3, #c4a7e7)",
+    "--font-weight-medium": "400",
+    "--font-weight-bold": "600"
   },
   localTokens: {
     "--astryx-theme-neutral-color-status-fill-accent": "light-dark(#0074e2, #6d9cfe)"
@@ -347,6 +349,9 @@ export const rosePineTheme = {
       },
       "base": {
         "borderRadius": "var(--radius-pill, 9999px)"
+      },
+      "variant:secondary": {
+        "boxShadow": "inset 0 0 0 1px var(--color-border-emphasized)"
       }
     },
     "badge": {
@@ -440,6 +445,11 @@ export const rosePineTheme = {
     "selector": {
       "base": {
         "borderRadius": "9999px"
+      }
+    },
+    "side-nav-item": {
+      "base": {
+        "marginBlockEnd": "var(--spacing-1)"
       }
     }
   },

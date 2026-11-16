@@ -35,6 +35,7 @@ import {
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { VStack } from "@astryxdesign/core/VStack";
 import {
   deleteHistory,
@@ -70,15 +71,15 @@ type Filter = "all" | TakeStatus;
 type Retention = Settings["historyRetention"];
 const filters: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "pasted", label: "Pasted" },
+  { value: "pasted", label: "Inserted" },
   { value: "copied", label: "Copied" },
-  { value: "skipped", label: "Skipped" },
+  { value: "skipped", label: "Nothing heard" },
   { value: "failed", label: "Failed" },
 ];
 const statusLabels: Record<TakeStatus, string> = {
-  pasted: "Pasted",
+  pasted: "Inserted",
   copied: "Copied",
-  skipped: "Skipped",
+  skipped: "Nothing heard",
   failed: "Failed",
 };
 const retentionLabels: Record<Retention, string> = {
@@ -490,7 +491,7 @@ function DictationDetail({
   }
   const status =
     entry.status === "pasted"
-      ? "Pasted"
+      ? "Inserted"
       : `${statusLabels[entry.status]}${entry.detail ? ` · ${entry.detail}` : ""}`;
   return (
     <Detail
@@ -518,9 +519,9 @@ function DictationDetail({
             icon={<Trash2 size={16} aria-hidden="true" />}
             onClick={() => setConfirming(true)}
           />
-          <Text role="status" aria-live="polite" type="supporting">
+          <VisuallyHidden role="status" aria-live="polite">
             {copied ? "Copied to clipboard" : ""}
-          </Text>
+          </VisuallyHidden>
         </>
       }
       metadata={[
@@ -710,7 +711,7 @@ function AnnotationDetail({
       <HStack gap={2} vAlign="center">
         <Button
           size="sm"
-          label={copied ? "Copied" : "Copy again"}
+          label="Copy again"
           icon={
             copied ? (
               <Check size={16} aria-hidden="true" />
@@ -727,9 +728,9 @@ function AnnotationDetail({
           icon={<FolderOpen size={16} aria-hidden="true" />}
           onClick={() => void reveal()}
         />
-        <Text role="status" aria-live="polite" type="supporting">
+        <VisuallyHidden role="status" aria-live="polite">
           {copied ? "Summary copied to clipboard" : ""}
-        </Text>
+        </VisuallyHidden>
       </HStack>
     </Detail>
   );

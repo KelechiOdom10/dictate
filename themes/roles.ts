@@ -12,8 +12,7 @@ type Side = Record<
   | "emphasized"
   | "accent"
   | "onAccent"
-  | "accentMuted"
-  | "focus",
+  | "accentMuted",
   string
 >;
 
@@ -40,10 +39,26 @@ export function roleTokens(light: Side, dark: Side) {
     "--color-accent-muted": pair("accentMuted"),
     "--color-text-accent": pair("accent"),
     "--color-icon-accent": pair("accent"),
-    "--focus-outline-color": pair("focus"),
+    "--font-weight-medium": "400",
+    "--font-weight-bold": "600",
+    "--text-heading-1-size": "var(--font-size-xl)",
+    "--text-heading-1-weight": "var(--font-weight-semibold)",
+    "--text-heading-2-size": "var(--font-size-lg)",
+    "--text-heading-2-weight": "var(--font-weight-semibold)",
+    "--text-heading-3-size": "var(--font-size-base)",
+    "--text-heading-3-weight": "var(--font-weight-semibold)",
+    "--text-large-size": "var(--font-size-lg)",
+    "--text-large-weight": "var(--font-weight-semibold)",
+    "--text-label-weight": "var(--font-weight-normal)",
   } satisfies DefinedTheme["tokens"];
 }
 
 export const pillButtons = {
-  button: { base: { borderRadius: "var(--radius-pill, 9999px)" } },
+  button: {
+    base: { borderRadius: "var(--radius-pill, 9999px)" },
+    "variant:secondary": {
+      boxShadow: "inset 0 0 0 1px var(--color-border-emphasized)",
+    },
+  },
+  "side-nav-item": { base: { marginBlockEnd: "var(--spacing-1)" } },
 };

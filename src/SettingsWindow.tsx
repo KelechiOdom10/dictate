@@ -11,8 +11,9 @@ import ModelsPage from "./ModelsPage";
 import OutputPage from "./OutputPage";
 import AdvancedPage from "./AdvancedPage";
 import AboutPage from "./AboutPage";
+import AppearancePage from "./AppearancePage";
 import { Banner } from "@astryxdesign/core/Banner";
-import { Button } from "@astryxdesign/core/Button";
+import { Link } from "@astryxdesign/core/Link";
 import { Heading } from "@astryxdesign/core/Heading";
 import { AppShell } from "@astryxdesign/core/AppShell";
 import {
@@ -31,13 +32,16 @@ import {
   Settings2,
   Info,
   PenLine,
+  SunMoon,
 } from "lucide-react";
 import { useDictationStatus } from "./useDictationStatus";
 import { readSettings } from "./settings";
+import { openLocation } from "./about";
 import { SettingsTheme } from "./ui/SettingsTheme";
 
 const subtitles: Record<string, string> = {
   General: "Make dictate feel like second nature.",
+  Appearance: "Pick a theme, and whether it follows your Mac’s light and dark.",
   Models:
     "Choose how dictate turns speech into text. Everything runs on this Mac.",
   Annotate:
@@ -50,6 +54,7 @@ const subtitles: Record<string, string> = {
 
 const pages = [
   { name: "General", icon: SlidersHorizontal },
+  { name: "Appearance", icon: SunMoon },
   { name: "Models", icon: Cpu },
   { name: "Annotate", icon: PenLine },
   { name: "History", icon: History },
@@ -125,13 +130,14 @@ export default function SettingsWindow({
             footer={
               <VStack gap={1}>
                 <Text type="supporting">Version {version.data ?? "…"}</Text>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  label="Check for updates"
-                  isDisabled
-                  tooltip="Updates are coming in a later release"
-                />
+                <Link
+                  as="button"
+                  isExternalLink
+                  type="supporting"
+                  onClick={() => void openLocation("releases")}
+                >
+                  Check for updates
+                </Link>
               </VStack>
             }
           >
@@ -168,6 +174,8 @@ export default function SettingsWindow({
           )}
           {page === "General" ? (
             <General onOpenModels={() => setPage("Models")} />
+          ) : page === "Appearance" ? (
+            <AppearancePage />
           ) : page === "Models" ? (
             <ModelsPage />
           ) : page === "Annotate" ? (

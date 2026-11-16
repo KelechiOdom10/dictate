@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, ExternalLink, HardDrive, Trash2 } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -7,6 +7,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
+import { Link } from "@astryxdesign/core/Link";
 import {
   MetadataList,
   MetadataListItem,
@@ -180,18 +181,18 @@ export function ModelCard({
               </HStack>
               <Text type="supporting">{description}</Text>
               {licence && (
-                <HStack>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    label={licence.name}
-                    icon={<ExternalLink size={12} aria-hidden="true" />}
-                    onClick={licence.onOpen}
-                  />
-                </HStack>
+                <Link
+                  as="button"
+                  isExternalLink
+                  hasUnderline
+                  onClick={licence.onOpen}
+                  type="supporting"
+                >
+                  {licence.name}
+                </Link>
               )}
             </VStack>
-            <MetadataList columns={2}>
+            <MetadataList columns={3}>
               {ratings.map((rating) => (
                 <MetadataListItem key={rating.label} label={rating.label}>
                   <HStack gap={2} vAlign="center">
@@ -203,20 +204,17 @@ export function ModelCard({
                       aria-label={`${name} ${rating.label.toLowerCase()}`}
                       aria-valuetext={rating.text}
                     />
-                    <Text type="supporting">{rating.text}</Text>
+                    <Text>{rating.text}</Text>
                   </HStack>
                 </MetadataListItem>
               ))}
+              <MetadataListItem label="Size">
+                <Text>{size}</Text>
+              </MetadataListItem>
             </MetadataList>
           </VStack>
-          <HStack gap={2} hAlign="between" vAlign="center">
-            <HStack gap={1} vAlign="center">
-              <HardDrive size={14} aria-hidden="true" />
-              <Text type="supporting">{size}</Text>
-            </HStack>
-            <HStack gap={2} vAlign="center">
-              {actions}
-            </HStack>
+          <HStack gap={2} hAlign="end" vAlign="center">
+            {actions}
           </HStack>
         </VStack>
       </Card>

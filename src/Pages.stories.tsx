@@ -416,6 +416,29 @@ export const History: Story = {
     await userEvent.click(c.getByRole("button", { name: /Bakery/i }));
   },
 };
+const layoutOf = (...elements: HTMLElement[]) =>
+  elements.map((element) => {
+    const { top, left, height, width } = element.getBoundingClientRect();
+    return { top, left, height, width };
+  });
+export const HistoryCopy: Story = {
+  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("button", { name: /Bakery/i }));
+    const copy = c.getByRole("button", { name: "Copy text" });
+    const parts = () => [
+      c.getByRole("region", { name: "Dictation" }),
+      c.getByRole("button", { name: "Delete dictation" }),
+      c.getByRole("button", { name: /Bakery/i }),
+    ];
+    const before = layoutOf(...parts());
+    await userEvent.click(copy);
+    await expect(await c.findByText("Copied to clipboard")).toBeInTheDocument();
+    await expect(layoutOf(...parts())).toEqual(before);
+  },
+};
 const annotationsHistory = ({
   globals,
 }: {
@@ -451,10 +474,23 @@ export const HistoryAnnotationActions: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     await userEvent.click(await c.findByRole("radio", { name: "Annotations" }));
-    await userEvent.click(await c.findByRole("button", { name: "Copy again" }));
+    const copyAgain = await c.findByRole("button", { name: "Copy again" });
+    const before = layoutOf(
+      c.getByRole("region", { name: "Annotation" }),
+      copyAgain,
+      c.getByRole("button", { name: "Reveal in Finder" }),
+    );
+    await userEvent.click(copyAgain);
     await expect(
-      await c.findByRole("button", { name: "Copied" }),
-    ).toBeVisible();
+      await c.findByText("Summary copied to clipboard"),
+    ).toBeInTheDocument();
+    await expect(
+      layoutOf(
+        c.getByRole("region", { name: "Annotation" }),
+        copyAgain,
+        c.getByRole("button", { name: "Reveal in Finder" }),
+      ),
+    ).toEqual(before);
     await userEvent.click(c.getByRole("button", { name: "Reveal in Finder" }));
     await expect(annotateCalls).toEqual([
       "copy_annotation 2026-11-15_10-42-08",

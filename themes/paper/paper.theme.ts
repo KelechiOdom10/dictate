@@ -22,7 +22,6 @@ export const paperTheme = defineTheme({
       accent: "#1c1b19",
       onAccent: "#fbfaf7",
       accentMuted: "#e6e2d9",
-      focus: "#1c1b19",
     },
     {
       body: "#1c1b19",
@@ -37,7 +36,6 @@ export const paperTheme = defineTheme({
       accent: "#f3f1ec",
       onAccent: "#1c1b19",
       accentMuted: "#33312d",
-      focus: "#f3f1ec",
     },
   ),
   components: pillButtons,

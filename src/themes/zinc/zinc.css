@@ -110,14 +110,14 @@
     --font-size-4xl: var(--_scaled-font-size-4xl);
     --_scaled-font-size-5xl: calc(2.625rem * var(--_dynamic-type-large-title, 1));
     --font-size-5xl: var(--_scaled-font-size-5xl);
-    --text-heading-1-size: var(--font-size-2xl);
+    --text-heading-1-size: var(--font-size-xl);
     --text-heading-1-weight: var(--font-weight-semibold);
     --text-heading-1-leading: 1.3333;
-    --text-heading-2-size: var(--font-size-xl);
+    --text-heading-2-size: var(--font-size-lg);
     --text-heading-2-weight: var(--font-weight-semibold);
     --text-heading-2-leading: 1.4;
-    --text-heading-3-size: var(--font-size-lg);
-    --text-heading-3-weight: var(--font-weight-bold);
+    --text-heading-3-size: var(--font-size-base);
+    --text-heading-3-weight: var(--font-weight-semibold);
     --text-heading-3-leading: 1.4118;
     --text-heading-4-size: var(--font-size-base);
     --text-heading-4-weight: var(--font-weight-bold);
@@ -135,7 +135,7 @@
     --text-large-weight: var(--font-weight-semibold);
     --text-large-leading: 1.4118;
     --text-label-size: var(--font-size-base);
-    --text-label-weight: var(--font-weight-medium);
+    --text-label-weight: var(--font-weight-normal);
     --text-label-leading: 1.4286;
     --text-code-size: var(--font-size-base);
     --text-code-weight: var(--font-weight-normal);
@@ -294,7 +294,9 @@
     --shadow-inset-success: inset 0px 0px 0px 2px #2f7d334D;
     --shadow-inset-warning: inset 0px 0px 0px 2px #f8d36a4D;
     --shadow-inset-error: inset 0px 0px 0px 2px #de47454D;
-    --focus-outline-color: light-dark(#71717a, #a1a1aa);
+    --focus-outline-color: light-dark(#71717a, #71717a);
+    --font-weight-medium: 400;
+    --font-weight-bold: 600;
     --color-icon-info: var(--color-text-info);
     --color-icon-success: var(--color-text-success);
     --color-icon-warning: var(--color-text-warning);
@@ -445,6 +447,10 @@
     --_button-radius: var(--radius-pill, 9999px);
   }
 
+  .astryx-button[data-variant="secondary"] {
+    box-shadow: inset 0 0 0 1px var(--color-border-emphasized);
+  }
+
   .astryx-badge[data-variant="neutral"] {
     background-color: var(--color-background-gray);
     color: var(--color-text-gray);
@@ -543,6 +549,10 @@
 
   .astryx-selector {
     border-radius: 9999px;
+  }
+
+  .astryx-side-nav-item {
+    margin-block-end: var(--spacing-1);
   }
 
   .astryx-text[data-color="primary"] { color: var(--color-text-primary); }

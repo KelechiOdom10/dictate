@@ -22,7 +22,6 @@ export const rosePineTheme = defineTheme({
       accent: "#575279",
       onAccent: "#faf4ed",
       accentMuted: "#f2e9e1",
-      focus: "#907aa9",
     },
     {
       body: "#1c1a29",
@@ -37,7 +36,6 @@ export const rosePineTheme = defineTheme({
       accent: "#e0def4",
       onAccent: "#191724",
       accentMuted: "#26233a",
-      focus: "#c4a7e7",
     },
   ),
   components: pillButtons,
