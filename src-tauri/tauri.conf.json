@@ -14,20 +14,35 @@
       {
         "label": "main",
         "title": "dictate",
-        "width": 460,
-        "height": 132,
+        "width": 360,
+        "height": 72,
         "resizable": false,
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "focus": false,
         "visible": false,
+        "center": true,
+        "transparent": true,
+        "focusable": false,
+        "shadow": false
+      },
+      {
+        "label": "settings",
+        "title": "dictate Settings",
+        "url": "index.html?window=settings",
+        "width": 820,
+        "height": 680,
+        "minWidth": 640,
+        "minHeight": 480,
+        "visible": false,
         "center": true
       }
     ],
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
@@ -38,6 +53,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }
