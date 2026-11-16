@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>dictate icon draft A: Ember wave</title>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBFAF8"/>
+      <stop offset="1" stop-color="#EDE9E3"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS grid: 824px rounded square inset 100px, ~185px corner -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#paper)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#1C1A18" stroke-opacity=".08"/>
+  <!-- Five bars echo the tray glyph; the middle one is the live ember -->
+  <g stroke-linecap="round" stroke-width="64">
+    <line x1="312" y1="462" x2="312" y2="562" stroke="#1C1A18"/>
+    <line x1="412" y1="392" x2="412" y2="632" stroke="#1C1A18"/>
+    <line x1="512" y1="312" x2="512" y2="712" stroke="#DF5822"/>
+    <line x1="612" y1="372" x2="612" y2="652" stroke="#1C1A18"/>
+    <line x1="712" y1="442" x2="712" y2="582" stroke="#1C1A18"/>
+  </g>
+</svg>

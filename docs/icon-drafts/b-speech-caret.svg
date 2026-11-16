@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>dictate icon draft B: Speech to caret</title>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#F5F3F0"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#1C1A18" stroke-opacity=".08"/>
+  <!-- A hand-drawn speech bubble in ink: slightly uneven stroke, open tail -->
+  <path d="M300 330
+           C 300 290, 330 262, 372 262
+           L 652 258
+           C 696 258, 726 288, 726 332
+           L 728 560
+           C 728 604, 698 632, 654 632
+           L 452 634
+           L 342 742
+           L 380 634
+           C 330 634, 300 604, 300 562 Z"
+        fill="#FFFEFE" stroke="#1C1A18" stroke-width="40" stroke-linejoin="round"/>
+  <!-- Typed words become a text caret: speech in, text out -->
+  <g stroke-linecap="round">
+    <line x1="384" y1="400" x2="560" y2="400" stroke="#635D54" stroke-width="34"/>
+    <line x1="384" y1="490" x2="500" y2="490" stroke="#635D54" stroke-width="34"/>
+    <line x1="610" y1="356" x2="610" y2="534" stroke="#DF5822" stroke-width="40"/>
+  </g>
+</svg>
