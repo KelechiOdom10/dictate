@@ -416,7 +416,13 @@ mod tests {
     fn unknown_theme_falls_back_to_ember_and_keeps_other_settings() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        for theme in [r#""dracula""#, r#""Ember""#, "42", "null", r#"{"id":"capy"}"#] {
+        for theme in [
+            r#""dracula""#,
+            r#""Ember""#,
+            "42",
+            "null",
+            r#"{"id":"capy"}"#,
+        ] {
             fs::write(
                 &path,
                 format!(r#"{{"shortcut":"Control+KeyD","theme":{theme},"appearanceMode":"dark"}}"#),
