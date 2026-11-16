@@ -2015,9 +2015,8 @@ pub fn run() {
             }
             surface::setup(app, &settings)?;
             annotate_ui::setup(app)?;
-            if let Some(window) = app.get_webview_window("main") {
-                window.set_ignore_cursor_events(false)?;
-                window.set_focusable(false)?;
+            if let Err(error) = overlay::setup(app) {
+                log::warn!("[overlay] capsule panel: {error}");
             }
             if let Some(error) = &startup_error {
                 report_error(app.handle(), error);

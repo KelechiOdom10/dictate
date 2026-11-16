@@ -27,6 +27,7 @@
 use std::time::Duration;
 
 use crate::package::{Display, Rect, Stroke};
+use crate::settings::OverlayPosition;
 
 /// A press shorter than this, that also moved less than `TAP_MAX_MOVE_PT`, is
 /// a tap. Tune both from the hands-on R2 run (`docs/spike-results.md`).
@@ -324,13 +325,11 @@ impl Ink {
     }
 }
 
-/// The display that contains a global point, or the first one if none does
-/// (the pointer sits on a display edge, or the list is stale).
+/// The display that contains a global point; the caller chooses the fallback.
 pub fn display_at(displays: &[Display], x: f64, y: f64) -> Option<&Display> {
     displays
         .iter()
         .find(|display| contains(&display.frame, x, y))
-        .or(displays.first())
 }
 
 fn contains(frame: &Rect, x: f64, y: f64) -> bool {
@@ -349,15 +348,20 @@ pub fn cocoa_frame(frame: &Rect, primary_height: f64) -> Rect {
     }
 }
 
-/// Where the floating bar sits: centred near the bottom of the display.
+/// Where the floating bar sits: centred near the selected display edge.
 pub const BAR_WIDTH: f64 = 168.0;
 pub const BAR_HEIGHT: f64 = 44.0;
 const BAR_MARGIN: f64 = 48.0;
+/// Distance from the display edge to the bar's far side.
+pub const BAR_CLEARANCE: f64 = BAR_MARGIN + BAR_HEIGHT;
 
-pub fn bar_frame(display: &Rect) -> Rect {
+pub fn bar_frame(display: &Rect, position: OverlayPosition) -> Rect {
     Rect {
         x: display.x + (display.w - BAR_WIDTH) / 2.0,
-        y: display.y + display.h - BAR_HEIGHT - BAR_MARGIN,
+        y: match position {
+            OverlayPosition::Top => display.y + BAR_MARGIN,
+            OverlayPosition::Bottom => display.y + display.h - BAR_HEIGHT - BAR_MARGIN,
+        },
         w: BAR_WIDTH,
         h: BAR_HEIGHT,
     }
@@ -511,8 +515,7 @@ mod tests {
         );
         // The right and bottom edges belong to the next display.
         assert_eq!(display_at(&displays, 1000.0, 0.0).unwrap().frame.x, 1000.0);
-        // Nowhere: fall back to the first, the main display.
-        assert_eq!(display_at(&displays, -50.0, 900.0).unwrap().frame.x, 0.0);
+        assert!(display_at(&displays, -50.0, 900.0).is_none());
         assert!(display_at(&[], 0.0, 0.0).is_none());
     }
 
@@ -573,14 +576,32 @@ mod tests {
 
     #[test]
     fn the_bar_sits_centred_near_the_bottom_of_the_recorded_display() {
-        let frame = bar_frame(&Rect {
+        let frame = bar_frame(
+            &Rect {
+                x: -1920.0,
+                y: -1080.0,
+                w: 1920.0,
+                h: 1080.0,
+            },
+            OverlayPosition::Bottom,
+        );
+        assert_eq!(frame.x, -1920.0 + (1920.0 - BAR_WIDTH) / 2.0);
+        assert_eq!(frame.y + frame.h, -BAR_MARGIN);
+    }
+
+    #[test]
+    fn the_bar_sits_centred_near_the_top_when_the_overlay_is_set_to_top() {
+        let display = Rect {
             x: -1920.0,
             y: -1080.0,
             w: 1920.0,
             h: 1080.0,
-        });
-        assert_eq!(frame.x, -1920.0 + (1920.0 - BAR_WIDTH) / 2.0);
-        assert_eq!(frame.y + frame.h, -BAR_MARGIN);
+        };
+        let top = bar_frame(&display, OverlayPosition::Top);
+        assert_eq!(top.x, -1920.0 + (1920.0 - BAR_WIDTH) / 2.0);
+        assert_eq!(top.y, -1080.0 + BAR_MARGIN);
+        assert_eq!((top.w, top.h), (BAR_WIDTH, BAR_HEIGHT));
+        assert!(top.y < bar_frame(&display, OverlayPosition::Bottom).y);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Which app the user was in when they started a take.
+//! The app and display active when the user starts a take.
 
 #[cfg(target_os = "macos")]
 pub fn frontmost_app() -> Option<String> {
@@ -103,4 +103,232 @@ pub fn editable_target() -> bool {
 #[cfg(not(target_os = "macos"))]
 pub fn editable_target() -> bool {
     false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn focused_window_center() -> Option<(f64, f64)> {
+    None
+}
+
+/// How long one Accessibility call may wait on the focused app. The default is
+/// about 6 s, which would stall the hotkey on a hung app; past this we fall
+/// back to the main display.
+#[cfg(target_os = "macos")]
+const AX_TIMEOUT_SECONDS: f32 = 0.1;
+
+#[cfg(target_os = "macos")]
+pub fn focused_window_center() -> Option<(f64, f64)> {
+    use core_foundation::{
+        base::{CFType, CFTypeID, CFTypeRef, TCFType},
+        string::{CFString, CFStringRef},
+    };
+    use core_graphics::geometry::{CGPoint, CGSize};
+    use std::ffi::c_void;
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXUIElementCreateSystemWide() -> CFTypeRef;
+        fn AXUIElementSetMessagingTimeout(element: CFTypeRef, timeout: f32) -> i32;
+        fn AXUIElementCopyAttributeValue(
+            element: CFTypeRef,
+            attribute: CFStringRef,
+            value: *mut CFTypeRef,
+        ) -> i32;
+        fn AXValueGetTypeID() -> CFTypeID;
+        fn AXValueGetType(value: CFTypeRef) -> u32;
+        fn AXValueGetValue(value: CFTypeRef, kind: u32, output: *mut c_void) -> bool;
+    }
+    fn attribute(element: &CFType, name: &str) -> Option<CFType> {
+        let mut value = std::ptr::null();
+        // SAFETY: element and key remain alive for the call; successful Copy returns an owned CF object.
+        let result = unsafe {
+            AXUIElementCopyAttributeValue(
+                element.as_CFTypeRef(),
+                CFString::new(name).as_concrete_TypeRef(),
+                &mut value,
+            )
+        };
+        if result != 0 || value.is_null() {
+            return None;
+        }
+        // SAFETY: checked successful Copy ownership above.
+        Some(unsafe { CFType::wrap_under_create_rule(value) })
+    }
+    // SAFETY: CreateSystemWide takes no arguments and returns an owned accessibility element.
+    let system = unsafe { CFType::wrap_under_create_rule(AXUIElementCreateSystemWide()) };
+    let limit = |element: &CFType| {
+        // SAFETY: element is a live AXUIElement for the duration of the call.
+        unsafe { AXUIElementSetMessagingTimeout(element.as_CFTypeRef(), AX_TIMEOUT_SECONDS) }
+    };
+    limit(&system);
+    let app = attribute(&system, "AXFocusedApplication")?;
+    limit(&app);
+    let window = attribute(&app, "AXFocusedWindow")?;
+    let position = attribute(&window, "AXPosition")?;
+    let size = attribute(&window, "AXSize")?;
+    let mut point = CGPoint::new(0.0, 0.0);
+    let mut dimensions = CGSize::new(0.0, 0.0);
+    // SAFETY: AXValue type checks establish the output layouts: CGPoint=1 and CGSize=2.
+    let valid = unsafe {
+        position.type_of() == AXValueGetTypeID()
+            && size.type_of() == AXValueGetTypeID()
+            && AXValueGetType(position.as_CFTypeRef()) == 1
+            && AXValueGetType(size.as_CFTypeRef()) == 2
+            && AXValueGetValue(
+                position.as_CFTypeRef(),
+                1,
+                (&mut point as *mut CGPoint).cast(),
+            )
+            && AXValueGetValue(
+                size.as_CFTypeRef(),
+                2,
+                (&mut dimensions as *mut CGSize).cast(),
+            )
+    };
+    if !valid {
+        return None;
+    }
+    window_center((point.x, point.y), (dimensions.width, dimensions.height))
+}
+
+fn window_center(position: (f64, f64), size: (f64, f64)) -> Option<(f64, f64)> {
+    let (x, y) = position;
+    let (width, height) = size;
+    let center = (x + width / 2.0, y + height / 2.0);
+    (x.is_finite()
+        && y.is_finite()
+        && width.is_finite()
+        && height.is_finite()
+        && width > 0.0
+        && height > 0.0
+        && center.0.is_finite()
+        && center.1.is_finite())
+    .then_some(center)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn pointer() -> Option<(f64, f64)> {
+    None
+}
+
+/// Global pointer position in display points, top-left origin.
+#[cfg(target_os = "macos")]
+pub fn pointer() -> Option<(f64, f64)> {
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let point = CGEvent::new(source).ok()?.location();
+    Some((point.x, point.y))
+}
+
+/// The display holding the focused window's centre, else the pointer.
+fn selected_display(
+    displays: &[crate::package::Display],
+    focused: Option<(f64, f64)>,
+    pointer: Option<(f64, f64)>,
+) -> Option<&crate::package::Display> {
+    [focused, pointer]
+        .into_iter()
+        .flatten()
+        .find_map(|(x, y)| crate::ink::display_at(displays, x, y))
+}
+
+/// The display a take or session belongs to, falling back to the main display.
+#[cfg(target_os = "macos")]
+pub fn active_display() -> crate::package::Display {
+    use core_graphics::display::CGDisplay;
+    fn describe(display: CGDisplay) -> crate::package::Display {
+        let bounds = display.bounds();
+        crate::package::Display {
+            id: display.id,
+            frame: crate::package::Rect {
+                x: bounds.origin.x,
+                y: bounds.origin.y,
+                w: bounds.size.width,
+                h: bounds.size.height,
+            },
+            scale: if bounds.size.width > 0.0 {
+                display.pixels_wide() as f64 / bounds.size.width
+            } else {
+                1.0
+            },
+        }
+    }
+    let displays: Vec<_> = CGDisplay::active_displays()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| describe(CGDisplay::new(id)))
+        .collect();
+    selected_display(&displays, focused_window_center(), pointer())
+        .cloned()
+        .unwrap_or_else(|| describe(CGDisplay::main()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{selected_display, window_center};
+    use crate::package::{Display, Rect};
+
+    fn display(id: u32, x: f64, y: f64, w: f64, h: f64) -> Display {
+        Display {
+            id,
+            frame: Rect { x, y, w, h },
+            scale: 2.0,
+        }
+    }
+
+    fn displays() -> Vec<Display> {
+        vec![
+            display(1, 0.0, 0.0, 1512.0, 982.0),
+            display(2, -1920.0, -1080.0, 1920.0, 1080.0),
+        ]
+    }
+
+    #[test]
+    fn the_focused_window_wins_over_the_pointer() {
+        let displays = displays();
+        let chosen = selected_display(&displays, Some((-900.0, -500.0)), Some((10.0, 10.0)));
+        assert_eq!(chosen.unwrap().id, 2);
+    }
+
+    #[test]
+    fn the_pointer_decides_when_no_window_is_focused_or_it_is_off_screen() {
+        let displays = displays();
+        assert_eq!(
+            selected_display(&displays, None, Some((-1.0, -1.0)))
+                .unwrap()
+                .id,
+            2
+        );
+        assert_eq!(
+            selected_display(&displays, Some((5000.0, 5000.0)), Some((100.0, 100.0)))
+                .unwrap()
+                .id,
+            1
+        );
+    }
+
+    #[test]
+    fn edges_belong_to_the_next_display_and_nowhere_means_no_choice() {
+        let displays = displays();
+        assert_eq!(
+            selected_display(&displays, Some((0.0, 0.0)), None)
+                .unwrap()
+                .id,
+            1
+        );
+        assert!(selected_display(&displays, Some((1512.0, 10.0)), None).is_none());
+        assert!(selected_display(&displays, None, None).is_none());
+        assert!(selected_display(&[], Some((0.0, 0.0)), Some((0.0, 0.0))).is_none());
+    }
+
+    #[test]
+    fn a_window_centre_needs_a_real_size() {
+        assert_eq!(
+            window_center((-100.0, 20.0), (200.0, 40.0)),
+            Some((0.0, 40.0))
+        );
+        assert!(window_center((0.0, 0.0), (0.0, 40.0)).is_none());
+        assert!(window_center((f64::NAN, 0.0), (10.0, 10.0)).is_none());
+        assert!(window_center((0.0, 0.0), (f64::INFINITY, 10.0)).is_none());
+    }
 }
