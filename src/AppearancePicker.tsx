@@ -67,7 +67,7 @@ export function AppearancePicker({
     <Card>
       <VStack gap={4}>
         <HStack gap={4} hAlign="between" vAlign="center">
-          <VStack gap={0}>
+          <VStack gap={1}>
             <Text weight="medium">Mode</Text>
             <Text type="supporting">Follow your Mac, or choose a look.</Text>
           </VStack>
@@ -89,7 +89,6 @@ export function AppearancePicker({
         </HStack>
         <RadioList
           label="Theme"
-          description="Each theme has a light and a dark side."
           value={theme}
           isDisabled={disabled}
           onChange={(value) =>

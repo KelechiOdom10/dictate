@@ -284,10 +284,15 @@ html {
 .ui-capsule .ui-timer {
   white-space: nowrap;
 }
+/* Stacked model metrics: one metric per line, label beside a fixed-width
+   meter, so the values line up without the label wrapping. */
+.ui-metric-label {
+  min-inline-size: 4.5rem;
+}
 meter.ui-rating {
   flex-shrink: 0;
-  width: 44px;
-  height: 4px;
+  width: 96px;
+  height: 5px;
   appearance: none;
   border: 0;
   background: var(--color-neutral);

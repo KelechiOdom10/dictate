@@ -195,7 +195,7 @@ function Detail({
     <Card role="region" aria-label={title}>
       <VStack gap={4}>
         <HStack gap={2} hAlign="between" vAlign="start">
-          <VStack gap={0}>
+          <VStack gap={1}>
             <Heading level={2}>{title}</Heading>
             <Text type="supporting">{subtitle}</Text>
           </VStack>

@@ -1518,3 +1518,87 @@ test("the sidebar sits a step behind the page in every theme and mode", async ({
     }
   }
 });
+
+test("the model metrics stack one metric per line", async ({ page }) => {
+  await openSettings(page, { pendingPage: "Models" });
+  const card = page.locator('section[aria-label="Small English"]');
+  await expect(card).toBeVisible();
+  const rows = await card.evaluate((el) => {
+    const stack = el.querySelector(".ui-model-metrics")!;
+    return [...stack.children].map((row) => ({
+      height: Math.round(row.getBoundingClientRect().height),
+      parts: [...row.children].map((part) => {
+        const box = part.getBoundingClientRect();
+        return {
+          height: Math.round(box.height),
+          top: Math.round(box.top),
+          left: Math.round(box.left),
+          text: (part.textContent ?? "").trim(),
+        };
+      }),
+    }));
+  });
+  expect(rows).toHaveLength(3);
+  for (const row of rows) {
+    expect(row.height).toBeLessThanOrEqual(24);
+    for (const part of row.parts) expect(part.height).toBeLessThanOrEqual(24);
+  }
+  expect(rows.map((row) => row.parts[0].text)).toEqual([
+    "Accuracy",
+    "Speed",
+    "Size",
+  ]);
+  expect(new Set(rows.map((row) => row.parts[0].left)).size).toBe(1);
+  for (let index = 1; index < rows.length; index++)
+    expect(rows[index].parts[0].top).toBeGreaterThan(
+      rows[index - 1].parts[0].top,
+    );
+});
+
+test("a label and its description never run together", async ({ page }) => {
+  const names = [
+    "General",
+    "Appearance",
+    "Models",
+    "Annotate",
+    "History",
+    "Output",
+    "Advanced",
+    "About",
+  ];
+  await openSettings(page);
+  for (const name of names) {
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name, exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name, exact: true, level: 1 }),
+    ).toBeVisible();
+    const touching = await page.getByRole("main").evaluate((main) =>
+      [
+        ...main.querySelectorAll(
+          ".astryx-text, .astryx-heading, .astryx-field-label",
+        ),
+      ]
+        .map((el) => {
+          const next = el.nextElementSibling;
+          if (!next || !(next.textContent ?? "").trim()) return null;
+          const above = el.getBoundingClientRect();
+          const below = next.getBoundingClientRect();
+          if (!above.height || !below.height) return null;
+          if (!el.checkVisibility() || !next.checkVisibility()) return null;
+          const stacked = Math.abs(above.left - below.left) < 2;
+          const gap = Math.round(below.top - above.bottom);
+          if (!stacked || gap > 1 || gap < 0) return null;
+          return {
+            label: (el.textContent ?? "").slice(0, 40),
+            description: (next.textContent ?? "").slice(0, 40),
+            gap,
+          };
+        })
+        .filter(Boolean),
+    );
+    expect(touching, `${name} stacks a label on its description`).toEqual([]);
+  }
+});

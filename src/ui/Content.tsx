@@ -7,10 +7,6 @@ import { Card } from "@astryxdesign/core/Card";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
 import { Link } from "@astryxdesign/core/Link";
-import {
-  MetadataList,
-  MetadataListItem,
-} from "@astryxdesign/core/MetadataList";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
@@ -50,29 +46,30 @@ function Metrics({
   size: string;
 }) {
   return (
-    <MetadataList
-      columns={3}
-      label={{ position: "start", width: "var(--spacing-12)" }}
-    >
+    <VStack className="ui-model-metrics" gap={1}>
       {ratings.map((rating) => (
-        <MetadataListItem key={rating.label} label={rating.label}>
-          <HStack gap={1} vAlign="center">
-            <meter
-              className="ui-rating"
-              min={0}
-              max={1}
-              value={rating.value}
-              aria-label={`${name} ${rating.label.toLowerCase()}`}
-              aria-valuetext={rating.text}
-            />
-            <Text type="supporting">{rating.text}</Text>
-          </HStack>
-        </MetadataListItem>
+        <HStack key={rating.label} gap={2} vAlign="center">
+          <Text type="supporting" className="ui-metric-label">
+            {rating.label}
+          </Text>
+          <meter
+            className="ui-rating"
+            min={0}
+            max={1}
+            value={rating.value}
+            aria-label={`${name} ${rating.label.toLowerCase()}`}
+            aria-valuetext={rating.text}
+          />
+          <Text type="supporting">{rating.text}</Text>
+        </HStack>
       ))}
-      <MetadataListItem label="Size">
+      <HStack gap={2} vAlign="center">
+        <Text type="supporting" className="ui-metric-label">
+          Size
+        </Text>
         <Text type="supporting">{size}</Text>
-      </MetadataListItem>
-    </MetadataList>
+      </HStack>
+    </VStack>
   );
 }
 
