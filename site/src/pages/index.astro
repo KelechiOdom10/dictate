@@ -9,50 +9,28 @@ const requirement = `Apple silicon, macOS 15 or later, ${release.size}`;
 
 const shotSizes = "(min-width: 64rem) 60rem, calc(100vw - 2.5rem)";
 
-const frameSizes = "(min-width: 56rem) 420px, calc(100vw - 5rem)";
+const takeSizes = "(min-width: 40rem) 34rem, calc(100vw - 2.5rem)";
 
 const steps = [
-  { id: "record", name: "Record", text: "Tap Option-Shift-A to record your screen and voice." },
-  { id: "draw", name: "Draw", text: "Hold the shortcut and move the pointer. Ink follows, then fades." },
-  { id: "talk", name: "Talk", text: "Say what you are pointing at." },
-  { id: "copy", name: "Copy", text: "Tap again. A summary is on your clipboard, pointing at the package." },
+  { id: "record", name: "Record" },
+  { id: "draw", name: "Draw" },
+  { id: "talk", name: "Talk" },
+  { id: "copy", name: "Copy" },
 ];
 
-const frames = [
-  {
-    id: "record",
-    at: "00:06",
-    caption: "Recording. The toolbar keeps time at the top of the screen.",
-    alt: "The Annotate toolbar above dictate's settings window, six seconds into a real take. It reads 00:06.",
-  },
-  {
-    id: "draw",
-    at: "0:21",
-    caption: "stroke across x 0.24–0.77, y 0.57–0.73",
-    alt: "A red ink loop drawn at 0:21 around the Input level row and the Test microphone button.",
-  },
-  {
-    id: "talk",
-    at: "0:54",
-    quote: true,
-    caption: "I'd rather it starts with like the segmented stuff already so that when you click test it just starts listening",
-    alt: "At 0:53, mid microphone test, a second ink loop around Input level and its segmented meter, beside Stop test.",
-  },
-];
-
-const files = [
-  { name: "recording.mp4", size: "13.4 MB" },
-  { name: "audio.wav", size: "4.4 MB" },
-  { name: "frames/ (10)", size: "7.3 MB" },
-  { name: "frames-full/ (10)", size: "16.2 MB" },
-  { name: "contact-sheet.png", size: "1.4 MB" },
-  { name: "annotation.json", size: "45 KB" },
-  { name: "summary.md", size: "on your clipboard", pasted: true },
-];
+const quote =
+  "And if you notice here, I can kind of come in here and choose okay for light mode, maybe I use Ember, right?";
 
 const summary = [
-  "#3 (0:21) stroke across x 0.24–0.77, y 0.57–0.73 — “microphone Right, clicking test microphone. Look”",
-  "#9 (0:54) stroke across x 0.24–0.75, y 0.60–0.73 (2 strokes) — “I'd rather it starts with like the segmented stuff already so that when you click”",
+  "[annotation 2:20 · T3 Code (Nightly)]",
+  "- #5 (0:53) circled region",
+  "  x 0.32–0.88, y 0.14–0.72",
+  "  — “And if you notice here, I can kind",
+  "    of come in here and choose okay”",
+  "- #6 (1:05) circled region",
+  "  x 0.34–0.91, y 0.13–0.82",
+  "  — “for light mode, maybe I use Ember,",
+  "    right?”",
 ];
 
 const settingsAlt =
@@ -198,83 +176,60 @@ const settingsAlt =
         </figure>
       </section>
 
-      <section class="wrap section annotate" aria-labelledby="annotate-title">
-        <div class="annotate-copy">
+      <section class="wrap section annotate" aria-labelledby="annotate-title" data-annotate data-step="record">
+        <div class="annotate-head">
           <h2 id="annotate-title">Annotate</h2>
-          <div class="steps" role="tablist" aria-label="Annotate, step by step" aria-orientation="vertical">
-            {
-              steps.map((step, i) => (
-                <button
-                  class="step"
-                  type="button"
-                  role="tab"
-                  id={`step-${step.id}`}
-                  aria-controls={`panel-${step.id}`}
-                  aria-selected={i === 0 ? "true" : "false"}
-                  tabindex={i === 0 ? 0 : -1}
-                  data-step
-                >
-                  <span class="step-n" aria-hidden="true">{i + 1}</span>
-                  <span class="step-name">{step.name}</span>
-                  <span class="step-text">{step.text}</span>
-                </button>
-              ))
-            }
-          </div>
+          <p class="lead">Circle the thing. Say what's wrong. Paste one summary into your agent.</p>
         </div>
-
-        <div class="panels">
+        <div class="pills" role="tablist" aria-label="Annotate, step by step">
           {
-            frames.map((frame, i) => (
-              <div
-                class="panel"
-                role="tabpanel"
-                id={`panel-${frame.id}`}
-                aria-labelledby={`step-${frame.id}`}
-                tabindex="0"
-                hidden={i > 0}
+            steps.map((step, i) => (
+              <button
+                type="button"
+                role="tab"
+                id={`step-${step.id}`}
+                aria-controls="take"
+                aria-selected={i === 0 ? "true" : "false"}
+                tabindex={i === 0 ? 0 : -1}
+                data-step={step.id}
               >
-                <figure>
-                  <img
-                    src={`/app/annotate-${frame.id}.webp`}
-                    srcset={`/app/annotate-${frame.id}-420.webp 420w, /app/annotate-${frame.id}.webp 840w`}
-                    sizes={frameSizes}
-                    width="840"
-                    height="420"
-                    alt={frame.alt}
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  <figcaption>
-                    <span class="at">{frame.at}</span>
-                    <span class={frame.quote ? "said" : undefined}>{frame.caption}</span>
-                  </figcaption>
-                </figure>
-              </div>
+                <span class="n" aria-hidden="true">{i + 1}</span>
+                {step.name}
+              </button>
             ))
           }
-          <div class="panel panel-copy" role="tabpanel" id="panel-copy" aria-labelledby="step-copy" tabindex="0" hidden>
-            <p class="copied">
-              <span class="capsule capsule-copied"><Icon name="clipboard" />Copied — paste it anywhere</span>
-              <span class="meta">Packaged in 1.5 s</span>
-            </p>
-            <ul class="files">
-              {
-                files.map((file) => (
-                  <li class={file.pasted ? "pasted" : undefined}>
-                    {file.name}
-                    <span>{file.size}</span>
-                  </li>
-                ))
-              }
-            </ul>
-            <figure>
-              <figcaption class="at">summary.md</figcaption>
-              <ol class="summary">
-                {summary.map((line) => <li>{line}</li>)}
-              </ol>
-            </figure>
-          </div>
+        </div>
+        <div class="take" id="take" role="tabpanel" aria-labelledby="step-record" tabindex="0">
+          <img
+            class="layer layer-clean"
+            src="/app/take-clean.webp"
+            srcset="/app/take-clean-640.webp 640w, /app/take-clean.webp 1200w"
+            sizes={takeSizes}
+            width="1200"
+            height="953"
+            alt="T3 Code's Appearance settings during a real take. The Annotate bar at the top reads 00:45."
+            loading="lazy"
+            decoding="async"
+          />
+          <img
+            class="layer layer-ink"
+            src="/app/take-ink.webp"
+            srcset="/app/take-ink-640.webp 640w, /app/take-ink.webp 1200w"
+            sizes={takeSizes}
+            width="1200"
+            height="953"
+            alt="The same screen at 00:53, with a red ink loop drawn around the color schemes and themes."
+            loading="lazy"
+            decoding="async"
+          />
+          <figure class="layer layer-quote">
+            <blockquote>{quote}</blockquote>
+            <figcaption><span class="mono">0:53</span> said while circling</figcaption>
+          </figure>
+          <figure class="layer layer-code">
+            <figcaption><span>summary.md</span><span class="copied">Copied · packaged in 2.2 s</span></figcaption>
+            <pre>{summary.join("\n")}</pre>
+          </figure>
         </div>
       </section>
     </main>
@@ -348,23 +303,25 @@ const settingsAlt =
       });
       window.addEventListener("blur", stop);
 
-      const tabs = [...document.querySelectorAll<HTMLButtonElement>("[data-step]")];
+      const annotate = document.querySelector<HTMLElement>("[data-annotate]")!;
+      const take = document.getElementById("take")!;
+      const tabs = [...annotate.querySelectorAll<HTMLButtonElement>("[role=tab]")];
       const select = (next: HTMLButtonElement) => {
         for (const tab of tabs) {
-          const on = tab === next;
-          tab.setAttribute("aria-selected", String(on));
-          tab.tabIndex = on ? 0 : -1;
-          document.getElementById(tab.getAttribute("aria-controls")!)!.hidden = !on;
+          tab.setAttribute("aria-selected", String(tab === next));
+          tab.tabIndex = tab === next ? 0 : -1;
         }
+        annotate.dataset.step = next.dataset.step;
+        take.setAttribute("aria-labelledby", next.id);
       };
       for (const tab of tabs) {
         tab.addEventListener("click", () => select(tab));
         tab.addEventListener("keydown", (event) => {
           const at = tabs.indexOf(tab);
           const to =
-            event.key === "ArrowDown" || event.key === "ArrowRight"
+            event.key === "ArrowRight" || event.key === "ArrowDown"
               ? (at + 1) % tabs.length
-              : event.key === "ArrowUp" || event.key === "ArrowLeft"
+              : event.key === "ArrowLeft" || event.key === "ArrowUp"
                 ? (at + tabs.length - 1) % tabs.length
                 : event.key === "Home"
                   ? 0
