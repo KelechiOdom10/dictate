@@ -10,11 +10,12 @@ type Story = StoryObj<typeof meta>;
 
 function Picker({ disabled = false }: { disabled?: boolean }) {
   const [value, setValue] = useState<
-    Pick<Settings, "themeLight" | "appearanceMode">
-  >({ themeLight: "ember", appearanceMode: "system" });
+    Pick<Settings, "themeLight" | "themeDark" | "appearanceMode">
+  >({ themeLight: "ember", themeDark: "ember", appearanceMode: "system" });
   return (
     <AppearancePicker
-      theme={value.themeLight}
+      themeLight={value.themeLight}
+      themeDark={value.themeDark}
       mode={value.appearanceMode}
       disabled={disabled}
       onChange={(patch) => setValue((current) => ({ ...current, ...patch }))}
@@ -23,20 +24,32 @@ function Picker({ disabled = false }: { disabled?: boolean }) {
 }
 
 export const EveryTheme: Story = {
-  name: "AppearancePicker / every theme, mode set separately",
+  name: "AppearancePicker / a theme for each appearance",
   render: () => <Picker />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("radio", { name: /Ember/ })).toBeChecked();
-    for (const name of ["Paper", "Capy", "Rosé Pine", "Neutral"]) {
-      const radio = canvas.getByRole("radio", { name: new RegExp(name) });
-      await userEvent.click(radio);
-      await expect(radio).toBeChecked();
-    }
-    const dark = canvas.getByRole("radio", { name: "Dark" });
-    await userEvent.click(dark);
-    await expect(dark).toBeChecked();
-    await expect(canvas.getByRole("radio", { name: /Neutral/ })).toBeChecked();
+    const light = within(
+      canvas.getByRole("radiogroup", { name: "Theme in light" }),
+    );
+    const dark = within(
+      canvas.getByRole("radiogroup", { name: "Theme in dark" }),
+    );
+    await expect(light.getByRole("radio", { name: /Ember/ })).toBeChecked();
+    await expect(dark.getByRole("radio", { name: /Ember/ })).toBeChecked();
+    await userEvent.click(light.getByRole("radio", { name: /Paper/ }));
+    await expect(light.getByRole("radio", { name: /Paper/ })).toBeChecked();
+    // Picking in one column leaves the other alone.
+    await expect(dark.getByRole("radio", { name: /Ember/ })).toBeChecked();
+    await userEvent.click(dark.getByRole("radio", { name: /Capy/ }));
+    await expect(dark.getByRole("radio", { name: /Capy/ })).toBeChecked();
+    await expect(light.getByRole("radio", { name: /Paper/ })).toBeChecked();
+    // Exactly one column says it is the one on screen, whatever the mode.
+    await expect(canvas.getAllByText("In use now")).toHaveLength(1);
+    const modeDark = canvas.getByRole("radio", { name: "Dark" });
+    await userEvent.click(modeDark);
+    await expect(modeDark).toBeChecked();
+    await expect(dark.getByRole("radio", { name: /Capy/ })).toBeChecked();
+    await expect(canvas.getAllByText("In use now")).toHaveLength(1);
   },
 };
 export const Disabled: Story = {

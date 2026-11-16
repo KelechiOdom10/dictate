@@ -590,6 +590,83 @@ test("each appearance uses the theme stored for it", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
 });
 
+test("the light and dark columns choose their themes independently", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await openSettings(page);
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  const light = page.getByRole("radiogroup", { name: "Theme in light" });
+  const dark = page.getByRole("radiogroup", { name: "Theme in dark" });
+  await light.getByRole("radio", { name: /^Paper/ }).click();
+  await dark.getByRole("radio", { name: /^Capy/ }).click();
+  await expect(light.getByRole("radio", { name: /^Paper/ })).toBeChecked();
+  await expect(dark.getByRole("radio", { name: /^Capy/ })).toBeChecked();
+  // System shows the theme that belongs to the Mac's side.
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "capy");
+  // Pinning a side overrides the Mac without touching either choice.
+  await page.getByRole("radio", { name: "Light", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveAttribute("data-palette", "paper");
+  await expect(light.getByRole("radio", { name: /^Paper/ })).toBeChecked();
+});
+
+test("each column previews its own appearance and marks the one in use", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await openSettings(page);
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  const light = page.getByRole("radiogroup", { name: "Theme in light" });
+  const dark = page.getByRole("radiogroup", { name: "Theme in dark" });
+  const previewed = (column: typeof light) =>
+    column.evaluate((group) => [
+      ...new Set(
+        [...group.querySelectorAll("[data-theme]")].map((el) =>
+          el.getAttribute("data-theme"),
+        ),
+      ),
+    ]);
+  expect(await previewed(light)).toEqual(["light"]);
+  expect(await previewed(dark)).toEqual(["dark"]);
+  // Exactly one column says it is on screen. The marker sits above its own
+  // list, so counting the theme groups after it names the column: two means
+  // the light one, one the dark one.
+  const markerColumn = () =>
+    page.evaluate(() => {
+      const marker = [...document.querySelectorAll("*")].find(
+        (el) =>
+          el.childElementCount === 0 && el.textContent?.trim() === "In use now",
+      )!;
+      const groups = [...document.querySelectorAll("[role=radiogroup]")].filter(
+        (group) => {
+          const id = group.getAttribute("aria-labelledby");
+          return (
+            id &&
+            document.getElementById(id)?.textContent?.startsWith("Theme in ")
+          );
+        },
+      );
+      return groups.filter(
+        (group) =>
+          marker.compareDocumentPosition(group) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).length;
+    });
+  await expect(page.getByText("In use now")).toHaveCount(1);
+  expect(await markerColumn()).toBe(1);
+  const modeLight = page.getByRole("radio", { name: "Light", exact: true });
+  await expect(modeLight).toBeEnabled();
+  await modeLight.click();
+  await expect(modeLight).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
+  await expect(page.getByText("In use now")).toHaveCount(1);
+  expect(await markerColumn()).toBe(2);
+});
+
 const themeCases = [
   { id: "ember", name: "Ember", slug: "ember" },
   { id: "paper", name: "Paper", slug: "paper" },
@@ -607,9 +684,9 @@ for (const theme of themeCases) {
     await expect(
       page.getByRole("heading", { name: "Appearance", level: 1 }),
     ).toBeVisible();
-    const radio = page.getByRole("radio", {
-      name: new RegExp(`^${theme.name}`),
-    });
+    const radio = page
+      .getByRole("radiogroup", { name: "Theme in light" })
+      .getByRole("radio", { name: new RegExp(`^${theme.name}`) });
     await radio.click();
     await expect(radio).toBeChecked();
     await expect(page.locator("html")).toHaveAttribute(
@@ -1396,7 +1473,9 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     "Advanced",
     "About",
   ]);
-  await expect(page.getByRole("radiogroup", { name: "Theme" })).toHaveCount(0);
+  await expect(
+    page.getByRole("radiogroup", { name: /^Theme in / }),
+  ).toHaveCount(0);
   const tops = await nav.evaluateAll((items) =>
     items.map((item) => item.getBoundingClientRect()),
   );
@@ -1434,7 +1513,12 @@ test("settings polish: sidebar order, Appearance page, resting buttons, two weig
     )
     .toBe(true);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  await expect(page.getByRole("radiogroup", { name: "Theme" })).toBeVisible();
+  await expect(
+    page.getByRole("radiogroup", { name: "Theme in light" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("radiogroup", { name: "Theme in dark" }),
+  ).toBeVisible();
 });
 
 test("a model card keeps its height as its state changes, so the rows below never move", async ({
@@ -1531,8 +1615,8 @@ test("theme previews show the theme's own colours and no status words", async ({
   page,
 }) => {
   await openSettings(page, { pendingPage: "Appearance" });
-  const themes = page.getByRole("radiogroup", { name: "Theme" });
-  await expect(themes).toBeVisible();
+  const themes = page.getByRole("radiogroup", { name: /^Theme in / });
+  await expect(themes).toHaveCount(2);
   await expect(themes.locator(".astryx-badge")).toHaveCount(0);
   await expect(themes.getByText("Ready")).toHaveCount(0);
   await expect(themes.getByText("Inserted")).toHaveCount(0);

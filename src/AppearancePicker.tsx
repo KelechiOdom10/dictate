@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from "react";
 import { Card } from "@astryxdesign/core/Card";
+import { Grid } from "@astryxdesign/core/Grid";
 import { HStack } from "@astryxdesign/core/HStack";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import {
@@ -13,27 +13,19 @@ import { VStack } from "@astryxdesign/core/VStack";
 import { settingsSchema, type Settings } from "./settings";
 import {
   THEMES,
+  shownDark,
   themeFor,
+  useSystemDark,
   type AppearanceMode,
   type ThemeId,
 } from "./ui/SettingsTheme";
 
-const darkQuery = "(prefers-color-scheme: dark)";
-function useSystemDark() {
-  return useSyncExternalStore(
-    (change) => {
-      const query = matchMedia(darkQuery);
-      query.addEventListener("change", change);
-      return () => query.removeEventListener("change", change);
-    },
-    () => matchMedia(darkQuery).matches,
-  );
-}
+type Side = "light" | "dark";
 
-function Preview({ id, mode }: { id: ThemeId; mode: "light" | "dark" }) {
+function Preview({ id, mode }: { id: ThemeId; mode: Side }) {
   return (
     <Theme theme={themeFor(id)} mode={mode}>
-      <Card padding={2} width={112}>
+      <Card padding={1} width={72}>
         <VStack gap={1}>
           <HStack gap={1} vAlign="center">
             <Text type="label">Aa</Text>
@@ -42,7 +34,6 @@ function Preview({ id, mode }: { id: ThemeId; mode: "light" | "dark" }) {
           <HStack gap={1} vAlign="center">
             <StatusDot variant="success" label="Positive" />
             <StatusDot variant="warning" label="Caution" />
-            <Text type="supporting">Body text</Text>
           </HStack>
         </VStack>
       </Card>
@@ -50,19 +41,73 @@ function Preview({ id, mode }: { id: ThemeId; mode: "light" | "dark" }) {
   );
 }
 
-export function AppearancePicker({
+function ThemeColumn({
+  side,
   theme,
+  disabled,
+  isShown,
+  onChange,
+}: {
+  side: Side;
+  theme: ThemeId;
+  disabled: boolean;
+  isShown: boolean;
+  onChange: (theme: ThemeId) => void;
+}) {
+  const name = side === "light" ? "Light" : "Dark";
+  return (
+    <VStack gap={2}>
+      <VStack gap={1}>
+        <HStack gap={2} vAlign="center">
+          <Text weight="medium">{name}</Text>
+          {isShown && (
+            <HStack gap={1} vAlign="center">
+              <StatusDot variant="accent" label="Current appearance" />
+              <Text type="supporting">In use now</Text>
+            </HStack>
+          )}
+        </HStack>
+        <Text type="supporting">
+          {side === "light"
+            ? "Used when the window is light."
+            : "Used when the window is dark."}
+        </Text>
+      </VStack>
+      <RadioList
+        label={`Theme in ${side}`}
+        value={theme}
+        isDisabled={disabled}
+        onChange={(value) =>
+          onChange(settingsSchema.shape.themeLight.parse(value))
+        }
+      >
+        {THEMES.map((option) => (
+          <RadioListItem
+            key={option.id}
+            value={option.id}
+            label={option.name}
+            endContent={<Preview id={option.id} mode={side} />}
+          />
+        ))}
+      </RadioList>
+    </VStack>
+  );
+}
+
+export function AppearancePicker({
+  themeLight,
+  themeDark,
   mode,
   disabled,
   onChange,
 }: {
-  theme: ThemeId;
+  themeLight: ThemeId;
+  themeDark: ThemeId;
   mode: AppearanceMode;
   disabled: boolean;
   onChange: (patch: Partial<Settings>) => void;
 }) {
-  const systemDark = useSystemDark();
-  const shown = mode === "system" ? (systemDark ? "dark" : "light") : mode;
+  const dark = shownDark(mode, useSystemDark());
   return (
     <Card>
       <VStack gap={4}>
@@ -87,28 +132,22 @@ export function AppearancePicker({
             <SegmentedControlItem value="dark" label="Dark" />
           </SegmentedControl>
         </HStack>
-        <RadioList
-          label="Theme"
-          value={theme}
-          isDisabled={disabled}
-          onChange={(value) => {
-            const id = settingsSchema.shape.themeLight.parse(value);
-            // One list for now: this commit only carries the format change, so
-            // both appearances follow the choice. The two-column picker lands
-            // next, and dropping it leaves a coherent single list.
-            onChange({ themeLight: id, themeDark: id });
-          }}
-        >
-          {THEMES.map((option) => (
-            <RadioListItem
-              key={option.id}
-              value={option.id}
-              label={option.name}
-              description={option.description}
-              endContent={<Preview id={option.id} mode={shown} />}
-            />
-          ))}
-        </RadioList>
+        <Grid columns={{ minWidth: 200, max: 2 }} gap={4}>
+          <ThemeColumn
+            side="light"
+            theme={themeLight}
+            disabled={disabled}
+            isShown={!dark}
+            onChange={(theme) => onChange({ themeLight: theme })}
+          />
+          <ThemeColumn
+            side="dark"
+            theme={themeDark}
+            disabled={disabled}
+            isShown={dark}
+            onChange={(theme) => onChange({ themeDark: theme })}
+          />
+        </Grid>
       </VStack>
     </Card>
   );

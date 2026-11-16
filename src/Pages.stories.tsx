@@ -954,18 +954,36 @@ export const Appearance: Story = {
   render: () => <GeneralPage page="Appearance" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
-    const themes = await c.findByRole("radiogroup", { name: "Theme" });
-    const scoped = within(themes);
-    expect(themes.querySelectorAll(".astryx-badge")).toHaveLength(0);
-    expect(scoped.queryByText("Ready")).toBeNull();
-    expect(scoped.queryByText("Inserted")).toBeNull();
-    expect(scoped.getAllByRole("radio")).toHaveLength(5);
-    for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
-      expect(
-        scoped.getByRole("radio", { name: new RegExp(name) }),
-      ).toBeInTheDocument();
+    const lightGroup = await c.findByRole("radiogroup", {
+      name: "Theme in light",
+    });
+    const darkGroup = c.getByRole("radiogroup", { name: "Theme in dark" });
+    for (const group of [lightGroup, darkGroup]) {
+      const column = within(group);
+      expect(column.getAllByRole("radio")).toHaveLength(5);
+      for (const name of ["Ember", "Paper", "Capy", "Rosé Pine", "Neutral"])
+        expect(
+          column.getByRole("radio", { name: new RegExp(name) }),
+        ).toBeInTheDocument();
+      expect(group.querySelectorAll(".astryx-badge")).toHaveLength(0);
+      expect(column.queryByText("Ready")).toBeNull();
+      expect(column.queryByText("Inserted")).toBeNull();
+    }
+    // Each list is previewed in the appearance it stands for, so a dark theme
+    // never shows its light side in the Dark column.
+    for (const [group, mode] of [
+      [lightGroup, "light"],
+      [darkGroup, "dark"],
+    ] as const) {
+      const seen = [...group.querySelectorAll("[data-theme]")].map((el) =>
+        el.getAttribute("data-theme"),
+      );
+      expect(seen.length).toBeGreaterThan(0);
+      expect(new Set(seen)).toEqual(new Set([mode]));
+    }
     expect(
-      themes.querySelectorAll(".astryx-status-dot").length,
+      canvasElement.querySelectorAll("[role=radiogroup] .astryx-status-dot")
+        .length,
     ).toBeGreaterThan(5);
   },
 };
