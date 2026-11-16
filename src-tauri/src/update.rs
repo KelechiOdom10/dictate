@@ -171,7 +171,7 @@ async fn run(app: &AppHandle) -> Result<(), String> {
     );
 
     let handle = app.clone();
-    let installed = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         when_ready(
             || {
                 // Holding the runtime lock through the install keeps a
@@ -197,8 +197,7 @@ async fn run(app: &AppHandle) -> Result<(), String> {
         )
     })
     .await
-    .map_err(|e| e.to_string())?;
-    installed
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
