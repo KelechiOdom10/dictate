@@ -282,6 +282,7 @@ html {
   white-space: nowrap;
 }
 meter.ui-rating {
+  flex-shrink: 0;
   width: 64px;
   height: 6px;
   appearance: none;
@@ -289,6 +290,9 @@ meter.ui-rating {
   background: var(--color-neutral);
   border-radius: var(--radius-pill);
   overflow: hidden;
+}
+meter.ui-rating + * {
+  white-space: nowrap;
 }
 meter.ui-rating::-webkit-meter-bar {
   background: var(--color-neutral);

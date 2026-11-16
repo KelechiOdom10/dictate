@@ -171,7 +171,7 @@ export function ModelCard({
     >
       <Card variant={active ? "muted" : "default"}>
         <VStack gap={4}>
-          <HStack gap={4} hAlign="between" vAlign="start">
+          <VStack gap={3}>
             <VStack gap={1}>
               <HStack gap={2} vAlign="center">
                 <Heading level={2}>{name}</Heading>
@@ -191,7 +191,7 @@ export function ModelCard({
                 </HStack>
               )}
             </VStack>
-            <MetadataList>
+            <MetadataList columns={2}>
               {ratings.map((rating) => (
                 <MetadataListItem key={rating.label} label={rating.label}>
                   <HStack gap={2} vAlign="center">
@@ -208,7 +208,7 @@ export function ModelCard({
                 </MetadataListItem>
               ))}
             </MetadataList>
-          </HStack>
+          </VStack>
           <HStack gap={2} hAlign="between" vAlign="center">
             <HStack gap={1} vAlign="center">
               <HardDrive size={14} aria-hidden="true" />
