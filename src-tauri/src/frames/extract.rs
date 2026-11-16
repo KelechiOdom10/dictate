@@ -82,15 +82,29 @@ pub fn frames(video: &Path, times_ms: &[u64]) -> Result<Vec<Extracted>, String> 
     }
     drop(sender);
 
+    let collected = collect(&receiver, times_ms, video);
+    if collected.is_err() {
+        // SAFETY: cancelling is always allowed; pending handlers still run and
+        // their sends fail quietly once the receiver is dropped.
+        unsafe { generator.cancelAllCGImageGeneration() };
+    }
+    collected
+}
+
+type Delivery = (usize, Result<Extracted, String>);
+
+fn collect(
+    receiver: &mpsc::Receiver<Delivery>,
+    times_ms: &[u64],
+    video: &Path,
+) -> Result<Vec<Extracted>, String> {
     let deadline = Instant::now() + TIMEOUT;
     let mut out: Vec<Option<Extracted>> = times_ms.iter().map(|_| None).collect();
     for _ in times_ms {
         let wait = deadline.saturating_duration_since(Instant::now());
-        let (index, result) = receiver.recv_timeout(wait).map_err(|_| {
-            // SAFETY: cancelling is always allowed; pending handlers still run.
-            unsafe { generator.cancelAllCGImageGeneration() };
-            format!("Frame extraction timed out after {} s", TIMEOUT.as_secs())
-        })?;
+        let (index, result) = receiver
+            .recv_timeout(wait)
+            .map_err(|_| format!("Frame extraction timed out after {} s", TIMEOUT.as_secs()))?;
         let image = result.map_err(|e| {
             format!(
                 "Frame at {} ms of {}: {e}",
