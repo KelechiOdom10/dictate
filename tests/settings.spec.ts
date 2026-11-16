@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -36,6 +36,8 @@ async function openSettings(
     pendingPage = null,
     delayCapture = false,
     suspendFrames = false,
+    history = [],
+    annotations = [],
   }: {
     failLoad?: boolean;
     startupError?: { title: string; fix: string; detail: string | null } | null;
@@ -45,6 +47,8 @@ async function openSettings(
     pendingPage?: string | null;
     delayCapture?: boolean;
     suspendFrames?: boolean;
+    history?: { id: number }[];
+    annotations?: { id: string }[];
   } = {},
 ) {
   await page.route("http://dictate.test/**", async (route) => {
@@ -82,6 +86,8 @@ async function openSettings(
       pendingPage,
       delayCapture,
       suspendFrames,
+      history,
+      annotations,
     }) => {
       if (suspendFrames) window.requestAnimationFrame = () => 1;
       const denied: string[] = [];
@@ -176,6 +182,7 @@ async function openSettings(
               enabled?: boolean;
               event?: string;
               handler?: number;
+              id?: number | string;
             },
           ) => {
             commands.push(command);
@@ -245,8 +252,12 @@ async function openSettings(
               return update;
             }
             if (command === "list_history")
-              return { entries: [], hasMore: false };
-            if (command === "list_annotations") return [];
+              return { entries: history, hasMore: false };
+            if (command === "list_annotations") return annotations;
+            if (command === "delete_history")
+              history = history.filter((entry) => entry.id !== args.id);
+            if (command === "delete_annotation")
+              annotations = annotations.filter((entry) => entry.id !== args.id);
             if (command === "list_models") return models;
             if (command === "whisper_status") return null;
             if (command === "dismiss_error") {
@@ -280,6 +291,8 @@ async function openSettings(
       pendingPage,
       delayCapture,
       suspendFrames,
+      history,
+      annotations,
     },
   );
   await page.goto(
@@ -2143,3 +2156,219 @@ test("the active model card carries its own hairline, not only a badge", async (
   );
   expect(idleShadow).not.toMatch(/inset/);
 });
+
+const minuteMs = 60_000;
+const takes = Array.from({ length: 24 }, (_, index) => ({
+  id: index + 1,
+  text: `Take ${index + 1}: water the plants, then call the bank about the card.`,
+  createdAtMs: Date.now() - (index + 1) * 37 * minuteMs,
+  app: index % 2 ? "Slack" : "Notes",
+  model: "ggml-base.en",
+  audioMs: 2_400,
+  inferenceMs: 410,
+  totalMs: 650,
+  status: "pasted",
+  detail: null,
+}));
+const sessions = Array.from({ length: 14 }, (_, index) => ({
+  id: `2026-11-${String(15 - (index % 10)).padStart(2, "0")}_10-${String(index).padStart(2, "0")}-00`,
+  startedAt: new Date(Date.now() - (index + 1) * 53 * minuteMs).toISOString(),
+  durationMs: 21_000,
+  app: "Linear",
+  frames: 2,
+  marks: 2,
+  text: `Session ${index + 1}: this toggle belongs on the right.`,
+  folder: `/Users/you/Library/Application Support/com.kelechiodom.dictate/annotations/${index}`,
+  hasContactSheet: true,
+  packagingMs: 2_100,
+  partial: [],
+}));
+
+async function openHistory(page: Page, width: number, view = "Dictations") {
+  await page.setViewportSize({ width, height: 580 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openSettings(page, { history: takes, annotations: sessions });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  if (view === "Annotations")
+    await page.getByRole("radio", { name: "Annotations", exact: true }).check();
+  return page.getByRole("group", { name: view, exact: true });
+}
+
+async function expectNothingClipped(list: Locator) {
+  await expect
+    .poll(() =>
+      list.evaluate((group) => group.getAnimations({ subtree: true }).length),
+    )
+    .toBe(0);
+  const outside = await list.evaluate((group) => {
+    const box = group.getBoundingClientRect();
+    return [...group.querySelectorAll("*")]
+      .filter((el) => el.getBoundingClientRect().width > 1)
+      .filter((el) => {
+        const { left, right } = el.getBoundingClientRect();
+        return left < box.left - 1 || right > box.right + 1;
+      })
+      .map((el) => `${el.tagName} ${el.textContent?.slice(0, 40)}`);
+  });
+  expect(outside).toEqual([]);
+  expect(
+    await list.page().evaluate(() => {
+      const root = document.documentElement;
+      return root.scrollWidth - root.clientWidth;
+    }),
+  ).toBeLessThanOrEqual(0);
+}
+
+const sentCommands = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { __commands: string[] }).__commands,
+  );
+
+for (const width of [640, 720]) {
+  test(`at ${width}px a History row opens in place with copy and delete inline`, async ({
+    page,
+  }) => {
+    const list = await openHistory(page, width);
+    const row = list.getByRole("button", { name: /^Take 18:/ });
+    await expect(row).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("region", { name: "Dictation" })).toHaveCount(
+      0,
+    );
+    await row.click();
+    await expect(row).toHaveAttribute("aria-expanded", "true");
+    const detail = page.getByRole("region", { name: "Dictation" });
+    await expect(detail).toContainText("Take 18: water the plants");
+    const copy = detail.getByRole("button", { name: "Copy text" });
+    const header = (await row.boundingBox())!;
+    const copyBox = (await copy.boundingBox())!;
+    expect(copyBox.y).toBeGreaterThan(header.y);
+    expect(copyBox.y - (header.y + header.height)).toBeLessThan(80);
+    expect(copyBox.y + copyBox.height).toBeLessThanOrEqual(580);
+    await expectNothingClipped(list);
+    await copy.click();
+    await expect(detail.getByText("Copied to clipboard")).toBeAttached();
+    expect(await sentCommands(page)).toContain(
+      "plugin:clipboard-manager|write_text",
+    );
+    await detail.getByRole("button", { name: "Delete dictation" }).click();
+    await page
+      .getByRole("alertdialog", { name: "Delete this dictation?" })
+      .getByRole("button", { name: "Delete dictation" })
+      .click();
+    await expect(list.getByRole("button", { name: /^Take 18:/ })).toHaveCount(
+      0,
+    );
+    await expect(
+      list.getByRole("button", { name: /^Take 19:/ }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+}
+
+test("the narrow History list keeps one row open and announces it", async ({
+  page,
+}) => {
+  const list = await openHistory(page, 640);
+  const third = list.getByRole("button", { name: /^Take 3:/ });
+  const sixth = list.getByRole("button", { name: /^Take 6:/ });
+  await third.click();
+  await expect(third).toHaveAttribute("aria-expanded", "true");
+  const contentId = await third.getAttribute("aria-controls");
+  await expect(
+    page
+      .locator(`[id="${contentId}"]`)
+      .getByRole("region", { name: "Dictation" }),
+  ).toContainText("Take 3:");
+  expect(
+    await third.evaluate(
+      (trigger, id) =>
+        trigger.compareDocumentPosition(document.getElementById(id!)!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      contentId,
+    ),
+  ).toBeTruthy();
+  await sixth.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  const before = (await sixth.boundingBox())!.y;
+  await sixth.click();
+  await expect(sixth).toHaveAttribute("aria-expanded", "true");
+  await expect(third).toHaveAttribute("aria-expanded", "false");
+  await expect(list.locator('button[aria-expanded="true"]')).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Dictation" })).toHaveCount(1);
+  expect(Math.abs((await sixth.boundingBox())!.y - before)).toBeLessThanOrEqual(
+    1,
+  );
+  await sixth.focus();
+  await page.keyboard.press("Enter");
+  await expect(sixth).toHaveAttribute("aria-expanded", "false");
+  await expect(list.locator('button[aria-expanded="true"]')).toHaveCount(0);
+  await page.keyboard.press("Space");
+  await expect(sixth).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Tab");
+  await expect(
+    page
+      .getByRole("region", { name: "Dictation" })
+      .getByRole("button", { name: "Copy text" }),
+  ).toBeFocused();
+});
+
+test("at 640px an Annotate row opens in place with its actions, one at a time", async ({
+  page,
+}) => {
+  const list = await openHistory(page, 640, "Annotations");
+  const second = list.getByRole("button", { name: /^Session 2:/ });
+  const twelfth = list.getByRole("button", { name: /^Session 12:/ });
+  await expect(page.getByRole("region", { name: "Annotation" })).toHaveCount(0);
+  await second.click();
+  await twelfth.click();
+  await expect(second).toHaveAttribute("aria-expanded", "false");
+  await expect(twelfth).toHaveAttribute("aria-expanded", "true");
+  await expect(list.locator('button[aria-expanded="true"]')).toHaveCount(1);
+  const detail = page.getByRole("region", { name: "Annotation" });
+  await expect(detail).toContainText("Session 12:");
+  await expectNothingClipped(list);
+  for (const name of ["Copy again", "Reveal in Finder"]) {
+    const action = detail.getByRole("button", { name });
+    const box = (await action.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(580);
+    await action.click();
+  }
+  await detail.getByRole("button", { name: "Delete annotation" }).click();
+  await page
+    .getByRole("alertdialog", { name: "Delete this annotation?" })
+    .getByRole("button", { name: "Delete annotation" })
+    .click();
+  await expect(list.getByRole("button", { name: /^Session 12:/ })).toHaveCount(
+    0,
+  );
+  expect(await sentCommands(page)).toEqual(
+    expect.arrayContaining([
+      "copy_annotation",
+      "reveal_annotation",
+      "delete_annotation",
+    ]),
+  );
+});
+
+for (const view of ["Dictations", "Annotations"] as const)
+  test(`a wide window keeps the two-pane ${view} layout`, async ({ page }) => {
+    await openHistory(page, 1100, view);
+    const title = view === "Dictations" ? "Dictation" : "Annotation";
+    const first = view === "Dictations" ? /Take 1:/ : /Session 1:/;
+    const fourth = view === "Dictations" ? /Take 4:/ : /Session 4:/;
+    await expect(page.getByRole("group", { name: view })).toHaveCount(0);
+    const list = page.getByRole("list", { name: view });
+    await expect(list.locator("button[aria-expanded]")).toHaveCount(0);
+    const detail = page.getByRole("region", { name: title });
+    await expect(detail).toContainText(first);
+    const listBox = (await list.boundingBox())!;
+    const detailBox = (await detail.boundingBox())!;
+    expect(detailBox.x).toBeGreaterThan(listBox.x + listBox.width);
+    expect(Math.abs(detailBox.y - listBox.y)).toBeLessThanOrEqual(1);
+    await list.getByRole("button", { name: fourth }).click();
+    await expect(
+      list
+        .getByRole("button", { name: fourth })
+        .locator("xpath=ancestor::*[@aria-current][1]"),
+    ).toHaveAttribute("aria-current", "true");
+    await expect(detail).toContainText(fourth);
+    await expect(detail.getByRole("heading", { name: title })).toBeVisible();
+  });
