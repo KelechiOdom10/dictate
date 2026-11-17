@@ -1,11 +1,11 @@
 {
-  "version": "0.1.1",
-  "notes": "First build of dictate: hold a key and speak, Annotate on screen, five themes, and updates that install themselves.",
-  "pub_date": "2026-11-16T19:25:54Z",
+  "version": "0.1.2",
+  "notes": "Selection markers, faster Appearance picker, storage on both History tabs, quiet takes are transcribed instead of dropped.",
+  "pub_date": "2026-11-17T04:25:01Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdnU2TjhmTHpaVXJpdk10cUpXNGhwMWV0TTFWZ0xJdUhQUDgyNGsxNnBSMkx6SGFUUDczOGh5YVdiMmVLdW8vaDVvMHdFNVFKb3dNaG5QeFdMdnNSelhYamgybFgwa0F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODU3MDk0CWZpbGU6ZGljdGF0ZS0wLjEuMS1hcm02NC5hcHAudGFyLmd6CjVoSDdha2tMZU5rVTliSHp0WGh0bHlOMnQzbTF6akhmOC83WWFnLzM1VnNMd2dYOWw3c05jK3Uxb3hyaFNnRlp1UU9IeEJVcFU2di9aaFpCL0xnQkRRPT0K",
-      "url": "https://dictate.kellycooks.dev/updates/dictate-0.1.1-arm64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdnU2TjhmTHpaVWxDTEhyY1JYSVE4YmFpUWUrNW5Db1RBb0RQVG9Oc1dsK2VJTkI0dVplVGQya3RaSE5JQnZZdks4UnlwYmQzUEFkSkNNWFBOcm53SXVldHlXNTNGcXdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODg5NDcwCWZpbGU6ZGljdGF0ZS0wLjEuMi1hcm02NC5hcHAudGFyLmd6CmJyZ0YxLzlycFR5OEVUanpsZWpycXhlWXRUQ1lLUEx2Y1kyaDE1ZVBYLzlCMkw2cFVQdjFpMDAvRTRxNG53K3k1d3MrZ3VGcFYxT2tic21KS0xPdURnPT0K",
+      "url": "https://dictate.kellycooks.dev/updates/dictate-0.1.2-arm64.app.tar.gz"
     }
   }
 }
