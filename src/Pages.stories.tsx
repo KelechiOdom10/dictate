@@ -465,23 +465,30 @@ const layoutOf = (...elements: HTMLElement[]) =>
     const { top, left, height, width } = element.getBoundingClientRect();
     return { top, left, height, width };
   });
+const longHistory = (now: number): HistoryEntry[] =>
+  Array.from({ length: 4 }, (_, round) =>
+    sampleHistory(now - round * 7 * 24 * 60 * minute).map((entry) => ({
+      ...entry,
+      id: entry.id + round * 100,
+    })),
+  ).flat();
 export const HistorySelecting: Story = {
   name: "History / selecting",
-  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  beforeEach: ({ globals }) => mockApp(globals, longHistory(Date.now())),
   render: () => <GeneralPage page="History" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     await userEvent.click(await c.findByRole("button", { name: "Select" }));
-    await userEvent.click(
-      c.getByRole("checkbox", { name: /^Select Ship the history/ }),
-    );
-    await userEvent.click(
-      c.getByRole("checkbox", { name: /^Select No speech/ }),
-    );
-    await expect(c.getByText("2 selected")).toBeInTheDocument();
+    const [ship, nothing] = [
+      c.getAllByRole("checkbox", { name: /^Select Ship the history/ })[0]!,
+      c.getAllByRole("checkbox", { name: /^Select No speech/ })[0]!,
+    ];
+    await userEvent.click(ship);
+    await userEvent.click(nothing);
     const bar = c.getByRole("toolbar", { name: "Selected dictations" });
+    await expect(within(bar).getByText("2 selected")).toBeInTheDocument();
     await expect(
-      within(bar).getByRole("button", { name: "Delete 2…" }),
+      within(bar).getByRole("button", { name: "Delete" }),
     ).toBeEnabled();
     await expect(
       c.getByRole("region", { name: "Dictation" }),
@@ -490,17 +497,17 @@ export const HistorySelecting: Story = {
 };
 export const HistorySelectingNarrow: Story = {
   name: "History / selecting, narrow",
-  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  beforeEach: ({ globals }) => mockApp(globals, longHistory(Date.now())),
   render: () => <GeneralPage page="History" width={640} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     await userEvent.click(await c.findByRole("button", { name: "Select" }));
-    const all = c.getByRole("checkbox", { name: "Select all 5 shown" });
+    const all = c.getByRole("checkbox", { name: "Select all 20 shown" });
     await userEvent.click(all);
     await expect(all).toBeChecked();
-    await expect(c.getByText("5 selected")).toBeInTheDocument();
-    await userEvent.click(c.getByText(/^Let’s move the Thursday sync/));
-    await expect(c.getByText("4 selected")).toBeInTheDocument();
+    await expect(c.getByText("20 selected")).toBeInTheDocument();
+    await userEvent.click(c.getAllByText(/^Let’s move the Thursday sync/)[0]!);
+    await expect(c.getByText("19 selected")).toBeInTheDocument();
     await expect(all).toHaveProperty("indeterminate", true);
   },
 };

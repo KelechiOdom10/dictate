@@ -65,7 +65,7 @@ import { ErrorNotice, LoadError, Loading } from "./SettingsStatus";
 import {
   Checklist,
   deleteEach,
-  SelectionBar,
+  SelectButton,
   SelectionFloat,
   useSelection,
   type Selection,
@@ -286,7 +286,7 @@ function Rows<Id extends string | number>({
           <ListItem
             key={row.id}
             className={
-              row.id === value
+              row.id === value && !selection.selecting
                 ? "ui-history-row ui-history-row-current"
                 : "ui-history-row"
             }
@@ -472,11 +472,7 @@ function Dictations() {
           onChange={setSearch}
         />
         {history.isSuccess && !nothingYet && (
-          <SelectionBar
-            selection={selection}
-            shown={entries.length}
-            scope={scope}
-          />
+          <SelectButton selection={selection} shown={entries.length} />
         )}
         {history.isSuccess && !nothingYet && !selection.selecting && (
           <Selector
@@ -641,6 +637,8 @@ function Dictations() {
                 {more}
                 <SelectionFloat
                   selection={selection}
+                  shown={entries.length}
+                  scope={scope}
                   noun={dictationNoun}
                   consequence="They can’t be recovered."
                   onDelete={removeChecked}
@@ -670,6 +668,8 @@ function Dictations() {
               {more}
               <SelectionFloat
                 selection={selection}
+                shown={entries.length}
+                scope={scope}
                 noun={dictationNoun}
                 consequence="They can’t be recovered."
                 onDelete={removeChecked}
@@ -886,11 +886,7 @@ function Annotations() {
     <>
       <ErrorNotice error={error} />
       <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
-        <SelectionBar
-          selection={selection}
-          shown={entries.length}
-          scope="shown"
-        />
+        <SelectButton selection={selection} shown={entries.length} />
         <Text type="supporting">
           {usage.data
             ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${entries.length.toLocaleString()} ${entries.length === 1 ? "session" : "sessions"} · kept until deleted`
@@ -915,6 +911,8 @@ function Annotations() {
               />
               <SelectionFloat
                 selection={selection}
+                shown={entries.length}
+                scope="shown"
                 noun={annotationNoun}
                 consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
                 onDelete={removeChecked}
@@ -932,6 +930,8 @@ function Annotations() {
             />
             <SelectionFloat
               selection={selection}
+              shown={entries.length}
+              scope="shown"
               noun={annotationNoun}
               consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
               onDelete={removeChecked}
