@@ -26,6 +26,7 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
+import { StackItem } from "@astryxdesign/core/Stack";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { List, ListItem } from "@astryxdesign/core/List";
 import {
@@ -229,10 +230,16 @@ function Accordion<Id extends string | number>({
             }}
             trigger={
               <HStack gap={2} hAlign="between" vAlign="center">
-                <VStack gap={0.5}>
-                  <Text maxLines={2}>{row.title}</Text>
-                  {row.meta && <Text type="supporting">{row.meta}</Text>}
-                </VStack>
+                <StackItem size="fill">
+                  <VStack gap={0.5}>
+                    <Text maxLines={2}>{row.title}</Text>
+                    {row.meta && (
+                      <Text type="supporting" maxLines={1}>
+                        {row.meta}
+                      </Text>
+                    )}
+                  </VStack>
+                </StackItem>
                 <Text type="supporting" textWrap="nowrap">
                   {row.date}
                 </Text>
@@ -388,7 +395,14 @@ function Dictations() {
   const [error, setError] = useState("");
   const query = useDeferredValue(search.trim());
   const [limit, setLimit] = useState({ query, count: HISTORY_PAGE });
-  const count = limit.query === query ? limit.count : HISTORY_PAGE;
+  // While selecting, takes that finish are added to the window instead of
+  // pushing the oldest loaded rows out of it, so a checked row only leaves
+  // the list when a search or filter hides it.
+  const [selectedSince, setSelectedSince] = useState<number | null>(null);
+  const [arrived, setArrived] = useState(0);
+  const count =
+    (limit.query === query ? limit.count : HISTORY_PAGE) +
+    (selectedSince === null ? 0 : arrived);
   const history = useQuery({
     queryKey: ["history", query, count],
     queryFn: () => readHistory(query, count),
@@ -426,6 +440,19 @@ function Dictations() {
   const selected = open ?? entries[0];
   const current = settings.data?.historyRetention ?? "week";
   const selection = useSelection(entries.map((entry) => entry.id));
+  const newest = history.data?.entries[0]?.createdAtMs ?? 0;
+  if (selection.selecting && selectedSince === null) setSelectedSince(newest);
+  if (!selection.selecting && selectedSince !== null) {
+    setSelectedSince(null);
+    setArrived(0);
+  }
+  const newSince =
+    selectedSince === null
+      ? 0
+      : (history.data?.entries ?? []).filter(
+          (entry) => entry.createdAtMs > selectedSince,
+        ).length;
+  if (newSince > arrived) setArrived(newSince);
   const scope = [
     query ? `matching “${query}”` : "shown",
     filter === "all" ? "" : `as ${statusLabels[filter]}`,

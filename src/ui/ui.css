@@ -465,6 +465,9 @@ meter.ui-rating::-moz-meter-bar {
 .ui-history-accordion > button[aria-expanded] {
   padding-inline-start: var(--spacing-4);
 }
+.ui-history-accordion > button[aria-expanded] > span {
+  min-inline-size: 0;
+}
 .ui-settings-row:has(:focus-visible) {
   outline-width: 0;
 }

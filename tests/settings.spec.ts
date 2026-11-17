@@ -286,12 +286,16 @@ async function openSettings(
               return { historyBytes: 18_432_000, annotationBytes: 3_145_728 };
             if (command === "list_history")
               return {
-                entries: history.filter((entry) =>
-                  String((entry as { text?: string }).text ?? "")
-                    .toLowerCase()
-                    .includes(String(args.search ?? "").toLowerCase()),
-                ),
-                hasMore: false,
+                entries: history
+                  .filter((entry) =>
+                    String((entry as { text?: string }).text ?? "")
+                      .toLowerCase()
+                      .includes(String(args.search ?? "").toLowerCase()),
+                  )
+                  .slice(0, Number((args as { limit?: number }).limit ?? 1e9)),
+                hasMore:
+                  history.length >
+                  Number((args as { limit?: number }).limit ?? 1e9),
               };
             if (command === "list_annotations") return annotations;
             if (
@@ -3521,3 +3525,107 @@ test("a take arriving while all are checked stays unchecked", async ({
     page.getByRole("checkbox", { name: /^Select Take 99:/ }),
   ).not.toBeChecked();
 });
+
+test("a take finishing while 500 are selected keeps every checked row in the list", async ({
+  page,
+}) => {
+  const many = Array.from({ length: 500 }, (_, index) => ({
+    ...takes[0],
+    id: index + 1,
+    text: `Take ${index + 1}`,
+    createdAtMs: Date.now() - (index + 1) * minuteMs,
+  }));
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openSettings(page, { history: many });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Select all 500 shown" }).check();
+  const status = page.locator(".ui-selection-count");
+  await expect(status).toHaveText("500 selected");
+  await page.evaluate(() =>
+    (window as unknown as { __addTake: (take: unknown) => void }).__addTake({
+      id: 9999,
+      text: "New take",
+      createdAtMs: Date.now(),
+      app: "Slack",
+      model: "ggml-base.en",
+      audioMs: 1000,
+      inferenceMs: 10,
+      totalMs: 20,
+      status: "pasted",
+      detail: null,
+    }),
+  );
+  await expect(
+    page.getByRole("checkbox", { name: /^Select New take/ }),
+  ).not.toBeChecked();
+  await expect(status).toHaveText("500 selected");
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toContainText(
+    "Delete 500 dictations?",
+  );
+});
+
+const longTitle =
+  "Send the deploy link https://dictate.kellycooks.dev/releases/download/v0.1.3/dictate_0.1.3_aarch64.dmg?utm_source=history&utm_medium=desktop to Aleksandra";
+const longApp =
+  "Microsoft Visual Studio Code – Insiders (Rosetta) – Untitled-1";
+
+for (const width of [640, 720, 1100]) {
+  for (const view of ["Dictations", "Annotations"]) {
+    test(`at ${width}px a ${view} row with an unbroken title keeps its date and chevron in place`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 600 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await openSettings(page, {
+        history: [
+          { ...takes[0], text: longTitle, app: longApp },
+          ...takes.slice(1, 4),
+        ],
+        annotations: [
+          { ...sessions[0], text: longTitle, app: longApp },
+          ...sessions.slice(1, 4),
+        ],
+      });
+      await page.getByRole("button", { name: "History", exact: true }).click();
+      if (view === "Annotations")
+        await page
+          .getByRole("radio", { name: "Annotations", exact: true })
+          .check();
+      const pane = page.locator("main, [role=main]").first();
+      const paneRight = await pane.evaluate(
+        (el) => el.getBoundingClientRect().right,
+      );
+      const date = page.getByText(/ago$/).first();
+      await expect(date).toBeVisible();
+      const dateBox = (await date.boundingBox())!;
+      expect(dateBox.x + dateBox.width).toBeLessThanOrEqual(paneRight);
+      for (const chevron of await page
+        .locator(
+          ".astryx-collapsible-trigger > svg, .astryx-collapsible-trigger [aria-hidden=true]",
+        )
+        .all()) {
+        const box = await chevron.boundingBox();
+        if (box) expect(box.x + box.width).toBeLessThanOrEqual(paneRight);
+      }
+      const title = page.getByText(longTitle.slice(0, 20)).first();
+      const clamped = await title.evaluate(
+        (el) =>
+          el.scrollHeight > el.clientHeight + 1 ||
+          el.scrollWidth > el.clientWidth + 1,
+      );
+      const titleBox = (await title.boundingBox())!;
+      expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(dateBox.x);
+      expect(clamped).toBe(true);
+      expect(
+        await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(0);
+    });
+  }
+}
