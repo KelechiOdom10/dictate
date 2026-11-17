@@ -22,6 +22,8 @@
     "allow-get-settings",
     "allow-save-settings",
     "allow-capture-shortcut",
+    "allow-settings-notices",
+    "allow-dismiss-settings-notices",
     "allow-input-devices",
     "allow-microphone-test",
     "allow-microphone-level",

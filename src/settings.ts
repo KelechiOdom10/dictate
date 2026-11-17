@@ -43,3 +43,6 @@ export const writeSettings = async (settings: Settings) =>
   settingsSchema.parse(await invoke("save_settings", { settings }));
 export const readDevices = async () =>
   z.array(z.string()).parse(await invoke("input_devices"));
+/** Sentences about settings that were reset at launch because they couldn’t be used. */
+export const readSettingsNotices = async () =>
+  z.array(z.string()).parse((await invoke("settings_notices")) ?? []);

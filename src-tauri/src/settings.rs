@@ -213,15 +213,19 @@ impl Settings {
         let annotate = if (self.annotate_enabled, &self.annotate_shortcut)
             != (previous.annotate_enabled, &previous.annotate_shortcut)
         {
-            let chord = self.annotate_chord()?;
-            if self.chord().ok() == Some(chord) {
-                return Err("That shortcut is your dictation shortcut. Choose another.".into());
-            }
+            let new = if self.annotate_enabled {
+                let chord = self.annotate_chord()?;
+                if self.chord().ok() == Some(chord) {
+                    return Err("That shortcut is your dictation shortcut. Choose another.".into());
+                }
+                Some(chord)
+            } else {
+                None
+            };
             let old = previous
                 .annotate_enabled
                 .then(|| previous.annotate_chord().ok())
                 .flatten();
-            let new = self.annotate_enabled.then_some(chord);
             (old != new).then_some(new)
         } else {
             None
@@ -266,11 +270,40 @@ impl Settings {
 }
 
 fn parse_chord(shortcut: &str) -> Result<Shortcut, String> {
-    let chord: Shortcut = shortcut
-        .parse()
-        .map_err(|e| format!("Invalid shortcut: {e}"))?;
+    check_chord(shortcut).map_err(|error| error.message())
+}
+
+enum ChordError {
+    Invalid(String),
+    NoModifier,
+    Reserved,
+}
+
+impl ChordError {
+    fn message(&self) -> String {
+        match self {
+            Self::Invalid(error) => format!("Invalid shortcut: {error}"),
+            Self::NoModifier => "Choose a shortcut with Command, Option, Control or Shift".into(),
+            Self::Reserved => "That shortcut is reserved by macOS. Choose another.".into(),
+        }
+    }
+
+    /// The same problem as a clause for a sentence about a reset shortcut.
+    fn reason(&self) -> &'static str {
+        match self {
+            Self::Invalid(_) => "dictate couldn’t read it",
+            Self::NoModifier => "it had no Command, Option, Control or Shift key",
+            Self::Reserved => "macOS reserves it",
+        }
+    }
+}
+
+fn check_chord(shortcut: &str) -> Result<Shortcut, ChordError> {
+    let chord = shortcut
+        .parse::<Shortcut>()
+        .map_err(|e| ChordError::Invalid(e.to_string()))?;
     if chord.mods.is_empty() {
-        return Err("Choose a shortcut with Command, Option, Control or Shift".into());
+        return Err(ChordError::NoModifier);
     }
     if [
         "Super+KeyQ",
@@ -284,28 +317,175 @@ fn parse_chord(shortcut: &str) -> Result<Shortcut, String> {
     .iter()
     .any(|reserved| reserved.parse::<Shortcut>().ok() == Some(chord))
     {
-        return Err("That shortcut is reserved by macOS. Choose another.".into());
+        return Err(ChordError::Reserved);
     }
     Ok(chord)
 }
 
-pub fn load(path: &Path) -> Result<Settings, String> {
-    match fs::read(path) {
-        Ok(bytes) => {
-            let mut value: serde_json::Value =
-                serde_json::from_slice(&bytes).map_err(|e| format!("Read settings: {e}"))?;
-            if let Some(object) = value.as_object_mut() {
-                migrate_theme(object);
-            }
-            let mut settings: Settings =
-                serde_json::from_value(value).map_err(|e| format!("Read settings: {e}"))?;
-            migrate(&mut settings);
-            settings.chord()?;
-            Ok(settings)
+/// A chord the way the Settings window shows it, for a sentence.
+fn spoken_chord(shortcut: &str) -> String {
+    shortcut
+        .split('+')
+        .filter(|key| !key.is_empty())
+        .map(|key| match key {
+            "Super" | "Meta" | "Command" | "CommandOrControl" => "Command".to_string(),
+            "Alt" | "Option" => "Option".to_string(),
+            key => key
+                .trim_start_matches("Key")
+                .trim_start_matches("Digit")
+                .to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+/// One field of the file that couldn't be used and went back to a default.
+struct Repair {
+    field: String,
+    notice: String,
+}
+
+/// What a file that couldn't be read keeps: nothing is pruned until the
+/// person picks how long history stays.
+const UNREADABLE_RETENTION: HistoryRetention = HistoryRetention::Forever;
+
+/// Reads the file field by field. A field that doesn't parse goes back to its
+/// default and every other field is kept, so one bad value never costs the
+/// rest. `None` when there is no file; an error only when the file is not a
+/// JSON object at all.
+fn read(path: &Path) -> Result<Option<(Settings, Vec<Repair>, bool)>, String> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Read settings: {error}")),
+    };
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("Read settings: {e}"))?;
+    let serde_json::Value::Object(mut stored) = value else {
+        return Err("Read settings: not a JSON object".into());
+    };
+    migrate_theme(&mut stored);
+    let retention_written = stored.contains_key("historyRetention");
+    let serde_json::Value::Object(mut merged) =
+        serde_json::to_value(Settings::default()).map_err(|e| e.to_string())?
+    else {
+        return Err("Settings must be an object".into());
+    };
+    let mut repairs = Vec::new();
+    for (key, value) in stored {
+        let Some(previous) = merged.insert(key.clone(), value) else {
+            merged.remove(&key);
+            continue;
+        };
+        if serde_json::from_value::<Settings>(serde_json::Value::Object(merged.clone())).is_err() {
+            merged.insert(key.clone(), previous);
+            repairs.push(Repair {
+                notice: format!(
+                    "Your {} setting couldn’t be read, so it’s back to its default.",
+                    field_label(&key)
+                ),
+                field: key,
+            });
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
-        Err(error) => Err(format!("Read settings: {error}")),
     }
+    let mut settings: Settings =
+        serde_json::from_value(serde_json::Value::Object(merged)).map_err(|e| e.to_string())?;
+    migrate(&mut settings);
+    if repairs
+        .iter()
+        .any(|repair| repair.field == "historyRetention")
+    {
+        settings.history_retention = UNREADABLE_RETENTION;
+        if let Some(repair) = repairs.iter_mut().find(|r| r.field == "historyRetention") {
+            repair.notice = "Your history setting couldn’t be read, so dictate keeps every dictation until you choose again.".into();
+        }
+    }
+    let defaults = Settings::default();
+    for (field, name, shortcut, default) in [
+        (
+            "shortcut",
+            "dictation",
+            &mut settings.shortcut,
+            &defaults.shortcut,
+        ),
+        (
+            "annotateShortcut",
+            "Annotate",
+            &mut settings.annotate_shortcut,
+            &defaults.annotate_shortcut,
+        ),
+    ] {
+        if let Err(error) = check_chord(shortcut) {
+            repairs.retain(|repair| repair.field != field);
+            repairs.push(Repair {
+                field: field.into(),
+                notice: format!(
+                    "Your {name} shortcut, {}, is now {} because {}.",
+                    spoken_chord(shortcut),
+                    spoken_chord(default),
+                    error.reason()
+                ),
+            });
+            *shortcut = default.clone();
+        }
+    }
+    if settings.annotate_chord().ok() == settings.chord().ok() {
+        let taken = settings.annotate_shortcut.clone();
+        if defaults.annotate_chord().ok() != settings.chord().ok() {
+            settings.annotate_shortcut = defaults.annotate_shortcut.clone();
+            repairs.push(Repair {
+                field: "annotateShortcut".into(),
+                notice: format!(
+                    "Your Annotate shortcut, {}, is now {} because it was also your dictation shortcut.",
+                    spoken_chord(&taken),
+                    spoken_chord(&settings.annotate_shortcut)
+                ),
+            });
+        } else if settings.annotate_enabled {
+            settings.annotate_enabled = false;
+            repairs.push(Repair {
+                field: "annotateEnabled".into(),
+                notice: format!(
+                    "Annotate is off because its shortcut, {}, was also your dictation shortcut.",
+                    spoken_chord(&taken)
+                ),
+            });
+        }
+    }
+    Ok(Some((settings, repairs, retention_written)))
+}
+
+fn field_label(field: &str) -> &str {
+    match field {
+        "shortcut" => "dictation shortcut",
+        "shortcutMode" => "shortcut mode",
+        "launchAtLogin" => "launch at login",
+        "appearanceMode" => "appearance",
+        "overlayPosition" => "overlay position",
+        "historyRetention" => "history",
+        "speechModel" => "speech model",
+        "pasteMethod" => "paste",
+        "restoreClipboard" => "restore clipboard",
+        "trailingSpace" => "trailing space",
+        "capitalizeFirst" => "capitalisation",
+        "micMode" => "microphone mode",
+        "soundFeedback" => "sound feedback",
+        "debugRecordings" => "debug recordings",
+        "annotateShortcut" => "Annotate shortcut",
+        "annotateEnabled" => "Annotate",
+        "annotateShowInRecordings" => "Annotate recording",
+        "themeLight" => "light theme",
+        "themeDark" => "dark theme",
+        "version" => "settings version",
+        other => other,
+    }
+}
+
+/// The settings file as it reads, with every repair applied. Missing gives
+/// the defaults.
+#[cfg(test)]
+pub fn load(path: &Path) -> Result<Settings, String> {
+    Ok(read(path)?.map_or_else(Settings::default, |(settings, ..)| settings))
 }
 
 fn migrate(settings: &mut Settings) {
@@ -314,29 +494,86 @@ fn migrate(settings: &mut Settings) {
     }
 }
 
-pub fn load_or_default(path: &Path) -> (Settings, Option<Problem>) {
-    match load(path) {
-        Ok(settings) => (settings, None),
+/// Settings at launch, and what the launch may do with them.
+pub struct Loaded {
+    pub settings: Settings,
+    /// True only when the file was read and held a usable history setting.
+    /// Nothing may be pruned with a retention that came from anywhere else.
+    pub retention_known: bool,
+    /// One sentence per setting that was reset, for the General page.
+    pub notices: Vec<String>,
+    pub problem: Option<Problem>,
+}
+
+fn backup_path(path: &Path) -> std::path::PathBuf {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    path.with_file_name(format!("settings.json.bad-{timestamp}"))
+}
+
+pub fn load_or_default(path: &Path) -> Loaded {
+    match read(path) {
+        Ok(None) => Loaded {
+            settings: Settings::default(),
+            retention_known: false,
+            notices: Vec::new(),
+            problem: None,
+        },
+        Ok(Some((settings, repairs, retention_written))) => {
+            if !repairs.is_empty() {
+                let backup = backup_path(path);
+                match fs::copy(path, &backup) {
+                    Ok(_) => {
+                        if let Err(error) = save(path, &settings) {
+                            log::warn!("[settings] save repaired settings: {error}");
+                        }
+                    }
+                    Err(error) => log::warn!(
+                        "[settings] back up {} before repairing: {error}",
+                        path.display()
+                    ),
+                }
+                for repair in &repairs {
+                    log::warn!("[settings] repaired {}: {}", repair.field, repair.notice);
+                }
+            }
+            Loaded {
+                retention_known: retention_written
+                    && !repairs.iter().any(|r| r.field == "historyRetention"),
+                notices: repairs.into_iter().map(|r| r.notice).collect(),
+                settings,
+                problem: None,
+            }
+        }
         Err(error) => {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            let backup = path.with_file_name(format!("settings.json.bad-{timestamp}"));
+            let backup = backup_path(path);
+            let settings = Settings {
+                history_retention: UNREADABLE_RETENTION,
+                ..Settings::default()
+            };
             let (fix, detail) = match fs::rename(path, &backup) {
-                Ok(()) => (
-                    "Using defaults. Your old file is saved beside them.",
-                    format!("{error}; original saved to {}", backup.display()),
-                ),
+                Ok(()) => {
+                    if let Err(error) = save(path, &settings) {
+                        log::warn!("[settings] write replacement settings: {error}");
+                    }
+                    (
+                        "Using defaults, and keeping all your history. Your old file is saved beside the new one.",
+                        format!("{error}; original saved to {}", backup.display()),
+                    )
+                }
                 Err(backup_error) => (
-                    "Using defaults. Choose your preferences again in Settings.",
+                    "Using defaults, and keeping all your history. Choose your preferences again in Settings.",
                     format!("{error}; could not back up original: {backup_error}"),
                 ),
             };
-            (
-                Settings::default(),
-                Some(Problem::new("Settings couldn’t be read", fix).because(detail)),
-            )
+            Loaded {
+                settings,
+                retention_known: false,
+                notices: Vec::new(),
+                problem: Some(Problem::new("Settings couldn’t be read", fix).because(detail)),
+            }
         }
     }
 }
@@ -514,7 +751,9 @@ mod tests {
             r#"{"version":1,"theme":"dracula","shortcut":"Control+KeyD"}"#,
         )
         .unwrap();
-        let (settings, problem) = load_or_default(&path);
+        let Loaded {
+            settings, problem, ..
+        } = load_or_default(&path);
         assert!(problem.is_none());
         assert_eq!(settings.theme_light, Theme::Ember);
         assert_eq!(settings.theme_dark, Theme::Ember);
@@ -573,7 +812,9 @@ mod tests {
                 format!(r#"{{"shortcut":"Control+KeyD","theme":{theme},"appearanceMode":"dark"}}"#),
             )
             .unwrap();
-            let (settings, problem) = load_or_default(&path);
+            let Loaded {
+                settings, problem, ..
+            } = load_or_default(&path);
             assert!(problem.is_none(), "{theme}");
             assert_eq!(settings.theme_light, Theme::Ember, "{theme}");
             assert_eq!(settings.theme_dark, Theme::Ember, "{theme}");
@@ -666,27 +907,178 @@ mod tests {
         assert_eq!(load(&path).unwrap(), settings);
     }
 
-    #[test]
-    fn corrupt_or_invalid_settings_are_backed_up_before_using_defaults() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        for original in ["{broken", r#"{"shortcut":"not-a-key"}"#] {
-            fs::write(&path, original).unwrap();
-            let (settings, error) = load_or_default(&path);
-            assert_eq!(settings, Settings::default());
-            let problem = error.unwrap();
-            assert_eq!(problem.title, "Settings couldn’t be read");
-            assert!(problem.fix.starts_with("Using defaults."));
-            assert!(!path.exists());
-            assert!(fs::read_dir(dir.path()).unwrap().any(|entry| {
-                let entry = entry.unwrap();
+    fn backups(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .filter(|entry| {
                 entry
                     .file_name()
                     .to_string_lossy()
                     .starts_with("settings.json.bad-")
-                    && fs::read_to_string(entry.path()).unwrap() == original
-            }));
+            })
+            .map(|entry| fs::read_to_string(entry.path()).unwrap())
+            .collect()
+    }
+
+    /// A file that isn't a JSON object is set aside whole. Nothing in it can
+    /// be trusted, the history setting included, so history is kept and the
+    /// launch must not prune.
+    #[test]
+    fn an_unreadable_file_is_backed_up_and_keeps_all_history() {
+        for original in ["{broken", "[]", "null"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("settings.json");
+            fs::write(&path, original).unwrap();
+            let loaded = load_or_default(&path);
+            assert_eq!(
+                loaded.settings,
+                Settings {
+                    history_retention: HistoryRetention::Forever,
+                    ..Settings::default()
+                }
+            );
+            assert!(!loaded.retention_known);
+            let problem = loaded.problem.unwrap();
+            assert_eq!(problem.title, "Settings couldn’t be read");
+            assert!(problem.fix.contains("keeping all your history"));
+            assert_eq!(backups(dir.path()), [original]);
+            // The replacement says Forever on disk, so the next launch can't
+            // fall back to the 7-day default.
+            let next = load_or_default(&path);
+            assert!(next.problem.is_none());
+            assert!(next.retention_known);
+            assert_eq!(next.settings.history_retention, HistoryRetention::Forever);
         }
+    }
+
+    /// The DICT-14 repro: a "Forever" file from 0.1.2 whose dictation
+    /// shortcut is now reserved used to load as defaults, so launch pruned to
+    /// a week. Only the shortcut is reset now; everything else stays.
+    #[test]
+    fn a_reserved_dictation_chord_resets_only_that_shortcut() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let original = r#"{"version":2,"shortcut":"Super+Space","historyRetention":"forever","themeLight":"paper","themeDark":"capy","speechModel":"small.en","futureKey":1}"#;
+        fs::write(&path, original).unwrap();
+        let loaded = load_or_default(&path);
+        assert!(loaded.problem.is_none());
+        assert!(loaded.retention_known);
+        assert_eq!(loaded.settings.shortcut, "Alt+Shift+Space");
+        assert_eq!(loaded.settings.history_retention, HistoryRetention::Forever);
+        assert_eq!(loaded.settings.theme_light, Theme::Paper);
+        assert_eq!(loaded.settings.theme_dark, Theme::Capy);
+        assert_eq!(loaded.settings.speech_model, SpeechModel::SmallEn);
+        assert_eq!(
+            loaded.notices,
+            [
+                "Your dictation shortcut, Command + Space, is now Option + Shift + Space because macOS reserves it."
+            ]
+        );
+        assert_eq!(backups(dir.path()), [original]);
+        let written: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written["shortcut"], "Alt+Shift+Space");
+        assert_eq!(written["historyRetention"], "forever");
+        assert_eq!(written["futureKey"], 1);
+        let again = load_or_default(&path);
+        assert!(again.notices.is_empty(), "a repair is made once");
+        assert_eq!(again.settings, loaded.settings);
+    }
+
+    #[test]
+    fn an_unusable_annotate_chord_resets_and_annotate_can_still_be_turned_off() {
+        for (stored, reason) in [
+            ("Super+KeyH", "macOS reserves it"),
+            ("KeyS", "it had no Command, Option, Control or Shift key"),
+            ("not-a-key", "dictate couldn’t read it"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("settings.json");
+            fs::write(
+                &path,
+                format!(
+                    r#"{{"version":2,"annotateShortcut":"{stored}","historyRetention":"month"}}"#
+                ),
+            )
+            .unwrap();
+            let loaded = load_or_default(&path);
+            assert_eq!(loaded.settings.annotate_shortcut, "Alt+Shift+KeyA");
+            assert_eq!(loaded.settings.history_retention, HistoryRetention::Month);
+            assert!(loaded.retention_known);
+            assert_eq!(loaded.notices.len(), 1);
+            assert!(loaded.notices[0].starts_with("Your Annotate shortcut"));
+            assert!(
+                loaded.notices[0].ends_with(&format!("because {reason}.")),
+                "{}",
+                loaded.notices[0]
+            );
+        }
+        let stuck = Settings {
+            annotate_shortcut: "Super+KeyH".into(),
+            ..Settings::default()
+        };
+        let off = Settings {
+            annotate_enabled: false,
+            ..stuck.clone()
+        };
+        // Nothing was registered for the unusable chord, so there is nothing
+        // to unregister: the save goes through and changes no registration.
+        assert_eq!(
+            off.validate_changes(&stuck, || Ok(Vec::new()), |_| true)
+                .unwrap()
+                .annotate,
+            None
+        );
+    }
+
+    #[test]
+    fn an_unreadable_history_setting_keeps_everything_and_blocks_the_prune() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"version":2,"historyRetention":"decade","soundFeedback":true,"micMode":42}"#,
+        )
+        .unwrap();
+        let loaded = load_or_default(&path);
+        assert_eq!(loaded.settings.history_retention, HistoryRetention::Forever);
+        assert!(loaded.settings.sound_feedback);
+        assert_eq!(loaded.settings.mic_mode, MicMode::OnDemand);
+        assert!(!loaded.retention_known);
+        assert_eq!(loaded.notices.len(), 2, "{:?}", loaded.notices);
+        assert!(
+            loaded
+                .notices
+                .iter()
+                .any(|n| n.contains("keeps every dictation"))
+        );
+    }
+
+    #[test]
+    fn a_missing_file_or_history_key_never_counts_as_a_known_retention() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert!(!load_or_default(&path).retention_known);
+        fs::write(&path, r#"{"version":2,"soundFeedback":true}"#).unwrap();
+        let loaded = load_or_default(&path);
+        assert!(loaded.settings.sound_feedback);
+        assert!(!loaded.retention_known);
+        assert!(loaded.notices.is_empty());
+    }
+
+    #[test]
+    fn an_annotate_chord_equal_to_the_dictation_one_is_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"shortcut":"Control+KeyD","annotateShortcut":"Control+KeyD"}"#,
+        )
+        .unwrap();
+        let loaded = load_or_default(&path);
+        assert_eq!(loaded.settings.shortcut, "Control+KeyD");
+        assert_eq!(loaded.settings.annotate_shortcut, "Alt+Shift+KeyA");
+        assert!(loaded.notices[0].contains("was also your dictation shortcut"));
     }
 
     #[test]

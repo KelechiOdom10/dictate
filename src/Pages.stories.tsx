@@ -145,6 +145,8 @@ const MB = 1_000_000;
 const opened: string[] = [];
 /** What "Check for updates" resolves to in the About stories. */
 let updateResult: Record<string, string> = { kind: "upToDate" };
+/** What the launch reset, for the General stories. */
+let settingsNotices: string[] = [];
 
 async function mockSettings({ globals }: { globals: Record<string, unknown> }) {
   return mockApp(globals, [], {
@@ -280,6 +282,11 @@ function mockApp(
       }
       if (command === "cancel_download") delete states[modelArg(args).id];
       if (command === "delete_model") delete states[modelArg(args).id];
+      if (command === "settings_notices") return settingsNotices;
+      if (command === "dismiss_settings_notices") {
+        settingsNotices = [];
+        return null;
+      }
       if (command === "delete_history") {
         const id = args && "id" in args ? args.id : undefined;
         history = history.filter((entry) => entry.id !== id);
@@ -325,6 +332,30 @@ export const General: Story = {
     await expect(control).toBeEnabled();
     await expect(control).not.toHaveAttribute("aria-disabled", "true");
     await expect(control).not.toBeChecked();
+  },
+};
+
+export const GeneralSettingsReset: Story = {
+  beforeEach: (context) => {
+    settingsNotices = [
+      "Your dictation shortcut, Command + Space, is now Option + Shift + Space because macOS reserves it.",
+    ];
+    const restore = mockSettings(context);
+    return async () => {
+      settingsNotices = [];
+      (await restore)();
+    };
+  },
+  render: () => <GeneralPage />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await expect(
+      await c.findByText(/Command \+ Space, is now Option \+ Shift \+ Space/),
+    ).toBeVisible();
+    await userEvent.click(c.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() =>
+      expect(c.queryByText(/is now Option/)).not.toBeInTheDocument(),
+    );
   },
 };
 
