@@ -13,7 +13,7 @@
 //! works offline and needs no download. See `resources/README.md`.
 
 use std::{path::PathBuf, sync::Mutex};
-use transcribe_cpp::{Model, VadOptions, VadSession};
+use transcribe_cpp::{Backend, Model, ModelOptions, VadOptions, VadSession};
 
 const MODEL: &[u8] = include_bytes!("../resources/ggml-silero-v5.1.2.bin");
 const MODEL_FILE: &str = "dictate-ggml-silero-v5.1.2.bin";
@@ -22,6 +22,8 @@ const MODEL_FILE: &str = "dictate-ggml-silero-v5.1.2.bin";
 /// a window edge is still whole in the next one.
 const WINDOW: usize = 16_000;
 const HOP: usize = 8_000;
+/// Silero's frame: 512 samples, 32 ms.
+const FRAME: usize = 512;
 /// The RMS each window is brought to before scoring.
 const LEVEL: f32 = 0.05;
 /// A frame at or above this probability is speech (Silero's own default).
@@ -53,10 +55,21 @@ pub fn has_speech(samples: &[f32]) -> Result<bool, String> {
     Ok(false)
 }
 
+/// Levels by a loud-but-typical 32 ms frame rather than the whole window, so
+/// a key click, which fills a frame or two, never sets the level.
 fn levelled(window: &[f32]) -> Vec<f32> {
-    let rms = (window.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>()
-        / window.len().max(1) as f64)
-        .sqrt() as f32;
+    let mut frames: Vec<f32> = window
+        .chunks(FRAME)
+        .map(|frame| {
+            (frame.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / frame.len() as f64).sqrt()
+                as f32
+        })
+        .collect();
+    frames.sort_by(f32::total_cmp);
+    let rms = frames
+        .get(frames.len() * 4 / 5)
+        .copied()
+        .unwrap_or_default();
     if rms == 0.0 {
         return window.to_vec();
     }
@@ -67,17 +80,22 @@ fn levelled(window: &[f32]) -> Vec<f32> {
 }
 
 /// The loader takes a path, so the compiled-in model is written once to the
-/// temp folder and read from there.
+/// temp folder and read from there. It runs on the CPU, so it never shares the
+/// GPU with a speech model that may still be decoding the take.
 fn open() -> Result<VadSession, String> {
     let path: PathBuf = std::env::temp_dir().join(MODEL_FILE);
-    let current = std::fs::metadata(&path).is_ok_and(|m| m.len() == MODEL.len() as u64);
+    let current = std::fs::read(&path).is_ok_and(|bytes| bytes == MODEL);
     if !current {
         let mut file = tempfile::NamedTempFile::new_in(std::env::temp_dir())
             .map_err(|e| format!("VAD model: {e}"))?;
         std::io::Write::write_all(&mut file, MODEL).map_err(|e| format!("VAD model: {e}"))?;
         file.persist(&path).map_err(|e| format!("VAD model: {e}"))?;
     }
-    Model::load(&path)
+    let options = ModelOptions {
+        backend: Backend::Cpu,
+        ..ModelOptions::default()
+    };
+    Model::load_with(&path, &options)
         .and_then(|model| model.vad_session())
         .map_err(|e| format!("VAD model: {e}"))
 }
@@ -216,6 +234,26 @@ pub(crate) mod tests {
                     has_speech(&take).unwrap(),
                     "{text} at {level} in a take with clicks"
                 );
+            }
+        }
+    }
+
+    /// Under a second there is only one window, so a key click in it must not
+    /// set the level the quiet word is scored at.
+    #[test]
+    fn a_short_quiet_word_with_a_key_click_is_speech() {
+        for text in ["Okay.", "Yes.", "Send it."] {
+            let Some(speech) = say(text) else { return };
+            for level in [0.002295_f32, 0.000239, 0.000075] {
+                let floor = (level * 0.3).max(0.00002);
+                let mut take = room_tone(0.1, floor, 5);
+                take.extend(at_rms(&speech, level));
+                take.extend(room_tone(0.1, floor, 6));
+                assert!(take.len() < WINDOW, "{text} is {} samples", take.len());
+                let end = take.len() - 400;
+                click(&mut take, 200, 0.3);
+                click(&mut take, end, 0.3);
+                assert!(has_speech(&take).unwrap(), "{text} at {level}");
             }
         }
     }

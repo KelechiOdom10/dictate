@@ -517,7 +517,8 @@ impl Skip {
         let device = source.describe();
         match self {
             Self::TooShort { seconds } => format!(
-                "Too short to transcribe: {seconds:.2} s, and a take needs at least 0.30 s. Speak a little longer before you stop."
+                "Too short to transcribe: {:.2} s, and a take needs at least 0.30 s. Speak a little longer before you stop.",
+                (seconds * 100.0 + 1e-9).floor() / 100.0
             ),
             Self::InvalidAudio => format!(
                 "{device} sent invalid audio, so nothing was transcribed. If it happens again, choose another microphone in Settings → General."
@@ -2857,6 +2858,12 @@ mod take_tests {
         assert_eq!(
             short.detail(&source),
             "Too short to transcribe: 0.10 s, and a take needs at least 0.30 s. Speak a little longer before you stop."
+        );
+        let just_under = take_skip_reason(&vec![0.05; 4_799]).unwrap();
+        assert!(
+            just_under.detail(&source).contains(": 0.29 s,"),
+            "{}",
+            just_under.detail(&source)
         );
         for skip in [
             Skip::TooShort { seconds: 0.1 },

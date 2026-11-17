@@ -812,12 +812,17 @@ Each cell is how many of the 5 takes pasted invented text.
 The VAD is Silero v5.1.2, compiled into the app (`src-tauri/src/vad.rs`). A
 take counts as speech when any 32 ms frame reaches probability 0.5. Silero
 reacts to level, so each one-second window (half-second hop) is brought to
-RMS 0.05 before it is scored. Levelling the whole take at once fails when a
-key click is 4,000 times louder than whispered speech: the click sets the gain
-and the speech vanishes. Measured with clicks of amplitude 0.3 at both ends of
+RMS 0.05 before it is scored. The level is taken from the window's
+80th-percentile 32 ms frame, not the window as a whole. Levelling the whole
+take at once fails when a key click is 4,000 times louder than whispered
+speech: the click sets the gain and the speech vanishes. A take under a second
+has only one window, so whole-window RMS fails the same way there: a quiet
+word in a take under a second, with clicks at both ends, scored no speech
+until the level came from a typical frame instead
+(`vad::tests::a_short_quiet_word_with_a_key_click_is_speech`). Measured with clicks of amplitude 0.3 at both ends of
 the take:
 
-| Audio | Whole-take peak | Whole-take RMS | Per-window RMS (shipped) |
+| Audio | Whole-take peak | Whole-take RMS | Per-window level |
 |---|---|---|---|
 | "Yes." at RMS 0.000075 + clicks | 0.084, missed | 0.082, missed | speech |
 | Fox sentence at 0.000075 + clicks | 0.084, missed | 0.299, missed | speech |
@@ -834,14 +839,19 @@ the fox sentence at RMS 0.05, 0.002295, 0.000239 and 0.000075.
   "No speech detected", with no inference run and nothing pasted.
 - `vad::tests::room_tone_has_no_speech_at_any_length_or_level`: 7 lengths ×
   5 levels × 3 seeds, with and without clicks, 210 of 210 with no speech.
+- `vad::tests::a_short_quiet_word_with_a_key_click_is_speech`: "Okay.", "Yes."
+  and "Send it." in takes under one second, with clicks at both ends, at RMS
+  0.002295, 0.000239 and 0.000075: 9 of 9 speech.
 - The same quiet speech the #57 fixtures use, at RMS 0.002295, 0.000239 and
   0.000075, through `dictation_text`: "Yes.", "Okay.", "Send it." and the fox
   sentence all transcribed, 12 of 12, and none was skipped. The #57 tests that
   call the transcriber directly (`parakeet_decodes_speech_below_the_former_dictation_gate`
   and the streamed version) are unchanged and pass.
 - Cost when a take has no speech, so every window is scored (the worst case),
-  measured with `vad::tests::measure_vad_cost`: 0.7 ms for 1 s, 13.1 ms for
-  10 s, 88.6 ms for 60 s, on CPU, at load average 10–13. A take with speech
+  measured with `vad::tests::measure_vad_cost`: 1.0 ms for 1 s, 13.0 ms for
+  10 s, 78.4 ms for 60 s, with the model loaded on the CPU backend
+  (`Backend::Cpu`), at load average about 2. (Before the backend was pinned it
+  loaded with `Backend::Auto`: 0.7, 13.1 and 88.6 ms at load average 10–13.) A take with speech
   stops at its first speech window.
 
 ### Still needs real hands
