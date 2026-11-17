@@ -7,6 +7,8 @@
     "dev": "astro dev",
     "build": "astro check && astro build",
     "preview": "astro preview",
+    "check:takes": "node scripts/takes/check-centre.mjs",
+    "render:takes": "node scripts/takes/render.mjs",
     "add-build": "node scripts/add-build.ts",
     "deploy": "astro build && wrangler deploy"
   },
