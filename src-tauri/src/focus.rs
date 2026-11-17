@@ -301,8 +301,17 @@ mod tests {
     use crate::package::{Display, Rect};
 
     /// Why `shift_and_button` reads the session instead of an event: a new
-    /// event carries no flags, so `CGEvent::new(..).get_flags()` answered
-    /// "no modifiers held" forever and Shift-draw never started natively.
+    /// event carries no modifier flags, so `CGEvent::new(..).get_flags()`
+    /// answered "no modifiers held" forever and Shift-draw never started
+    /// natively.
+    ///
+    /// Only the modifier bits are asserted. A new event is not flag-empty in
+    /// general: on this machine its flags are exactly `CGEventFlagNonCoalesced`,
+    /// which is not a modifier, so comparing against an empty set failed for a
+    /// reason that has nothing to do with the bug guarded here. The masking is
+    /// not a loosening — a modifier physically held while the suite runs still
+    /// lands in the mask and still fails this test, which is the behaviour
+    /// being checked. That makes it the one test here needing an idle keyboard.
     #[cfg(target_os = "macos")]
     #[test]
     fn a_new_event_carries_no_modifier_flags() {
@@ -310,7 +319,13 @@ mod tests {
         use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
         let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).unwrap();
         let event = CGEvent::new(source).unwrap();
-        assert_eq!(event.get_flags(), CGEventFlags::empty());
+        let modifiers = CGEventFlags::CGEventFlagAlphaShift
+            | CGEventFlags::CGEventFlagShift
+            | CGEventFlags::CGEventFlagControl
+            | CGEventFlags::CGEventFlagAlternate
+            | CGEventFlags::CGEventFlagCommand
+            | CGEventFlags::CGEventFlagSecondaryFn;
+        assert_eq!(event.get_flags() & modifiers, CGEventFlags::empty());
     }
 
     /// The session read itself must work with nothing held, and must not panic.
