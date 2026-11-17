@@ -17,6 +17,7 @@ export function SettingsRow({
 }) {
   return (
     <ListItem
+      className="ui-settings-row"
       label={label}
       description={help ? <Text type="supporting">{help}</Text> : undefined}
       endContent={children}

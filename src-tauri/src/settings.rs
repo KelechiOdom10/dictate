@@ -132,10 +132,6 @@ pub struct Settings {
     /// On: the recording also shows dictate's ink and floating bar.
     #[serde(default)]
     pub annotate_show_in_recordings: bool,
-    /// On: the settings window takes the system's own material behind the
-    /// page. Off keeps the opaque window every earlier build had.
-    #[serde(default)]
-    pub glass: bool,
 }
 
 fn enabled() -> bool {
@@ -190,7 +186,6 @@ impl Default for Settings {
             annotate_shortcut: default_annotate_shortcut(),
             annotate_enabled: true,
             annotate_show_in_recordings: false,
-            glass: false,
         }
     }
 }
@@ -347,9 +342,12 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
     else {
         return Err("Settings must be an object".into());
     };
-    // A file read before the theme migration is written back without the dead
-    // key, so the migration is still a one-way move after a load and save.
-    value.remove("theme");
+    // Keys this build retired are written back without them: the single theme
+    // id the theme migration replaced, and the translucent window that was
+    // removed. A load ignores them; the next save drops them.
+    for retired in ["theme", "glass"] {
+        value.remove(retired);
+    }
     value.extend(known);
     serde_json::to_writer_pretty(&mut file, &value).map_err(|e| e.to_string())?;
     file.as_file().sync_all().map_err(|e| e.to_string())?;
@@ -422,7 +420,6 @@ mod tests {
             mic_mode: MicMode::Warm,
             sound_feedback: true,
             debug_recordings: true,
-            glass: true,
             ..Settings::default()
         };
         save(&path, &settings).unwrap();
@@ -631,6 +628,28 @@ mod tests {
                 .get("unloadModelAfterMinutes"),
             None
         );
+    }
+
+    /// The translucent window was removed. A v2 file that still carries its
+    /// key loads with every other choice intact, and the next save drops the
+    /// key instead of carrying it forward.
+    #[test]
+    fn a_removed_glass_setting_loads_and_is_dropped_on_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"version":2,"themeLight":"paper","themeDark":"capy","glass":true}"#,
+        )
+        .unwrap();
+        let settings = load(&path).unwrap();
+        assert_eq!(settings.theme_light, Theme::Paper);
+        assert_eq!(settings.theme_dark, Theme::Capy);
+        save(&path, &settings).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value.get("glass"), None);
+        assert_eq!(value["themeLight"], "paper");
+        assert_eq!(load(&path).unwrap(), settings);
     }
 
     #[test]

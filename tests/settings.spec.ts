@@ -38,6 +38,8 @@ async function openSettings(
     suspendFrames = false,
     history = [],
     annotations = [],
+    delaySave = false,
+    saveError = null,
   }: {
     failLoad?: boolean;
     startupError?: { title: string; fix: string; detail: string | null } | null;
@@ -49,6 +51,8 @@ async function openSettings(
     suspendFrames?: boolean;
     history?: { id: number }[];
     annotations?: { id: string }[];
+    delaySave?: boolean;
+    saveError?: string | null;
   } = {},
 ) {
   await page.route("http://dictate.test/**", async (route) => {
@@ -88,6 +92,8 @@ async function openSettings(
       suspendFrames,
       history,
       annotations,
+      delaySave,
+      saveError,
     }) => {
       if (suspendFrames) window.requestAnimationFrame = () => 1;
       const denied: string[] = [];
@@ -149,7 +155,6 @@ async function openSettings(
         annotateShortcut: "Alt+Shift+KeyA",
         annotateEnabled: true,
         annotateShowInRecordings: false,
-        glass: false,
         ...stored,
       };
       Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
@@ -235,6 +240,14 @@ async function openSettings(
               return settings;
             }
             if (command === "save_settings") {
+              if (delaySave)
+                await new Promise<void>((resolve) => {
+                  Object.defineProperty(window, "__finishSave", {
+                    value: resolve,
+                    configurable: true,
+                  });
+                });
+              if (saveError) throw saveError;
               if (args.settings?.shortcut === "Super+KeyQ")
                 throw "Shortcut unavailable";
               Object.assign(settings, args.settings);
@@ -251,6 +264,8 @@ async function openSettings(
               emit("update-state", update);
               return update;
             }
+            if (command === "storage_usage")
+              return { historyBytes: 18_432_000, annotationBytes: 3_145_728 };
             if (command === "list_history")
               return { entries: history, hasMore: false };
             if (command === "list_annotations") return annotations;
@@ -293,6 +308,8 @@ async function openSettings(
       suspendFrames,
       history,
       annotations,
+      delaySave,
+      saveError,
     },
   );
   await page.goto(
@@ -478,7 +495,6 @@ test("overlay receives retained errors, live phases and changed shortcuts", asyn
           annotateShortcut: "Alt+Shift+KeyA",
           annotateEnabled: true,
           annotateShowInRecordings: false,
-          glass: false,
         },
       },
       "*",
@@ -795,7 +811,6 @@ test("overlay applies appearance events live, including System changes", async (
                 annotateShortcut: "Alt+Shift+KeyA",
                 annotateEnabled: true,
                 annotateShowInRecordings: false,
-                glass: false,
               },
             },
             "*",
@@ -1041,7 +1056,6 @@ test("capsule state screenshots cover every theme and fit a narrow overlay", asy
                 annotateShortcut: "Alt+Shift+KeyA",
                 annotateEnabled: true,
                 annotateShowInRecordings: false,
-                glass: false,
               },
             },
             "*",
@@ -1734,52 +1748,6 @@ test("the sidebar sits a step behind the page in every theme and mode", async ({
   }
 });
 
-test("the translucent window steps the surfaces aside only while it is on", async ({
-  page,
-}) => {
-  await openSettings(page);
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  const surfaces = () =>
-    page.evaluate(() => {
-      const pick = (selector: string) => {
-        const el = document.querySelector(selector);
-        return el ? getComputedStyle(el).backgroundColor : "absent";
-      };
-      return {
-        glass: document.documentElement.dataset.glass ?? null,
-        shell: pick(".astryx-app-shell"),
-        main: pick(".astryx-app-shell [role=main]"),
-        nav: pick(".astryx-side-nav"),
-        card: pick(".astryx-card"),
-      };
-    });
-  const off = await surfaces();
-  expect(off.glass).toBeNull();
-  expect(off.shell).not.toBe("rgba(0, 0, 0, 0)");
-  const toggle = page.getByRole("switch", { name: "Translucent window" });
-  await expect(toggle).toBeEnabled();
-  await toggle.click();
-  await expect(toggle).toBeChecked();
-  const on = await surfaces();
-  expect(on.glass).toBe("true");
-  // The window's own backdrop steps aside for the material macOS draws there,
-  // and the page and sidebar keep most of their surface.
-  expect(on.shell).toBe("rgba(0, 0, 0, 0)");
-  expect(on.main).toMatch(/\/ 0\.88\)$/);
-  expect(on.nav).toMatch(/\/ 0\.92\)$/);
-  // Cards stay opaque, so text keeps the contrast it was measured at.
-  expect(on.card).toBe(off.card);
-  await page.getByRole("button", { name: "About", exact: true }).click();
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  await expect(
-    page.getByRole("switch", { name: "Translucent window" }),
-  ).toBeChecked();
-  expect((await surfaces()).glass).toBe("true");
-  await page.getByRole("switch", { name: "Translucent window" }).click();
-  await expect.poll(async () => (await surfaces()).glass).toBeNull();
-  expect((await surfaces()).shell).toBe(off.shell);
-});
-
 test("the model metrics stack one metric per line", async ({ page }) => {
   await openSettings(page, { pendingPage: "Models" });
   const card = page.locator('section[aria-label="Small English"]');
@@ -2372,3 +2340,656 @@ for (const view of ["Dictations", "Annotations"] as const)
     await expect(detail).toContainText(fourth);
     await expect(detail.getByRole("heading", { name: title })).toBeVisible();
   });
+
+/** What a History row paints before its content: the leading edge of selection. */
+const edgeMarker = (row: Locator) =>
+  row.evaluate((element) => {
+    const bar = getComputedStyle(element, "::before");
+    return { width: bar.width, colour: bar.backgroundColor };
+  });
+
+/** The History list is a List in two panes and an accordion group when narrow. */
+const historyList = (page: Page, view: string, width: number) =>
+  width >= 820
+    ? page.getByRole("list", { name: view, exact: true })
+    : page.getByRole("group", { name: view, exact: true });
+
+const rowBoxes = (rows: Locator) =>
+  rows.evaluateAll((items) =>
+    items.map((item) => {
+      const box = item.getBoundingClientRect();
+      return [box.x, box.y, box.width, box.height].map(Math.round).join();
+    }),
+  );
+
+for (const initialMode of ["system", "light", "dark"] as const) {
+  test(`Appearance ${initialMode} arrows and Tab survive live palette changes`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await openSettings(page, {
+      pendingPage: "Appearance",
+      stored: { appearanceMode: initialMode },
+    });
+    const modes = page.getByRole("radiogroup", { name: "Mode", exact: true });
+    await expect(modes).toBeVisible();
+    await page.keyboard.press("Tab");
+    await modes
+      .getByRole("radio", {
+        name:
+          initialMode === "system"
+            ? "System"
+            : initialMode === "light"
+              ? "Light"
+              : "Dark",
+        exact: true,
+      })
+      .focus();
+    for (let step = 0; step < 3; step++) {
+      await page.keyboard.press("ArrowRight");
+      await expect
+        .poll(() =>
+          modes.evaluate(
+            (group) =>
+              group.contains(document.activeElement) &&
+              (document.activeElement as HTMLInputElement).checked,
+          ),
+        )
+        .toBe(true);
+    }
+    await page.keyboard.press("Tab");
+    const themes = page.getByRole("radiogroup", {
+      name: /^(Light|Dark) theme$/,
+    });
+    await expect
+      .poll(() =>
+        themes.evaluate((group) => group.contains(document.activeElement)),
+      )
+      .toBe(true);
+    for (const [name, palette] of [
+      ["Paper", "paper"],
+      ["Capy", "capy"],
+      ["Rosé Pine", "rosePine"],
+      ["Neutral", "neutral"],
+      ["Ember", "ember"],
+    ]) {
+      await page.keyboard.press("ArrowRight");
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-palette",
+        palette,
+      );
+      const radio = themes.getByRole("radio", { name, exact: true });
+      await expect(radio).toBeChecked();
+      await expect(radio).toBeFocused();
+    }
+    await page.keyboard.press("Shift+Tab");
+    await expect
+      .poll(() =>
+        modes.evaluate((group) => group.contains(document.activeElement)),
+      )
+      .toBe(true);
+    for (const width of [640, 720, 1100, 1512]) {
+      await page.setViewportSize({ width, height: 900 });
+      const previews = themes.locator("svg");
+      for (const rect of await previews.evaluateAll((els) =>
+        els.map((el) => el.getBoundingClientRect().toJSON()),
+      )) {
+        expect(rect.width).toBeLessThanOrEqual(64);
+        expect(rect.height).toBeLessThanOrEqual(39);
+      }
+      const tiles = await page.getByRole("radio").evaluateAll((radios) =>
+        radios.map((radio) =>
+          [...radio.closest('[role="radiogroup"]')!.children]
+            .find((tile) => tile.contains(radio))!
+            .getBoundingClientRect()
+            .toJSON(),
+        ),
+      );
+      for (const tile of tiles) {
+        expect(tile.width).toBeGreaterThanOrEqual(44);
+        expect(tile.height).toBeGreaterThanOrEqual(44);
+      }
+    }
+    await expect(
+      page.getByRole("switch", { name: "Translucent window" }),
+    ).toHaveCount(0);
+  });
+}
+
+test("Appearance retains focus while saving and when the runtime rejects a save", async ({
+  page,
+}) => {
+  await openSettings(page, {
+    pendingPage: "Appearance",
+    delaySave: true,
+    saveError: "Stop Annotate before changing settings",
+  });
+  const modes = page.getByRole("radiogroup", { name: "Mode", exact: true });
+  const system = modes.getByRole("radio", { name: "System", exact: true });
+  await expect(system).toBeVisible();
+  await page.keyboard.press("Tab");
+  await system.focus();
+  await page.keyboard.press("ArrowRight");
+  const light = modes.getByRole("radio", { name: "Light", exact: true });
+  await expect(light).toBeChecked();
+  await expect(light).toBeFocused();
+  await expect(light).not.toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByRole("status")).toHaveText("Saving…");
+  await page.evaluate(() =>
+    (window as unknown as { __finishSave: () => void }).__finishSave(),
+  );
+  await expect(page.getByRole("alert")).toContainText(
+    "Stop Annotate before changing settings",
+  );
+  await expect(system).toBeChecked();
+  await expect(light).toBeFocused();
+});
+
+for (const phase of ["recording", "transcribing", "annotating", "packaging"]) {
+  test(`Appearance explains ${phase} safety without losing keyboard navigation`, async ({
+    page,
+  }) => {
+    await openSettings(page, { pendingPage: "Appearance" });
+    const mode = page.getByRole("radiogroup", { name: "Mode", exact: true });
+    const themes = page.getByRole("radiogroup", {
+      name: /^(Light|Dark) theme$/,
+    });
+    const system = mode.getByRole("radio", { name: "System", exact: true });
+    await expect(system).toBeVisible();
+    await system.focus();
+    await page.evaluate(
+      (phase) =>
+        window.postMessage(
+          {
+            type: "dictate-test",
+            event: "dictation-state",
+            payload: { phase, error: null },
+          },
+          "*",
+        ),
+      phase,
+    );
+    const reason =
+      phase === "annotating" || phase === "packaging"
+        ? "Stop Annotate before changing appearance."
+        : "Finish dictating before changing appearance.";
+    await expect(
+      page.getByRole("status").filter({ hasText: reason }),
+    ).toBeVisible();
+    await expect(system).toHaveAttribute("aria-disabled", "true");
+    await expect(system).toBeFocused();
+    await system.press("Tab");
+    await expect
+      .poll(() =>
+        themes.evaluate((group) => group.contains(document.activeElement)),
+      )
+      .toBe(true);
+    const before = await sentCommands(page);
+    await page.keyboard.press("ArrowRight");
+    await expect(
+      themes.getByRole("radio", { name: "Ember", exact: true }),
+    ).toBeChecked();
+    expect(
+      (await sentCommands(page)).filter((c) => c === "save_settings"),
+    ).toEqual(before.filter((c) => c === "save_settings"));
+    await page.evaluate(() =>
+      window.postMessage(
+        {
+          type: "dictate-test",
+          event: "dictation-state",
+          payload: { phase: "idle", error: null },
+        },
+        "*",
+      ),
+    );
+    await expect(system).not.toHaveAttribute("aria-disabled", "true");
+    await expect
+      .poll(() =>
+        themes.evaluate((group) => group.contains(document.activeElement)),
+      )
+      .toBe(true);
+  });
+}
+
+test("General keyboard order and control actions survive the focus polish", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openSettings(page, { stored: { speechModel: "tiny.en" } });
+  const shortcut = page.getByRole("button", { name: /^Shortcut,/ });
+  const mode = page.getByRole("combobox", {
+    name: "Shortcut mode",
+    exact: true,
+  });
+  const model = page.getByRole("combobox", {
+    name: "Speech model",
+    exact: true,
+  });
+  const manage = page.getByRole("button", {
+    name: "Manage models",
+    exact: true,
+  });
+  const mic = page.getByRole("combobox", { name: "Microphone", exact: true });
+  const testMic = page.getByRole("button", {
+    name: "Test microphone",
+    exact: true,
+  });
+  const startup = page.getByRole("switch", { name: "Launch at login" });
+  await expect(shortcut).toBeVisible();
+  await page.keyboard.press("Tab");
+  await shortcut.focus();
+  for (const control of [
+    shortcut,
+    mode,
+    model,
+    manage,
+    mic,
+    testMic,
+    startup,
+  ]) {
+    await expect(control).toBeFocused();
+    await control.press("Tab");
+  }
+  await shortcut.focus();
+  await shortcut.press("Enter");
+  await expect(shortcut).toHaveAccessibleName(/Press shortcut/);
+  await shortcut.press("Escape");
+  await expect(shortcut).not.toHaveAccessibleName(/Press shortcut/);
+  for (const selector of [mode, model, mic]) {
+    await selector.focus();
+    await selector.press("Space");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await selector.press("ArrowDown");
+    await selector.press("Escape");
+    await expect(page.getByRole("listbox")).not.toBeVisible();
+    await expect(selector).toBeFocused();
+  }
+  await testMic.focus();
+  await testMic.press("Enter");
+  const stop = page.getByRole("button", { name: "Stop test", exact: true });
+  await expect(stop).toBeFocused();
+  await stop.press("Enter");
+  await expect(testMic).toBeFocused();
+  await startup.focus();
+  await startup.press("Space");
+  await expect(startup).toBeChecked();
+  await manage.focus();
+  await manage.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Models", level: 1 }),
+  ).toBeVisible();
+});
+
+for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
+  for (const mode of ["light", "dark"] as const) {
+    test(`${theme} ${mode} Settings keyboard traversal rings the control, not its passive row`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await page.emulateMedia({ colorScheme: mode, reducedMotion: "reduce" });
+      await openSettings(page, {
+        history: takes,
+        annotations: sessions,
+        stored: { themeLight: theme, themeDark: theme, appearanceMode: mode },
+      });
+      for (const name of [
+        "General",
+        "Appearance",
+        "Models",
+        "Annotate",
+        "History",
+        "Output",
+        "Advanced",
+        "About",
+      ]) {
+        await page
+          .getByRole("navigation")
+          .getByRole("button", { name, exact: true })
+          .click();
+        const main = page.getByRole("main");
+        await expect(
+          main.getByRole("heading", { name, level: 1, exact: true }),
+        ).toBeVisible();
+        const controls = main.locator(
+          'button, input, select, textarea, a[href], [tabindex="0"]',
+        );
+        await expect.poll(() => controls.count()).toBeGreaterThan(0);
+        const geometry = () =>
+          main.locator(".ui-settings-row").evaluateAll((rows) =>
+            rows.map((row) => {
+              const el = row as HTMLElement;
+              return [
+                el.offsetLeft,
+                el.offsetTop,
+                el.offsetWidth,
+                el.offsetHeight,
+              ];
+            }),
+          );
+        const before = await geometry();
+        await page.keyboard.press("Tab");
+        await main.evaluate((root) => {
+          const first = [
+            ...root.querySelectorAll<HTMLElement>(
+              'button, input, select, textarea, a[href], [tabindex="0"]',
+            ),
+          ].find(
+            (el) =>
+              el.tabIndex >= 0 &&
+              !el.hasAttribute("disabled") &&
+              el.checkVisibility(),
+          );
+          first?.focus();
+        });
+        const visited = new Set<string>();
+        for (let step = 0; step < 60; step++) {
+          const focus = await main.evaluate((root) => {
+            const active = document.activeElement as HTMLElement;
+            if (!root.contains(active)) return null;
+            const row = active.closest(".ui-settings-row");
+            const rings = row
+              ? [...row.querySelectorAll("*")].filter((el) => {
+                  const css = getComputedStyle(el);
+                  return (
+                    el.checkVisibility({ checkOpacity: true }) &&
+                    el.getBoundingClientRect().width > 1 &&
+                    el.getBoundingClientRect().height > 1 &&
+                    ((css.outlineStyle !== "none" &&
+                      parseFloat(css.outlineWidth) > 0) ||
+                      (el.contains(active) &&
+                        css.boxShadow.includes("inset") &&
+                        css.boxShadow.includes("2px")))
+                  );
+                })
+              : [];
+            const css = row && getComputedStyle(row);
+            return {
+              key: [...root.querySelectorAll("*")].indexOf(active).toString(),
+              name: active.getAttribute("aria-label") ?? active.textContent,
+              passive: !!row,
+              rowRing: css
+                ? css.outlineStyle !== "none" &&
+                  parseFloat(css.outlineWidth) > 0
+                : false,
+              rings: rings.length,
+            };
+          });
+          if (!focus) break;
+          expect(visited.has(focus.key), name + " repeats a Tab stop").toBe(
+            false,
+          );
+          visited.add(focus.key);
+          if (focus.passive) {
+            expect(focus.rowRing, name + " / " + focus.name).toBe(false);
+            expect(focus.rings, name + " / " + focus.name).toBe(1);
+          }
+          await page.keyboard.press("Tab");
+        }
+        expect(visited.size, name).toBeGreaterThan(0);
+        expect(await geometry(), name + " row geometry").toEqual(before);
+      }
+    });
+  }
+}
+
+for (const theme of ["ember", "paper", "capy", "rosePine", "neutral"]) {
+  for (const mode of ["light", "dark"] as const) {
+    test(`${theme} ${mode} History markers are inset and separate from focus`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: mode, reducedMotion: "reduce" });
+      await openSettings(page, {
+        history: takes,
+        annotations: sessions,
+        stored: { themeLight: theme, themeDark: theme, appearanceMode: mode },
+      });
+      await page.getByRole("button", { name: "History", exact: true }).click();
+      for (const view of ["Dictations", "Annotations"]) {
+        await page.getByRole("radio", { name: view, exact: true }).check();
+        for (const width of [1100, 640]) {
+          await page.setViewportSize({ width, height: 760 });
+          const titles = view === "Dictations" ? /^Take / : /^Session /;
+          const controls = page.getByRole("button", { name: titles });
+          if (width === 640) await controls.first().click();
+          const selected =
+            width === 640
+              ? page.locator(".ui-history-accordion-current > button")
+              : page.locator(".ui-history-row-current");
+          await expect(selected).toHaveCount(1);
+          const idle =
+            width === 640
+              ? controls.nth(1)
+              : controls.nth(1).locator("xpath=ancestor::li[1]");
+          await page.mouse.move(0, 0);
+          expect(
+            await selected.evaluate(
+              (row) => getComputedStyle(row).backgroundColor,
+            ),
+          ).toBe(
+            await idle.evaluate((row) => getComputedStyle(row).backgroundColor),
+          );
+          const restingHover = await selected.evaluate(
+            (row) => getComputedStyle(row).backgroundImage,
+          );
+          if (width === 1100) {
+            await selected.hover();
+            await expect
+              .poll(() =>
+                selected.evaluate(
+                  (row) => getComputedStyle(row).backgroundImage,
+                ),
+              )
+              .not.toBe(restingHover);
+          }
+          await page.mouse.move(0, 0);
+          const shape = await selected.evaluate((row) => {
+            const marker = getComputedStyle(row, "::before");
+            const label = row.querySelector(".astryx-text")!;
+            return {
+              top: marker.top,
+              bottom: marker.bottom,
+              left: marker.left,
+              width: marker.width,
+              rounded: parseFloat(marker.borderRadius) > 0,
+              textGap:
+                label.getBoundingClientRect().left -
+                row.getBoundingClientRect().left -
+                parseFloat(marker.left) -
+                parseFloat(marker.width),
+            };
+          });
+          expect(shape).toMatchObject({
+            top: "8px",
+            bottom: "8px",
+            left: "4px",
+            width: "2px",
+            rounded: true,
+          });
+          expect(shape.textGap).toBeGreaterThanOrEqual(8);
+          const before = await controls.evaluateAll((rows) =>
+            rows.map((row) => row.getBoundingClientRect().toJSON()),
+          );
+          await page.keyboard.press("Tab");
+          await controls.nth(1).focus();
+          await expect(controls.nth(1)).toBeFocused();
+          expect(
+            await selected.evaluate(
+              (row) => getComputedStyle(row, "::before").width,
+            ),
+          ).toBe("2px");
+          const focused =
+            width === 640
+              ? controls.nth(1)
+              : controls.nth(1).locator("xpath=ancestor::li[1]");
+          expect((await edgeMarker(focused)).width).not.toBe("2px");
+          const ring = await focused.evaluate((row) => {
+            const button = row.matches("button")
+              ? row
+              : row.querySelector("button")!;
+            return [row, button].some((node) => {
+              const css = getComputedStyle(node);
+              return (
+                css.outlineStyle !== "none" && parseFloat(css.outlineWidth) > 0
+              );
+            });
+          });
+          expect(ring).toBe(true);
+          if (width === 1100) {
+            expect(
+              await focused.evaluate((row) => ({
+                offset: getComputedStyle(row).outlineOffset,
+                rounded: parseFloat(getComputedStyle(row).borderRadius) > 0,
+              })),
+            ).toEqual({ offset: "-4px", rounded: true });
+          }
+          expect(
+            await controls.evaluateAll((rows) =>
+              rows.map((row) => row.getBoundingClientRect().toJSON()),
+            ),
+          ).toEqual(before);
+        }
+      }
+    });
+  }
+}
+
+test("the entry the detail belongs to is marked in both History layouts", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1100, height: 580 });
+  await openSettings(page, { history: takes, annotations: sessions });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  const list = historyList(page, "Dictations", 1100);
+  const rows = list.locator("li");
+  // The library's own selected row is reported, and only one row carries it.
+  await expect(rows.first()).toHaveAttribute("aria-current", "true");
+  await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
+  const picked = await edgeMarker(rows.first());
+  expect(picked.width).toBe("2px");
+  expect(picked.colour).not.toBe("rgba(0, 0, 0, 0)");
+  expect((await edgeMarker(rows.nth(2))).width).not.toBe("2px");
+  // Choosing another entry moves the marker and moves nothing else.
+  const before = await rowBoxes(rows);
+  await rows.nth(2).getByRole("button").click();
+  await expect(rows.nth(2)).toHaveAttribute("aria-current", "true");
+  await expect(rows.first()).not.toHaveAttribute("aria-current", "true");
+  expect(await rowBoxes(rows)).toEqual(before);
+  // The narrow layout marks the row it has open, and keeps the same choice.
+  await page.setViewportSize({ width: 640, height: 580 });
+  const third = page.getByRole("button", { name: /^Take 3:/ });
+  await expect(third).toHaveAttribute("aria-expanded", "true");
+  expect((await edgeMarker(third)).width).toBe("2px");
+  expect(
+    (await edgeMarker(page.getByRole("button", { name: /^Take 5:/ }))).width,
+  ).not.toBe("2px");
+  await page.getByRole("button", { name: /^Take 5:/ }).click();
+  await expect(third).toHaveAttribute("aria-expanded", "false");
+  expect((await edgeMarker(third)).width).not.toBe("2px");
+  expect(
+    (await edgeMarker(page.getByRole("button", { name: /^Take 5:/ }))).width,
+  ).toBe("2px");
+});
+
+for (const width of [640, 720, 820, 1100]) {
+  for (const view of ["Dictations", "Annotations"] as const) {
+    test(`at ${width}px ${view} says what it keeps on disk above the list`, async ({
+      page,
+    }) => {
+      await openHistory(page, width, view);
+      const list = historyList(page, view, width);
+      const line = page.getByText(
+        new RegExp(
+          view === "Dictations"
+            ? "^17\\.6 MB on this Mac"
+            : "^3\\.0 MB on this Mac · 14 sessions · kept until deleted$",
+        ),
+      );
+      await expect(line).toHaveCount(1);
+      await expect(line).toBeVisible();
+      // Above the list, and on screen before anything is scrolled.
+      const [lineBox, listBox] = [
+        (await line.boundingBox())!,
+        (await list.boundingBox())!,
+      ];
+      expect(lineBox.y + lineBox.height).toBeLessThanOrEqual(listBox.y + 1);
+      expect(lineBox.y + lineBox.height).toBeLessThanOrEqual(580);
+      expect(
+        await page.evaluate(() => document.scrollingElement!.scrollTop),
+      ).toBe(0);
+      // One quiet line of type: no card, no rule, no background of its own.
+      const painted = await line.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          background: style.backgroundColor,
+          border: style.borderBottomWidth,
+          height: element.getBoundingClientRect().height,
+        };
+      });
+      expect(painted.background).toBe("rgba(0, 0, 0, 0)");
+      expect(painted.border).toBe("0px");
+      expect(painted.height).toBeLessThanOrEqual(24);
+      // The retention control lives on that line, not below the list.
+      if (view === "Dictations")
+        await expect(
+          page.getByRole("combobox", { name: "Keep history for" }),
+        ).toBeVisible();
+    });
+  }
+}
+
+for (const width of [640, 720, 820, 1100]) {
+  for (const view of ["Dictations", "Annotations"] as const) {
+    test(`at ${width}px ${view} storage stays readable with the navigation hint`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 760 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await openSettings(page, { history: takes, annotations: sessions });
+      await page.getByRole("button", { name: "History", exact: true }).click();
+      await page.keyboard.press("Tab");
+      const tab = page.getByRole("radio", { name: view, exact: true });
+      await tab.focus();
+      await tab.press("Space");
+      const hint = page.getByText("to navigate", { exact: true });
+      await expect(hint).toBeVisible();
+      const line = page.getByText(
+        view === "Dictations"
+          ? /^17\.6 MB on this Mac/
+          : /^3\.0 MB on this Mac · 14 sessions · kept until deleted$/,
+      );
+      await expect(line).toBeVisible();
+      const readable = () =>
+        line.evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const text = range.getBoundingClientRect();
+          const box = element.getBoundingClientRect();
+          const overlays = [...document.querySelectorAll("[popover]")]
+            .filter((node) => node.matches(":popover-open"))
+            .map((node) => node.getBoundingClientRect());
+          return {
+            complete:
+              text.left >= box.left - 1 &&
+              text.right <= box.right + 1 &&
+              text.top >= box.top - 1 &&
+              text.bottom <= box.bottom + 1 &&
+              text.right <= innerWidth,
+            covered: overlays.some(
+              (overlay) =>
+                overlay.left < text.right &&
+                overlay.right > text.left &&
+                overlay.top < text.bottom &&
+                overlay.bottom > text.top,
+            ),
+          };
+        });
+      await expect.poll(readable).toEqual({ complete: true, covered: false });
+      const before = await line.boundingBox();
+      await tab.press("Tab");
+      await expect(hint).not.toBeVisible();
+      expect(await readable()).toEqual({ complete: true, covered: false });
+      expect(await line.boundingBox()).toEqual(before);
+    });
+  }
+}

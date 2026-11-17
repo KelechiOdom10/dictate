@@ -201,7 +201,6 @@ function mockApp(
     annotateShortcut: "Alt+Shift+KeyS",
     annotateEnabled: true,
     annotateShowInRecordings: false,
-    glass: false,
     ...overrides,
   };
   mockWindows("settings");
@@ -231,6 +230,8 @@ function mockApp(
         opened.push(String(args && "location" in args ? args.location : ""));
         return null;
       }
+      if (command === "storage_usage")
+        return { historyBytes: 18_432_000, annotationBytes: 3_145_728 };
       if (command === "list_history") {
         const search = String(
           args && "search" in args ? args.search : "",
@@ -436,6 +437,27 @@ export const History: Story = {
       "true",
     );
     await userEvent.click(c.getByRole("button", { name: /Bakery/i }));
+    // The row in use carries the marker, and it is the only one that does.
+    // The list rebuilds its rows on a selection change, so the row is read
+    // fresh rather than held across the click.
+    const current = () =>
+      canvasElement.querySelector<HTMLElement>(".ui-history-row-current");
+    await waitFor(() =>
+      expect(getComputedStyle(current()!, "::before").width).toBe("2px"),
+    );
+    expect(getComputedStyle(current()!, "::before").backgroundColor).not.toBe(
+      "rgba(0, 0, 0, 0)",
+    );
+    expect(
+      canvasElement.querySelectorAll(".ui-history-row-current"),
+    ).toHaveLength(1);
+    // What the tab keeps on disk sits in one quiet line above the list.
+    const kept = await c.findByText(/^17\.6 MB on this Mac · keep$/);
+    expect(kept.getBoundingClientRect().height).toBeLessThanOrEqual(24);
+    expect(getComputedStyle(kept).backgroundColor).toBe("rgba(0, 0, 0, 0)");
+    expect(kept.getBoundingClientRect().bottom).toBeLessThan(
+      c.getByRole("list", { name: "Dictations" }).getBoundingClientRect().top,
+    );
   },
 };
 const layoutOf = (...elements: HTMLElement[]) =>
@@ -487,6 +509,11 @@ export const HistoryNarrowOpen: Story = {
     await userEvent.click(slack);
     await expect(bakery).toHaveAttribute("aria-expanded", "false");
     await expect(slack).toHaveAttribute("aria-expanded", "true");
+    // The row the detail belongs to is marked once it is open.
+    await waitFor(() =>
+      expect(getComputedStyle(slack, "::before").width).toBe("2px"),
+    );
+    expect(getComputedStyle(bakery, "::before").width).not.toBe("2px");
     const detail = c.getByRole("region", { name: "Dictation" });
     await expect(detail).toHaveTextContent("Then hand it to review.");
     await expect(detail.scrollWidth).toBeLessThanOrEqual(detail.clientWidth);
@@ -1093,30 +1120,6 @@ export const Appearance: Story = {
     // Every theme is a picture of its light and dark side, nothing else.
     expect(themes.querySelectorAll("svg")).toHaveLength(5);
     expect(themes.querySelectorAll(".astryx-status-dot")).toHaveLength(0);
-    // Glass is opt-in and starts off.
-    expect(
-      c.getByRole("switch", { name: "Translucent window" }),
-    ).not.toBeChecked();
-  },
-};
-
-export const AppearanceGlass: Story = {
-  name: "Appearance / translucent window on",
-  beforeEach: ({ globals }) => mockApp(globals, [], undefined, { glass: true }),
-  render: () => <GeneralPage page="Appearance" />,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement);
-    const toggle = await c.findByRole("switch", {
-      name: "Translucent window",
-    });
-    expect(toggle).toBeChecked();
-    expect(
-      c.getByText(/Lets what is behind the window show through/),
-    ).toBeInTheDocument();
-    await userEvent.click(toggle);
-    await expect(
-      c.getByRole("switch", { name: "Translucent window" }),
-    ).not.toBeChecked();
   },
 };
 

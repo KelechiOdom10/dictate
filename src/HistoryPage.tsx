@@ -58,7 +58,8 @@ import {
   writeSettings,
   type Settings,
 } from "./settings";
-import { KeyboardShortcut, SettingsGroup, SettingsRow } from "./ui";
+import { formatBytes, readStorageUsage } from "./storage";
+import { KeyboardShortcut } from "./ui";
 import { ErrorNotice, LoadError, Loading } from "./SettingsStatus";
 import {
   annotationMeta,
@@ -117,10 +118,12 @@ export default function HistoryPage({
   const [view, setView] = useState<string>(initialView);
   return (
     <VStack gap={4}>
-      <SegmentedControl label="Show" value={view} onChange={setView}>
-        <SegmentedControlItem value="dictations" label="Dictations" />
-        <SegmentedControlItem value="annotations" label="Annotations" />
-      </SegmentedControl>
+      <VStack paddingBlockEnd={6}>
+        <SegmentedControl label="Show" value={view} onChange={setView}>
+          <SegmentedControlItem value="dictations" label="Dictations" />
+          <SegmentedControlItem value="annotations" label="Annotations" />
+        </SegmentedControl>
+      </VStack>
       {view === "annotations" ? <Annotations /> : <Dictations />}
     </VStack>
   );
@@ -191,6 +194,11 @@ function Accordion<Id extends string | number>({
         {rows.map((row) => (
           <Collapsible
             key={row.id}
+            className={
+              row.id === value
+                ? "ui-history-accordion ui-history-accordion-current"
+                : "ui-history-accordion"
+            }
             value={String(row.id)}
             onClickCapture={(event) => {
               const trigger = event.currentTarget.querySelector(
@@ -264,6 +272,11 @@ function Rows<Id extends string | number>({
         {rows.map((row) => (
           <ListItem
             key={row.id}
+            className={
+              row.id === value
+                ? "ui-history-row ui-history-row-current"
+                : "ui-history-row"
+            }
             itemKey={row.id}
             label={row.title}
             description={row.meta}
@@ -352,6 +365,7 @@ function Dictations() {
     placeholderData: keepPreviousData,
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+  const usage = useQuery({ queryKey: ["storage"], queryFn: readStorageUsage });
   const retention = useMutation({
     mutationFn: writeSettings,
     onSuccess: (saved) => {
@@ -400,40 +414,41 @@ function Dictations() {
   const nothingYet =
     !query && history.isSuccess && history.data.entries.length === 0;
   const toolbar = (
-    <HStack gap={2} vAlign="center" wrap="wrap">
-      <TextInput
-        type="search"
-        label="Search history"
-        isLabelHidden
-        placeholder="Search history"
-        startIcon={Search}
-        hasClear
-        value={search}
-        onChange={setSearch}
-      />
-      {history.isSuccess && !nothingYet && (
-        <Selector
-          label="Status"
+    <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <TextInput
+          type="search"
+          label="Search history"
           isLabelHidden
-          variant="secondary"
-          value={filter}
-          options={filters}
-          onChange={(value) =>
-            setFilter(filters.find((f) => f.value === value)?.value ?? "all")
-          }
+          placeholder="Search history"
+          startIcon={Search}
+          hasClear
+          value={search}
+          onChange={setSearch}
         />
-      )}
-    </HStack>
-  );
-  const keepFor = (
-    <SettingsGroup title="Storage">
-      <SettingsRow
-        label="Keep history for"
-        help="Older dictations are deleted from this Mac automatically."
-      >
+        {history.isSuccess && !nothingYet && (
+          <Selector
+            label="Status"
+            isLabelHidden
+            variant="secondary"
+            value={filter}
+            options={filters}
+            onChange={(value) =>
+              setFilter(filters.find((f) => f.value === value)?.value ?? "all")
+            }
+          />
+        )}
+      </HStack>
+      <HStack gap={2} vAlign="center">
+        <Text type="supporting">
+          {usage.data
+            ? `${formatBytes(usage.data.historyBytes)} on this Mac · keep`
+            : "Measuring this Mac · keep"}
+        </Text>
         <Selector
           label="Keep history for"
           isLabelHidden
+          variant="secondary"
           value={pendingRetention ?? current}
           isDisabled={!settings.data || retention.isPending}
           options={retentionOrder.map((value) => ({
@@ -447,20 +462,20 @@ function Dictations() {
             else saveRetention(value);
           }}
         />
-      </SettingsRow>
-      <AlertDialog
-        isOpen={pendingRetention !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingRetention(null);
-        }}
-        title={`Delete dictations older than ${retentionLabels[pendingRetention ?? current]}?`}
-        description={`They are removed now, and from then on after ${retentionLabels[pendingRetention ?? current]}.`}
-        actionLabel="Delete older dictations"
-        onAction={() => {
-          if (pendingRetention) saveRetention(pendingRetention);
-        }}
-      />
-    </SettingsGroup>
+        <AlertDialog
+          isOpen={pendingRetention !== null}
+          onOpenChange={(open) => {
+            if (!open) setPendingRetention(null);
+          }}
+          title={`Delete dictations older than ${retentionLabels[pendingRetention ?? current]}?`}
+          description={`They are removed now, and from then on after ${retentionLabels[pendingRetention ?? current]}.`}
+          actionLabel="Delete older dictations"
+          onAction={() => {
+            if (pendingRetention) saveRetention(pendingRetention);
+          }}
+        />
+      </HStack>
+    </HStack>
   );
 
   if (history.isPending)
@@ -468,7 +483,6 @@ function Dictations() {
       <>
         {toolbar}
         <Loading>Loading your history…</Loading>
-        {keepFor}
       </>
     );
   if (history.isError)
@@ -479,7 +493,6 @@ function Dictations() {
           error={history.error}
           onRetry={() => void history.refetch()}
         />
-        {keepFor}
       </>
     );
 
@@ -591,7 +604,6 @@ function Dictations() {
           )}
         </Grid>
       )}
-      {keepFor}
     </>
   );
 }
@@ -719,6 +731,7 @@ function Annotations() {
     queryFn: readAnnotations,
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
+  const usage = useQuery({ queryKey: ["storage"], queryFn: readStorageUsage });
 
   useEffect(() => {
     const subscription = listen("annotations-changed", () => {
@@ -781,6 +794,11 @@ function Annotations() {
   return (
     <>
       <ErrorNotice error={error} />
+      <Text type="supporting">
+        {usage.data
+          ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${entries.length.toLocaleString()} ${entries.length === 1 ? "session" : "sessions"} · kept until deleted`
+          : "Measuring this Mac"}
+      </Text>
       <Grid
         ref={panes}
         columns={{ minWidth: PANE_MIN_WIDTH, repeat: "fit" }}

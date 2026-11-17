@@ -240,8 +240,6 @@ function Appearance({
       document.documentElement.dataset.palette =
         (dark ? settings?.themeDark : settings?.themeLight) ?? "ember";
       document.documentElement.dataset.mode = dark ? "dark" : "light";
-      if (settings?.glass) document.documentElement.dataset.glass = "true";
-      else delete document.documentElement.dataset.glass;
       root.getBoundingClientRect();
       frame = requestAnimationFrame(() =>
         root.classList.remove("appearance-changing"),
@@ -258,7 +256,6 @@ function Appearance({
     query.data?.themeLight,
     query.data?.themeDark,
     query.data?.appearanceMode,
-    query.data?.glass,
     query.isFetched,
   ]);
   return null;

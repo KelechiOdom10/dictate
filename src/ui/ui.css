@@ -461,25 +461,31 @@ meter.ui-rating::-moz-meter-bar {
   background: var(--color-accent);
 }
 
-/* Glass: the window's own backdrop steps aside so the material macOS puts
-   behind the webview shows through. The page and the sidebar keep most of
-   their theme surface, and cards stay opaque, so text keeps the contrast it
-   was measured at; only the window frame and the areas around the cards let
-   the desktop through. */
-html[data-glass="true"] .astryx-app-shell {
+.ui-history-row,
+.ui-history-accordion > button[aria-expanded] {
+  padding-inline-start: var(--spacing-4);
+}
+.ui-settings-row:has(:focus-visible) {
+  outline-width: 0;
+}
+.ui-history-row:has(> button:focus-visible) {
+  outline-offset: calc(-1 * var(--spacing-1));
+  border-radius: var(--radius-inner);
+}
+.ui-history-row-current,
+.ui-history-accordion-current button[aria-expanded="true"] {
+  position: relative;
+}
+.ui-history-row-current {
   background-color: transparent;
 }
-html[data-glass="true"] .astryx-app-shell [role="main"] {
-  background-color: color-mix(
-    in oklab,
-    var(--color-background-body) 88%,
-    transparent
-  );
-}
-html[data-glass="true"] .astryx-side-nav {
-  background-color: color-mix(
-    in oklab,
-    var(--color-background-muted) 92%,
-    transparent
-  );
+.ui-history-row-current::before,
+.ui-history-accordion-current button[aria-expanded="true"]::before {
+  content: "";
+  position: absolute;
+  inset-block: var(--spacing-2);
+  inset-inline-start: var(--spacing-1);
+  inline-size: var(--spacing-0-5);
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
 }

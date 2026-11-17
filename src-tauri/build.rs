@@ -37,6 +37,7 @@ const APP_COMMANDS: &[&str] = &[
     "report_settings_refresh_error",
     "list_history",
     "delete_history",
+    "storage_usage",
     "list_models",
     "download_model",
     "cancel_download",

@@ -36,8 +36,7 @@
         "minWidth": 640,
         "minHeight": 480,
         "visible": false,
-        "center": true,
-        "transparent": true
+        "center": true
       }
     ],
     "security": {
