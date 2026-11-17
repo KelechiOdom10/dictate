@@ -90,6 +90,12 @@ const filters: { value: Filter; label: string }[] = [
   { value: "skipped", label: "Nothing heard" },
   { value: "failed", label: "Failed" },
 ];
+type AnnotationFilter = "all" | "complete" | "partial";
+const annotationFilters: { value: AnnotationFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "complete", label: "Complete" },
+  { value: "partial", label: "Partial" },
+];
 const statusLabels: Record<TakeStatus, string> = {
   pasted: "Inserted",
   copied: "Copied",
@@ -429,16 +435,18 @@ function Dictations() {
 
   async function removeChecked(ids: number[]) {
     setError("");
+    const deleted: typeof ids = [];
     try {
-      await deleteEach(ids, deleteHistory, dictationNoun);
-      selection.cancel();
+      await deleteEach(ids, deleteHistory, dictationNoun, deleted);
     } catch (e) {
       setError(String(e));
     } finally {
-      if (selectedId !== null && ids.includes(selectedId)) setSelectedId(null);
+      if (selectedId !== null && deleted.includes(selectedId))
+        setSelectedId(null);
       void client.invalidateQueries({ queryKey: ["history"] });
       void client.invalidateQueries({ queryKey: ["storage"] });
     }
+    return deleted;
   }
 
   function saveRetention(value: Retention) {
@@ -474,11 +482,12 @@ function Dictations() {
         {history.isSuccess && !nothingYet && (
           <SelectButton selection={selection} shown={entries.length} />
         )}
-        {history.isSuccess && !nothingYet && !selection.selecting && (
+        {history.isSuccess && !nothingYet && (
           <Selector
             label="Status"
             isLabelHidden
             variant="secondary"
+            isDisabled={selection.selecting}
             value={filter}
             options={filters}
             onChange={(value) =>
@@ -797,31 +806,51 @@ function DictationDetail({
 function Annotations() {
   const client = useQueryClient();
   const now = useNow();
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<AnnotationFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panes, twoPanes] = useTwoPanes();
   const [error, setError] = useState("");
+  const query = useDeferredValue(search.trim());
   const annotations = useQuery({
     queryKey: ["annotations"],
     queryFn: readAnnotations,
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   const usage = useQuery({ queryKey: ["storage"], queryFn: readStorageUsage });
-  const selection = useSelection(
-    annotations.data?.map((entry) => entry.id) ?? [],
+  const all = annotations.data ?? [];
+  const needle = query.toLowerCase();
+  const entries = all.filter(
+    (entry) =>
+      (filter === "all" ||
+        (filter === "partial") === entry.partial.length > 0) &&
+      (!needle ||
+        [annotationTitle(entry), entry.text, entry.app ?? ""].some((field) =>
+          field.toLowerCase().includes(needle),
+        )),
   );
+  const selection = useSelection(entries.map((entry) => entry.id));
+  const scope = [
+    query ? `matching “${query}”` : "shown",
+    filter === "all" ? "" : filter,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   async function removeChecked(ids: string[]) {
     setError("");
+    const deleted: typeof ids = [];
     try {
-      await deleteEach(ids, deleteAnnotation, annotationNoun);
-      selection.cancel();
+      await deleteEach(ids, deleteAnnotation, annotationNoun, deleted);
     } catch (e) {
       setError(String(e));
     } finally {
-      if (selectedId !== null && ids.includes(selectedId)) setSelectedId(null);
+      if (selectedId !== null && deleted.includes(selectedId))
+        setSelectedId(null);
       void client.invalidateQueries({ queryKey: ["annotations"] });
       void client.invalidateQueries({ queryKey: ["storage"] });
     }
+    return deleted;
   }
 
   useEffect(() => {
@@ -842,10 +871,9 @@ function Annotations() {
         onRetry={() => void annotations.refetch()}
       />
     );
-  const entries = annotations.data;
   const open = entries.find((entry) => entry.id === selectedId);
   const selected = open ?? entries[0];
-  if (!selected)
+  if (all.length === 0)
     return (
       <EmptyState
         headingLevel={2}
@@ -886,10 +914,36 @@ function Annotations() {
     <>
       <ErrorNotice error={error} />
       <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
-        <SelectButton selection={selection} shown={entries.length} />
+        <HStack gap={2} vAlign="center" wrap="wrap">
+          <TextInput
+            type="search"
+            label="Search annotations"
+            isLabelHidden
+            placeholder="Search annotations"
+            startIcon={Search}
+            hasClear
+            value={search}
+            onChange={setSearch}
+          />
+          <SelectButton selection={selection} shown={entries.length} />
+          <Selector
+            label="Status"
+            isLabelHidden
+            variant="secondary"
+            isDisabled={selection.selecting}
+            value={filter}
+            options={annotationFilters}
+            onChange={(value) =>
+              setFilter(
+                annotationFilters.find((f) => f.value === value)?.value ??
+                  "all",
+              )
+            }
+          />
+        </HStack>
         <Text type="supporting">
           {usage.data
-            ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${entries.length.toLocaleString()} ${entries.length === 1 ? "session" : "sessions"} · kept until deleted`
+            ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${all.length.toLocaleString()} ${all.length === 1 ? "session" : "sessions"} · kept until deleted`
             : "Measuring this Mac"}
         </Text>
       </HStack>
@@ -899,7 +953,23 @@ function Annotations() {
         gap={4}
         align="start"
       >
-        {twoPanes ? (
+        {!selected ? (
+          <EmptyState
+            headingLevel={2}
+            title="No matching annotations"
+            description={
+              query
+                ? `Nothing you annotated matches “${query}”.`
+                : `No ${filter} annotations.`
+            }
+            actions={
+              <Button
+                label={query ? "Clear search" : "Show all"}
+                onClick={() => (query ? setSearch("") : setFilter("all"))}
+              />
+            }
+          />
+        ) : twoPanes ? (
           <>
             <VStack gap={2}>
               <Rows
@@ -912,7 +982,7 @@ function Annotations() {
               <SelectionFloat
                 selection={selection}
                 shown={entries.length}
-                scope="shown"
+                scope={scope}
                 noun={annotationNoun}
                 consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
                 onDelete={removeChecked}
@@ -931,7 +1001,7 @@ function Annotations() {
             <SelectionFloat
               selection={selection}
               shown={entries.length}
-              scope="shown"
+              scope={scope}
               noun={annotationNoun}
               consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
               onDelete={removeChecked}

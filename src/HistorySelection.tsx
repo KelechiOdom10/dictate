@@ -24,29 +24,55 @@ export const count = (n: number, noun: Noun) =>
   `${n.toLocaleString()} ${n === 1 ? noun.one : noun.many}`;
 
 /**
- * Checked rows, kept apart from the row being viewed. Only rows still shown
- * count, so a search or filter that hides a checked row also unchecks it.
+ * Checked rows, kept apart from the row being viewed. A row hidden by a
+ * search or filter keeps its check, but is left out of the count and is never
+ * deleted until it is shown again. While a delete runs, selecting cannot be
+ * started or ended.
  */
 export function useSelection<Id>(shown: Id[]) {
   const [selecting, setSelecting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [ids, setIds] = useState<Id[]>([]);
   const all = useRef<HTMLInputElement>(null);
   const checked = ids.filter((id) => shown.includes(id));
   return {
     selecting,
     checked,
+    hidden: ids.length - checked.length,
     all,
     confirming,
-    setConfirming,
-    start: () => setSelecting(true),
+    setConfirming: (open: boolean) => {
+      if (!deleting) setConfirming(open);
+    },
+    deleting,
+    start: () => {
+      if (!deleting) setSelecting(true);
+    },
     cancel: () => {
+      if (deleting) return;
       setSelecting(false);
       setIds([]);
     },
     toggle: (id: Id, on: boolean) =>
-      setIds(on ? [...checked, id] : checked.filter((other) => other !== id)),
-    setAll: (on: boolean) => setIds(on ? shown : []),
+      setIds((ids) =>
+        on ? [...ids, id] : ids.filter((other) => other !== id),
+      ),
+    setAll: (on: boolean) =>
+      setIds((ids) => [
+        ...ids.filter((id) => !shown.includes(id)),
+        ...(on ? shown : []),
+      ]),
+    async remove(onDelete: (ids: Id[]) => Promise<Id[]>) {
+      const asked = checked;
+      setDeleting(true);
+      const deleted = await onDelete(asked).finally(() => {
+        setDeleting(false);
+        setConfirming(false);
+      });
+      setIds((ids) => ids.filter((id) => !deleted.includes(id)));
+      if (deleted.length === asked.length) setSelecting(false);
+    },
   };
 }
 
@@ -63,7 +89,9 @@ export function SelectButton<Id>({
   selection: Selection<Id>;
   shown: number;
 }) {
-  const { selecting, confirming, cancel } = selection;
+  const { selecting, confirming, deleting } = selection;
+  const cancel = useRef(selection.cancel);
+  cancel.current = selection.cancel;
   const button = useRef<HTMLButtonElement>(null);
   const wasSelecting = useRef(false);
   useEffect(() => {
@@ -71,13 +99,13 @@ export function SelectButton<Id>({
     wasSelecting.current = selecting;
   }, [selecting]);
   useEffect(() => {
-    if (!selecting || confirming) return;
+    if (!selecting || confirming || deleting) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) cancel();
+      if (event.key === "Escape" && !event.defaultPrevented) cancel.current();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [selecting, confirming, cancel]);
+  }, [selecting, confirming, deleting]);
   if (selecting) return null;
   return (
     <Button
@@ -85,7 +113,7 @@ export function SelectButton<Id>({
       size="sm"
       variant="ghost"
       label="Select"
-      isDisabled={shown === 0}
+      isDisabled={shown === 0 || deleting}
       onClick={selection.start}
     />
   );
@@ -132,9 +160,9 @@ export function SelectionFloat<Id>({
   scope: string;
   noun: Noun;
   consequence: string;
-  onDelete: (ids: Id[]) => Promise<void>;
+  onDelete: (ids: Id[]) => Promise<Id[]>;
 }) {
-  const [deleting, setDeleting] = useState(false);
+  const { deleting, hidden } = selection;
   const [leaving, setLeaving] = useState(false);
   const [wasSelecting, setWasSelecting] = useState(selection.selecting);
   if (wasSelecting !== selection.selecting) {
@@ -157,7 +185,7 @@ export function SelectionFloat<Id>({
           : "ui-selection-dock ui-selection-reserve"
       }
       ref={dock}
-      aria-hidden={leaving || undefined}
+      inert={leaving}
       style={
         {
           "--pane-center": `${pane.left + pane.width / 2}px`,
@@ -185,6 +213,7 @@ export function SelectionFloat<Id>({
               className="ui-selection-count"
             >
               {n.toLocaleString()} selected
+              {hidden > 0 && ` · ${hidden.toLocaleString()} hidden`}
             </Text>
           </HStack>
         }
@@ -203,6 +232,7 @@ export function SelectionFloat<Id>({
               label="Stop selecting"
               tooltip="Stop selecting"
               icon={<X size={16} aria-hidden="true" />}
+              isDisabled={deleting}
               onClick={selection.cancel}
             />
             <AlertDialog
@@ -212,15 +242,7 @@ export function SelectionFloat<Id>({
               description={consequence}
               actionLabel={`Delete ${count(n, noun)}`}
               isActionLoading={deleting}
-              onAction={async () => {
-                setDeleting(true);
-                try {
-                  await onDelete(selection.checked);
-                } finally {
-                  setDeleting(false);
-                  selection.setConfirming(false);
-                }
-              }}
+              onAction={() => selection.remove(onDelete)}
             />
           </>
         }
@@ -237,14 +259,14 @@ export async function deleteEach<Id>(
   ids: Id[],
   remove: (id: Id) => Promise<unknown>,
   noun: Noun,
+  deleted: Id[],
 ) {
-  let done = 0;
   for (const id of ids) {
     try {
       await remove(id);
-      done++;
+      deleted.push(id);
     } catch (e) {
-      throw `Deleted ${done.toLocaleString()} of ${count(ids.length, noun)}. ${String(e)}`;
+      throw `Deleted ${deleted.length.toLocaleString()} of ${count(ids.length, noun)}. ${String(e)}`;
     }
   }
 }

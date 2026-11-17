@@ -103,6 +103,14 @@ async function openSettings(
       const listeners = new Map<string, { id: number; handler: number }[]>();
       const commands: string[] = [];
       Object.defineProperty(window, "__commands", { value: commands });
+      Object.defineProperty(window, "__deleted", { value: [] });
+      Object.defineProperty(window, "__deleteHooks", { value: {} });
+      Object.defineProperty(window, "__addTake", {
+        value: (take: { id: number }) => {
+          history = [take, ...history];
+          emit("history-changed", null);
+        },
+      });
       // Lets a test move one model between states, the way a download does.
       Object.defineProperty(window, "__setModelState", {
         value: (id, state, active = false) => {
@@ -267,12 +275,39 @@ async function openSettings(
             if (command === "storage_usage")
               return { historyBytes: 18_432_000, annotationBytes: 3_145_728 };
             if (command === "list_history")
-              return { entries: history, hasMore: false };
+              return {
+                entries: history.filter((entry) =>
+                  String((entry as { text?: string }).text ?? "")
+                    .toLowerCase()
+                    .includes(String(args.search ?? "").toLowerCase()),
+                ),
+                hasMore: false,
+              };
             if (command === "list_annotations") return annotations;
-            if (command === "delete_history")
-              history = history.filter((entry) => entry.id !== args.id);
-            if (command === "delete_annotation")
-              annotations = annotations.filter((entry) => entry.id !== args.id);
+            if (
+              command === "delete_history" ||
+              command === "delete_annotation"
+            ) {
+              const hooks = (
+                window as unknown as {
+                  __deleteHooks: { failId?: unknown; delayMs?: number };
+                }
+              ).__deleteHooks;
+              if (hooks.delayMs)
+                await new Promise((resolve) =>
+                  setTimeout(resolve, hooks.delayMs),
+                );
+              if (hooks.failId === args.id) throw "disk said no";
+              (window as unknown as { __deleted: unknown[] }).__deleted.push(
+                args.id,
+              );
+              if (command === "delete_history")
+                history = history.filter((entry) => entry.id !== args.id);
+              else
+                annotations = annotations.filter(
+                  (entry) => entry.id !== args.id,
+                );
+            }
             if (command === "list_models") return models;
             if (command === "whisper_status") return null;
             if (command === "dismiss_error") {
@@ -3000,6 +3035,24 @@ const deletes = async (page: Page, command: string) =>
 const selectionBar = (page: Page, noun: string) =>
   page.getByRole("toolbar", { name: `Selected ${noun}` });
 
+const deletedIds = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { __deleted: unknown[] }).__deleted,
+  );
+
+const setDeleteHooks = (
+  page: Page,
+  hooks: { failId?: unknown; delayMs?: number },
+) =>
+  page.evaluate(
+    (hooks) =>
+      Object.assign(
+        (window as unknown as { __deleteHooks: object }).__deleteHooks,
+        hooks,
+      ),
+    hooks,
+  );
+
 test("wide Dictations bulk delete keeps the viewed row apart from checked rows", async ({
   page,
 }) => {
@@ -3038,6 +3091,7 @@ test("wide Dictations bulk delete keeps the viewed row apart from checked rows",
   await expect(list.getByRole("button", { name: /^Take 5:/ })).toHaveCount(0);
   await expect(list.getByRole("button")).toHaveCount(22);
   expect(await deletes(page, "delete_history")).toBe(2);
+  expect(await deletedIds(page)).toEqual([3, 5]);
   await expect(bar).toHaveCount(0);
   await expect(detail).toContainText("Take 4:");
   await expect(list.locator(".ui-history-row-current")).toHaveCount(1);
@@ -3047,20 +3101,20 @@ test("Dictations select-all names its scope and Escape steps back", async ({
   page,
 }) => {
   await openHistory(page, 1100);
-  await page.getByRole("searchbox", { name: "Search history" }).fill("Take");
+  await page.getByRole("searchbox", { name: "Search history" }).fill("Take 1");
   await page.getByRole("button", { name: "Select", exact: true }).click();
   const bar = selectionBar(page, "dictations");
   await bar
-    .getByRole("checkbox", { name: "Select all 24 matching “Take”" })
+    .getByRole("checkbox", { name: "Select all 11 matching “Take 1”" })
     .check();
-  await expect(bar.getByText("24 selected", { exact: true })).toBeVisible();
+  await expect(bar.getByText("11 selected", { exact: true })).toBeVisible();
   await bar.getByRole("button", { name: "Delete" }).click();
   await expect(
-    page.getByRole("alertdialog", { name: "Delete 24 dictations?" }),
+    page.getByRole("alertdialog", { name: "Delete 11 dictations?" }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
-  await expect(bar.getByText("24 selected", { exact: true })).toBeVisible();
+  await expect(bar.getByText("11 selected", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(bar).toHaveCount(0);
   await expect(
@@ -3114,6 +3168,9 @@ for (const width of [640, 1100])
     await dialog.getByRole("button", { name: "Delete 3 annotations" }).click();
     await expect(page.getByText(/^Session 9:/)).toHaveCount(0);
     expect(await deletes(page, "delete_annotation")).toBe(3);
+    expect(await deletedIds(page)).toEqual(
+      [2, 9, 11].map((n) => sessions[n - 1].id),
+    );
     await expect(page.getByText(/· 11 sessions ·/)).toBeVisible();
   });
 
@@ -3202,3 +3259,155 @@ for (const view of ["Dictations", "Annotations"] as const)
         page.getByRole("button", { name: "Select", exact: true }),
       ).toBeFocused();
     });
+
+for (const width of [640, 1100])
+  test(`Annotations at ${width}px search narrows the list and select-all follows it`, async ({
+    page,
+  }) => {
+    await openHistory(page, width, "Annotations");
+    const select = page.getByRole("button", { name: "Select", exact: true });
+    await expect(select).toBeVisible();
+    await page
+      .getByRole("searchbox", { name: "Search annotations" })
+      .fill("Session 1");
+    await select.click();
+    await expect(
+      page.getByRole("checkbox", { name: /^Select Session \d+:/ }),
+    ).toHaveCount(6);
+    const bar = selectionBar(page, "annotations");
+    await bar
+      .getByRole("checkbox", { name: "Select all 6 matching “Session 1”" })
+      .check();
+    await expect(bar.getByText("6 selected", { exact: true })).toBeVisible();
+    await bar.getByRole("button", { name: "Delete" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Delete 6 annotations" })
+      .click();
+    await expect(bar).toHaveCount(0);
+    expect(await deletedIds(page)).toEqual(
+      [1, 10, 11, 12, 13, 14].map((n) => sessions[n - 1].id),
+    );
+  });
+
+test("both History tabs show the Select button with real data", async ({
+  page,
+}) => {
+  await openHistory(page, 1100);
+  await expect(
+    page.getByRole("button", { name: "Select", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("radio", { name: "Annotations", exact: true }).check();
+  await expect(
+    page.getByRole("searchbox", { name: "Search annotations" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Select", exact: true }),
+  ).toBeVisible();
+});
+
+test("a checked row hidden by search stays checked but is not counted or deleted", async ({
+  page,
+}) => {
+  await openHistory(page, 1100);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const list = page.getByRole("list", { name: "Dictations" });
+  await list.getByRole("checkbox", { name: /^Select Take 3:/ }).check();
+  const bar = selectionBar(page, "dictations");
+  const search = page.getByRole("searchbox", { name: "Search history" });
+  await search.fill("Take 1");
+  await expect(bar.getByText("0 selected · 1 hidden")).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Delete" })).toBeDisabled();
+  await list.getByRole("checkbox", { name: /^Select Take 12:/ }).check();
+  await search.fill("");
+  await expect(bar.getByText("2 selected", { exact: true })).toBeVisible();
+  await expect(
+    list.getByRole("checkbox", { name: /^Select Take 3:/ }),
+  ).toBeChecked();
+  await search.fill("Take 1");
+  await bar.getByRole("button", { name: "Delete" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Delete 1 dictation" })
+    .click();
+  await expect(bar).toHaveCount(0);
+  expect(await deletedIds(page)).toEqual([12]);
+});
+
+test("a failed bulk delete says how far it got and keeps the survivors checked", async ({
+  page,
+}) => {
+  await openHistory(page, 1100, "Annotations");
+  await setDeleteHooks(page, { failId: sessions[8].id });
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  for (const n of [2, 9, 11])
+    await page
+      .getByRole("checkbox", { name: new RegExp(`^Select Session ${n}:`) })
+      .check();
+  const bar = selectionBar(page, "annotations");
+  await bar.getByRole("button", { name: "Delete" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Delete 3 annotations" })
+    .click();
+  await expect(
+    page.getByText("Deleted 1 of 3 annotations. disk said no"),
+  ).toBeVisible();
+  await expect(bar.getByText("2 selected", { exact: true })).toBeVisible();
+  expect(await deletedIds(page)).toEqual([sessions[1].id]);
+});
+
+test("while a bulk delete runs, the confirm is disabled and selecting cannot end", async ({
+  page,
+}) => {
+  await openHistory(page, 1100);
+  await setDeleteHooks(page, { delayMs: 600 });
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const list = page.getByRole("list", { name: "Dictations" });
+  await list.getByRole("checkbox", { name: /^Select Take 3:/ }).check();
+  await list.getByRole("checkbox", { name: /^Select Take 5:/ }).check();
+  const bar = selectionBar(page, "dictations");
+  await bar.getByRole("button", { name: "Delete" }).click();
+  const action = page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Delete 2 dictations" });
+  await action.click();
+  await expect(action).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(bar).toBeVisible();
+  await expect(
+    bar.getByRole("button", { name: "Stop selecting" }),
+  ).toBeDisabled();
+  await expect(bar).toHaveCount(0);
+  expect(await deletedIds(page)).toEqual([3, 5]);
+});
+
+test("a take arriving while all are checked stays unchecked", async ({
+  page,
+}) => {
+  await openHistory(page, 1100);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = selectionBar(page, "dictations");
+  await bar.getByRole("checkbox", { name: "Select all 24 shown" }).check();
+  await page.evaluate(() =>
+    (window as unknown as { __addTake: (take: object) => void }).__addTake({
+      id: 99,
+      text: "Take 99: arrived while selecting.",
+      createdAtMs: Date.now(),
+      app: "Notes",
+      model: "ggml-base.en",
+      audioMs: 2_400,
+      inferenceMs: 410,
+      totalMs: 650,
+      status: "pasted",
+      detail: null,
+    }),
+  );
+  const all = bar.getByRole("checkbox", { name: "Select all 25 shown" });
+  await expect(all).toHaveJSProperty("indeterminate", true);
+  await expect(bar.getByText("24 selected", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: /^Select Take 99:/ }),
+  ).not.toBeChecked();
+});
