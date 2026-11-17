@@ -12,6 +12,8 @@ const APP_COMMANDS: &[&str] = &[
     "get_settings",
     "save_settings",
     "capture_shortcut",
+    "settings_notices",
+    "dismiss_settings_notices",
     "input_devices",
     "microphone_test",
     "microphone_level",

@@ -271,14 +271,16 @@ impl Runtime {
             return Err("Stop Annotate before recording a shortcut".into());
         }
         let dictation = self.settings.chord()?;
-        let annotate = self.settings.annotate_chord()?;
+        let annotate = self.settings.annotate_chord().ok();
         if enabled {
             self.capturing_shortcut = true;
             for (chord, registered) in [
-                (dictation, &mut self.shortcut_registered),
+                (Some(dictation), &mut self.shortcut_registered),
                 (annotate, &mut self.annotate_registered),
             ] {
-                if *registered {
+                if let Some(chord) = chord
+                    && *registered
+                {
                     registration(chord, false)?;
                     *registered = false;
                     self.suspended_shortcuts.push(chord);
@@ -290,7 +292,7 @@ impl Runtime {
                 if chord == dictation && !self.shortcut_registered {
                     registration(chord, true)?;
                     self.shortcut_registered = true;
-                } else if chord == annotate
+                } else if Some(chord) == annotate
                     && self.settings.annotate_enabled
                     && !self.annotate_registered
                 {
@@ -574,6 +576,25 @@ fn with_history<T>(
     let state = app.state::<History>();
     let store = state.lock().map_err(|e| e.to_string())?;
     read(store.as_ref().map_err(Clone::clone)?)
+}
+
+/// The history store at launch. It is pruned only when the settings were read
+/// from disk as written: a retention that came from a default or a repair
+/// must never decide what is deleted.
+fn open_history(
+    path: &Path,
+    retention: HistoryRetention,
+    may_prune: bool,
+) -> Result<history::Store, history::OpenError> {
+    let store = history::Store::open(path)?;
+    if may_prune {
+        store
+            .prune(retention, history::now_ms())
+            .map_err(history::OpenError::Failed)?;
+    } else {
+        log::warn!("[history] startup prune skipped: settings were not read from disk as written");
+    }
+    Ok(store)
 }
 
 fn record_take(app: &AppHandle, take: &NewTake, retention: HistoryRetention) {
@@ -906,6 +927,21 @@ fn capture_shortcut(app: AppHandle, enabled: bool) -> Result<(), String> {
         surface::clear_error(&app);
     }
     result
+}
+
+/// Sentences about settings that were reset at launch, for the General page.
+struct SettingsNotices(Mutex<Vec<String>>);
+
+#[tauri::command]
+fn settings_notices(notices: tauri::State<'_, SettingsNotices>) -> Vec<String> {
+    notices.0.lock().map(|n| n.clone()).unwrap_or_default()
+}
+
+#[tauri::command]
+fn dismiss_settings_notices(notices: tauri::State<'_, SettingsNotices>) {
+    if let Ok(mut notices) = notices.0.lock() {
+        notices.clear();
+    }
 }
 
 #[tauri::command]
@@ -1982,6 +2018,8 @@ pub fn run() {
             get_settings,
             save_settings,
             capture_shortcut,
+            settings_notices,
+            dismiss_settings_notices,
             input_devices,
             microphone_test,
             microphone_level,
@@ -2023,8 +2061,13 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let data_dir = app.path().app_data_dir()?;
-            let (settings, mut startup_error) =
-                settings::load_or_default(&data_dir.join("settings.json"));
+            let settings::Loaded {
+                settings,
+                may_prune,
+                notices,
+                problem: mut startup_error,
+            } = settings::load_or_default(&data_dir.join("settings.json"));
+            app.manage(SettingsNotices(Mutex::new(notices)));
             app_icon::sync(app.handle(), &settings);
             let models_dir = data_dir.join("models");
             let removed = models::remove_partials(&models_dir);
@@ -2033,12 +2076,11 @@ pub fn run() {
             }
             let legacy = models::legacy_candidates();
             let pending = models::legacy_pending(&models_dir, &legacy);
-            let store = history::Store::open(&data_dir.join("history.sqlite3")).and_then(|store| {
-                store
-                    .prune(settings.history_retention, history::now_ms())
-                    .map_err(history::OpenError::Failed)?;
-                Ok(store)
-            });
+            let store = open_history(
+                &data_dir.join("history.sqlite3"),
+                settings.history_retention,
+                may_prune,
+            );
             let store = store.map_err(|error| {
                 let problem = error.problem();
                 let message = problem.fix.clone();
@@ -2411,6 +2453,78 @@ mod take_tests {
         fn persist(&self, settings: &Settings) -> Result<(), String> {
             settings::save(&self.path, settings)
         }
+    }
+
+    /// The DICT-14 repro end to end: the two calls launch makes, against a
+    /// temp app-data dir. A reserved chord in a "Forever" file, or a file
+    /// that can't be read at all, must never delete a 30-day-old dictation.
+    #[test]
+    fn launch_never_prunes_history_on_a_settings_file_it_had_to_repair() {
+        for file in [
+            r#"{"version":2,"shortcut":"Super+Space","historyRetention":"forever"}"#,
+            r#"{"version":2,"historyRetention":"decade"}"#,
+            "{broken",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let settings_path = dir.path().join("settings.json");
+            let history_path = dir.path().join("history.sqlite3");
+            std::fs::write(&settings_path, file).unwrap();
+            let now = history::now_ms();
+            {
+                let store = history::Store::open(&history_path).unwrap();
+                for age_ms in [30 * 24 * 3600 * 1000, 60_000] {
+                    store
+                        .insert(&NewTake {
+                            text: "kept".into(),
+                            created_at_ms: now - age_ms,
+                            app: None,
+                            model: "parakeet".into(),
+                            audio_ms: 1000,
+                            inference_ms: Some(10),
+                            total_ms: 20,
+                            status: TakeStatus::Pasted,
+                            detail: None,
+                        })
+                        .unwrap();
+                }
+            }
+            let loaded = settings::load_or_default(&settings_path);
+            let store = open_history(
+                &history_path,
+                loaded.settings.history_retention,
+                loaded.may_prune,
+            )
+            .unwrap();
+            assert_eq!(store.list("", 10).unwrap().entries.len(), 2, "{file}");
+            assert_eq!(
+                loaded.settings.history_retention,
+                HistoryRetention::Forever,
+                "{file}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unusable_annotate_chord_never_blocks_recording_the_dictation_shortcut() {
+        let mut runtime = unavailable_shortcut();
+        runtime.settings.annotate_shortcut = "Super+KeyH".into();
+        runtime.shortcut_registered = true;
+        let mut calls = Vec::new();
+        runtime
+            .capture_shortcut(true, |chord, register| {
+                calls.push((chord, register));
+                Ok(())
+            })
+            .unwrap();
+        assert!(runtime.capturing_shortcut);
+        runtime
+            .capture_shortcut(false, |chord, register| {
+                calls.push((chord, register));
+                Ok(())
+            })
+            .unwrap();
+        let dictation = runtime.settings.chord().unwrap();
+        assert_eq!(calls, [(dictation, false), (dictation, true)]);
     }
 
     #[test]

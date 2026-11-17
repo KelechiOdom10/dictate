@@ -4,12 +4,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AudioWaveform, Keyboard, Mic, Power } from "lucide-react";
 import { z } from "zod";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
 import {
   readDevices,
   readSettings,
+  readSettingsNotices,
   writeSettings,
   type Settings,
 } from "./settings";
@@ -30,6 +32,10 @@ export default function General({
   const query = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   const models = useQuery({ queryKey: ["models"], queryFn: readModels });
   const devices = useQuery({ queryKey: ["devices"], queryFn: readDevices });
+  const notices = useQuery({
+    queryKey: ["settings-notices"],
+    queryFn: readSettingsNotices,
+  });
   const [recording, setRecording] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
@@ -103,6 +109,20 @@ export default function General({
     settings.speechModel;
   return (
     <>
+      {notices.data && notices.data.length > 0 && (
+        <Banner
+          status="warning"
+          title="Some settings were reset"
+          description={notices.data.join(" ")}
+          collapsible={false}
+          isDismissable
+          dismissLabel="Dismiss"
+          onDismiss={() => {
+            client.setQueryData(["settings-notices"], []);
+            void invoke("dismiss_settings_notices").catch(console.error);
+          }}
+        />
+      )}
       <SettingsGroup
         title="Dictation"
         icon={<Keyboard size={14} aria-hidden="true" />}
