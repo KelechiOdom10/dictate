@@ -318,7 +318,7 @@ mod tests {
             app: None,
             inference_ms: None,
             status: TakeStatus::Skipped,
-            detail: Some("0.12 s, below minimum 0.30 s".into()),
+            detail: Some("Too short to transcribe: 0.12 s, and a take needs at least 0.30 s. Speak a little longer before you stop.".into()),
             ..take("", 2_000)
         };
         {

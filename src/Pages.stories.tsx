@@ -65,7 +65,8 @@ const sampleHistory = (now: number): HistoryEntry[] =>
       inferenceMs: null,
       totalMs: 4,
       status: "skipped" as TakeStatus,
-      detail: "0.18 s, below minimum 0.30 s",
+      detail:
+        "Too short to transcribe: 0.18 s, and a take needs at least 0.30 s. Speak a little longer before you stop.",
     },
     {
       text: "Remember that the overlay should never take focus from the app you are typing in.",
