@@ -56,6 +56,23 @@ export const CaptureFlow: Story = {
   },
 };
 export const Disabled: Story = { render: () => <RecorderDemo disabled /> };
+export const KeyboardActivation: Story = {
+  render: () => <RecorderDemo />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    const button = c.getByRole("button");
+    button.focus();
+    await userEvent.keyboard("{Enter}");
+    await expect(button).toHaveAccessibleName(/Press shortcut/);
+    await userEvent.keyboard("{Escape}");
+    await expect(button).toHaveFocus();
+    await userEvent.keyboard(" ");
+    await expect(button).toHaveAccessibleName(/Press shortcut/);
+    await userEvent.keyboard("{Tab}");
+    await expect(button).not.toHaveFocus();
+    await expect(button).not.toHaveAccessibleName(/Press shortcut/);
+  },
+};
 // The resting state and the waiting state, each held from the first frame, so
 // a screenshot of either shows what its name claims. Both are 161x32: the
 // invisible copy of the wider state reserves the size. CaptureFlow below runs

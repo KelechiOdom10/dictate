@@ -1,6 +1,7 @@
 import { useDictationStatus } from "./useDictationStatus";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Text } from "@astryxdesign/core/Text";
 import { SettingsRow, ShortcutRecorder as Recorder } from "./ui";
 
 type Props = {
@@ -33,6 +34,8 @@ export default function ShortcutRecorder({
       : "Shortcut unavailable");
   const [conflict, setConflict] = useState("");
   const request = useRef(0);
+  const arming = useRef<Promise<unknown>>(Promise.resolve());
+  const saving = useRef(false);
   useEffect(() => {
     if (!recording) request.current += 1;
   }, [recording]);
@@ -48,11 +51,12 @@ export default function ShortcutRecorder({
     onError("");
     onRecordingChange(true);
     try {
-      await invoke("capture_shortcut", { enabled: true });
+      arming.current = invoke("capture_shortcut", { enabled: true });
+      await arming.current;
     } catch (e) {
       if (request.current === generation) {
         onRecordingChange(false);
-        onError(String(e));
+        setConflict(String(e));
       }
     }
   }
@@ -66,25 +70,31 @@ export default function ShortcutRecorder({
     }
   }
   async function commit(shortcut: string) {
-    onRecordingChange(false);
+    if (saving.current) return;
+    const generation = request.current;
+    saving.current = true;
     try {
+      await arming.current;
+      if (generation !== request.current) return;
       await onSave(shortcut);
     } catch (error) {
-      if (/shortcut unavailable|shortcut.*register/i.test(String(error)))
-        setConflict("Used by another app — pick another");
-      else onError(String(error));
+      if (generation !== request.current) return;
+      setConflict(
+        /shortcut unavailable|shortcut.*register/i.test(String(error))
+          ? "Used by another app — pick another"
+          : String(error),
+      );
     } finally {
-      await cancel();
+      saving.current = false;
+      if (generation === request.current) await cancel();
     }
   }
   return (
     <SettingsRow
       label={label}
       help={
-        conflict ||
+        (conflict ? <Text role="alert">{conflict}</Text> : "") ||
         (startupConflict ? "Used by another app — pick another" : "") ||
-        // Nothing is added to the row while a capture runs: the button itself
-        // shows it is waiting, and its label carries the Escape instruction.
         idleHelp ||
         undefined
       }
@@ -97,7 +107,7 @@ export default function ShortcutRecorder({
         onStart={() => void capture()}
         onCancel={() => void cancel()}
         onCommit={(shortcut) => void commit(shortcut)}
-        onError={onError}
+        onError={setConflict}
       />
     </SettingsRow>
   );
