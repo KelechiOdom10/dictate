@@ -51,6 +51,20 @@ window) and their 720 px versions are Storybook captures of the
 `5f19989` and re-shot from `main` at `8f0d77c`, where they came out byte-identical (the General page did not change). The page shows the light or dark capture to match the visitor's
 mode. Retake both when the settings window changes.
 
+## The Annotate take
+
+The Annotate section shows a staged "Lumen" pricing page, not a real recording.
+Its sources are `scripts/takes/mock-{d,m}.html` (desktop and mobile). Both
+commands run from the repo root and need Google Chrome, or a Playwright
+Chromium, on the machine:
+
+```sh
+pnpm --dir site render:takes   # re-renders public/app/take-*.webp from the mocks
+pnpm --dir site check:takes    # fails if the recorder capsule is more than 1 px off centre in any take
+```
+
+Run `check:takes` after any change to the mocks or the takes.
+
 ## Deploying on Cloudflare (Workers Builds)
 
 Cloudflare retired the separate Pages flow; the site deploys as a Worker with

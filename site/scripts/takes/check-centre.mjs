@@ -1,9 +1,9 @@
-const { chromium } = await import(process.env.PLAYWRIGHT_CORE || "playwright-core");
+import { launch } from "./browser.mjs";
 import { readdirSync, readFileSync } from "node:fs";
 
 const dir = new URL("../../public/app/", import.meta.url).pathname;
 const files = readdirSync(dir).filter((f) => /^take-(clean|ink)[^.]*\.webp$/.test(f));
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 let failed = false;
 for (const file of files) {

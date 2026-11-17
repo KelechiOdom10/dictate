@@ -1,8 +1,8 @@
-const { chromium } = await import(process.env.PLAYWRIGHT_CORE || "playwright-core");
+import { launch } from "./browser.mjs";
 import { writeFileSync, readFileSync } from "node:fs";
 const here = new URL(".", import.meta.url).pathname;
 const out = process.argv[2] ?? here + "../../public/app";
-const b = await chromium.launch(); const exp = await b.newPage();
+const b = await launch(); const exp = await b.newPage();
 const jobs = [["d", 965, 508, [[2, ""], [1, "-965"]]], ["m", 315, 280, [[3, "-m945"], [2, "-m630"]]]];
 for (const [mk, w, h, scales] of jobs) for (const [name, ink, time] of [["clean", false, "00:38"], ["ink", true, "00:41"]]) for (const [s, suffix] of scales) {
   const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: s });
