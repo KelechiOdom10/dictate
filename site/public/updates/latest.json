@@ -1,11 +1,11 @@
 {
-  "version": "0.1.3",
-  "notes": "Bulk select and delete in History, Annotations search and filters, record your own shortcuts, a cleaner Appearance page.",
-  "pub_date": "2026-11-17T13:41:57Z",
+  "version": "0.1.4",
+  "notes": "History is never pruned because of a bad settings file, empty taps no longer paste stray words, and History selection is steadier.",
+  "pub_date": "2026-11-17T16:22:05Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdnU2TjhmTHpaVXI3UlNmVWhHSG85clpod01vL1VrR0N4bUtiMkQ1RlJ1bjRBVTljdlBjVlc0ZXNNWkdvd0FwcVhuUUxtZlczaUFtWUNRYmh2bm1mVi9xL0x6ZzczbUFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0OTIyODY3CWZpbGU6ZGljdGF0ZS0wLjEuMy1hcm02NC5hcHAudGFyLmd6CndvTFNnUXVhWitkelRQVmxLNkkxWmJieWx4UG9vb0dxbnl1MTNNcno5TjRqbGdscW5UOEYzcW4yK1VOUGZ4Vm5xdzEzRlBVYWFiYmxJMnN3R01WTkRBPT0K",
-      "url": "https://dictate.kellycooks.dev/updates/dictate-0.1.3-arm64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdnU2TjhmTHpaVWxsVjBYejdRNU0zMis5eDFyTVozMkd5Y1d6QlpmY2FFQVFmcDdlRGVDRUJpY0UzSUU1UjJBQk8ydkFNUUEvWDJVL1QvbWFHSHNLMmN4VjhIT3E1dFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0OTMyNDcxCWZpbGU6ZGljdGF0ZS0wLjEuNC1hcm02NC5hcHAudGFyLmd6CmVuN2RRL0E0dm9uNHZGVWFST0NOZTZxdzdVbW01NXNuSnhzYXdIY1JXa013UlRvR05SL0tLenF1R1o0RVpyR29UT0l2S2I5TURBRFZ2Witzb3lRSUJnPT0K",
+      "url": "https://dictate.kellycooks.dev/updates/dictate-0.1.4-arm64.app.tar.gz"
     }
   }
 }
