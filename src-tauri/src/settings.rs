@@ -272,6 +272,20 @@ fn parse_chord(shortcut: &str) -> Result<Shortcut, String> {
     if chord.mods.is_empty() {
         return Err("Choose a shortcut with Command, Option, Control or Shift".into());
     }
+    if [
+        "Super+KeyQ",
+        "Super+KeyW",
+        "Super+KeyH",
+        "Super+Tab",
+        "Super+Space",
+        "Super+Alt+Escape",
+        "Control+Super+KeyQ",
+    ]
+    .iter()
+    .any(|reserved| reserved.parse::<Shortcut>().ok() == Some(chord))
+    {
+        return Err("That shortcut is reserved by macOS. Choose another.".into());
+    }
     Ok(chord)
 }
 
@@ -673,6 +687,24 @@ mod tests {
                     && fs::read_to_string(entry.path()).unwrap() == original
             }));
         }
+    }
+
+    #[test]
+    fn macos_reserved_shortcuts_cannot_replace_either_binding() {
+        for shortcut in [
+            "Super+KeyQ",
+            "Super+KeyH",
+            "Super+Tab",
+            "Super+Space",
+            "Super+Alt+Escape",
+        ] {
+            assert!(
+                parse_chord(shortcut)
+                    .unwrap_err()
+                    .contains("reserved by macOS")
+            );
+        }
+        assert!(parse_chord("Super+Shift+KeyK").is_ok());
     }
 
     #[test]

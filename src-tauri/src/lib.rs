@@ -69,6 +69,7 @@ struct Runtime {
     take_id: u64,
     take_start: Option<TakeStart>,
     capturing_shortcut: bool,
+    suspended_shortcuts: Vec<tauri_plugin_global_shortcut::Shortcut>,
     shortcut_registered: bool,
     annotate: annotate::Phase,
     /// False when the Annotate chord failed to register or equals the
@@ -196,19 +197,18 @@ impl Runtime {
             .flatten();
         if let Some(new_annotate) = changes.annotate {
             let swapped = (|| {
-                if let Some(old) = old_annotate {
-                    platform.unregister(old)?;
+                if let Some(new) = new_annotate {
+                    platform
+                        .register(new)
+                        .map_err(|error| format!("Annotate shortcut unavailable: {error}"))?;
                 }
-                if let Some(new) = new_annotate
-                    && let Err(error) = platform.register(new)
+                if let Some(old) = old_annotate
+                    && let Err(error) = platform.unregister(old)
                 {
-                    let mut errors = vec![format!("Annotate shortcut unavailable: {error}")];
-                    if let Some(old) = old_annotate
-                        && let Err(error) = platform.register(old)
-                    {
-                        errors.push(format!("Restore Annotate shortcut: {error}"));
+                    if let Some(new) = new_annotate {
+                        platform.unregister(new)?;
                     }
-                    return Err(errors.join("; "));
+                    return Err(error);
                 }
                 Ok(())
             })();
@@ -247,7 +247,6 @@ impl Runtime {
             return Err(errors.join("; "));
         }
         if changes.shortcut.is_some() {
-            self.capturing_shortcut = false;
             self.shortcut_registered = true;
         }
         if let Some(new_annotate) = changes.annotate {
@@ -260,21 +259,46 @@ impl Runtime {
     fn capture_shortcut(
         &mut self,
         enabled: bool,
-        mut registration: impl FnMut(bool) -> Result<(), String>,
+        mut registration: impl FnMut(tauri_plugin_global_shortcut::Shortcut, bool) -> Result<(), String>,
     ) -> Result<(), String> {
-        if self.capturing_shortcut == enabled {
+        if self.capturing_shortcut == enabled && (enabled || self.suspended_shortcuts.is_empty()) {
             return Ok(());
         }
-        if self.phase != Phase::Idle {
+        if enabled && (self.phase != Phase::Idle || audio::is_recording()) {
             return Err("Finish dictating before recording a shortcut".into());
         }
-        if enabled && self.shortcut_registered {
-            registration(false)?;
-            self.shortcut_registered = false;
-        } else if !enabled && !self.shortcut_registered {
+        if enabled && self.annotate != annotate::Phase::Idle {
+            return Err("Stop Annotate before recording a shortcut".into());
+        }
+        let dictation = self.settings.chord()?;
+        let annotate = self.settings.annotate_chord()?;
+        if enabled {
+            self.capturing_shortcut = true;
+            for (chord, registered) in [
+                (dictation, &mut self.shortcut_registered),
+                (annotate, &mut self.annotate_registered),
+            ] {
+                if *registered {
+                    registration(chord, false)?;
+                    *registered = false;
+                    self.suspended_shortcuts.push(chord);
+                }
+            }
+        } else {
             self.capturing_shortcut = false;
-            registration(true)?;
-            self.shortcut_registered = true;
+            while let Some(chord) = self.suspended_shortcuts.last().copied() {
+                if chord == dictation && !self.shortcut_registered {
+                    registration(chord, true)?;
+                    self.shortcut_registered = true;
+                } else if chord == annotate
+                    && self.settings.annotate_enabled
+                    && !self.annotate_registered
+                {
+                    registration(chord, true)?;
+                    self.annotate_registered = true;
+                }
+                self.suspended_shortcuts.pop();
+            }
         }
         self.capturing_shortcut = enabled;
         Ok(())
@@ -862,16 +886,22 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
 fn capture_shortcut(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<Mutex<Runtime>>();
     let mut runtime = state.lock().map_err(|e| e.to_string())?;
-    let chord = runtime.settings.chord()?;
     let was_registered = runtime.shortcut_registered;
-    let result = runtime.capture_shortcut(enabled, |register| {
+    let mut registration = |chord, register| {
         if register {
             app.global_shortcut().register(chord)
         } else {
             app.global_shortcut().unregister(chord)
         }
         .map_err(|e| e.to_string())
-    });
+    };
+    let result = runtime.capture_shortcut(enabled, &mut registration);
+    if let Err(error) = &result
+        && enabled
+        && let Err(restore) = runtime.capture_shortcut(false, &mut registration)
+    {
+        return Err(format!("{error}; restore shortcuts: {restore}"));
+    }
     if !was_registered && runtime.shortcut_registered {
         surface::clear_error(&app);
     }
@@ -2077,6 +2107,7 @@ pub fn run() {
                     take_id: 0,
                     take_start: None,
                     capturing_shortcut: false,
+                    suspended_shortcuts: Vec::new(),
                     shortcut_registered,
                     annotate: annotate::Phase::Idle,
                     annotate_registered,
@@ -2190,6 +2221,7 @@ mod take_tests {
             take_id: 0,
             take_start: None,
             capturing_shortcut: false,
+            suspended_shortcuts: Vec::new(),
             shortcut_registered: false,
             annotate: annotate::Phase::Idle,
             annotate_registered: false,
@@ -2339,6 +2371,8 @@ mod take_tests {
         login: std::cell::Cell<bool>,
         device_checks: std::cell::Cell<usize>,
         registered: std::cell::RefCell<Vec<tauri_plugin_global_shortcut::Shortcut>>,
+        calls: std::cell::RefCell<Vec<(&'static str, tauri_plugin_global_shortcut::Shortcut)>>,
+        unavailable: Option<tauri_plugin_global_shortcut::Shortcut>,
     }
 
     impl SettingsPlatform for TestSettingsPlatform {
@@ -2357,10 +2391,15 @@ mod take_tests {
             Ok(())
         }
         fn register(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String> {
+            self.calls.borrow_mut().push(("register", chord));
+            if self.unavailable == Some(chord) {
+                return Err("Already used by another app".into());
+            }
             self.registered.borrow_mut().push(chord);
             Ok(())
         }
         fn unregister(&self, chord: tauri_plugin_global_shortcut::Shortcut) -> Result<(), String> {
+            self.calls.borrow_mut().push(("unregister", chord));
             let mut registered = self.registered.borrow_mut();
             let index = registered
                 .iter()
@@ -2382,6 +2421,8 @@ mod take_tests {
             login: std::cell::Cell::new(false),
             device_checks: std::cell::Cell::new(0),
             registered: std::cell::RefCell::new(Vec::new()),
+            calls: std::cell::RefCell::new(Vec::new()),
+            unavailable: None,
         };
         let mut runtime = unavailable_shortcut();
         let s = Settings::default().annotate_chord().unwrap();
@@ -2429,6 +2470,8 @@ mod take_tests {
             login: std::cell::Cell::new(false),
             device_checks: std::cell::Cell::new(0),
             registered: std::cell::RefCell::new(Vec::new()),
+            calls: std::cell::RefCell::new(Vec::new()),
+            unavailable: None,
         };
         let mut runtime = unavailable_shortcut();
         runtime.settings.microphone = Some("Unplugged USB microphone".into());
@@ -2516,24 +2559,119 @@ mod take_tests {
     }
 
     #[test]
+    fn replacing_either_shortcut_registers_first_and_preserves_old_on_failure() {
+        for annotate in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut runtime = unavailable_shortcut();
+            runtime.shortcut_registered = true;
+            runtime.annotate_registered = true;
+            let before = runtime.settings.clone();
+            let old = if annotate {
+                before.annotate_chord().unwrap()
+            } else {
+                before.chord().unwrap()
+            };
+            let mut changed = before.clone();
+            if annotate {
+                changed.annotate_shortcut = "Control+Shift+KeyK".into();
+            } else {
+                changed.shortcut = "Control+Shift+KeyK".into();
+            }
+            let new = "Control+Shift+KeyK".parse().unwrap();
+            let mut platform = TestSettingsPlatform {
+                path: dir.path().join("settings.json"),
+                login: std::cell::Cell::new(false),
+                device_checks: std::cell::Cell::new(0),
+                registered: std::cell::RefCell::new(vec![
+                    before.chord().unwrap(),
+                    before.annotate_chord().unwrap(),
+                ]),
+                calls: std::cell::RefCell::new(Vec::new()),
+                unavailable: Some(new),
+            };
+            settings::save(&platform.path, &before).unwrap();
+            assert!(runtime.save_settings(changed.clone(), &platform).is_err());
+            assert_eq!(platform.calls.borrow().as_slice(), &[("register", new)]);
+            assert!(platform.registered.borrow().contains(&old));
+            assert_eq!(runtime.settings, before);
+            assert_eq!(settings::load(&platform.path).unwrap(), before);
+            platform.unavailable = None;
+            platform.calls.borrow_mut().clear();
+            let settings_path = platform.path.clone();
+            platform.path = dir.path().to_path_buf();
+            assert!(runtime.save_settings(changed.clone(), &platform).is_err());
+            assert!(platform.registered.borrow().contains(&old));
+            assert!(!platform.registered.borrow().contains(&new));
+            assert_eq!(runtime.settings, before);
+            assert_eq!(settings::load(&settings_path).unwrap(), before);
+            platform.path = settings_path;
+            platform.calls.borrow_mut().clear();
+            assert!(runtime.save_settings(changed.clone(), &platform).unwrap());
+            assert_eq!(
+                platform.calls.borrow().as_slice(),
+                &[("register", new), ("unregister", old)]
+            );
+            let restarted = settings::load(&platform.path).unwrap();
+            assert_eq!(restarted, changed);
+            assert_eq!(
+                shortcut_target(&restarted, true, &new),
+                Some(if annotate {
+                    Target::Annotate
+                } else {
+                    Target::Dictation
+                })
+            );
+            assert_eq!(shortcut_target(&restarted, true, &old), None);
+        }
+    }
+
+    #[test]
     fn failed_cancel_registration_always_exits_capture_and_can_be_retried() {
         let mut runtime = unavailable_shortcut();
+        runtime.shortcut_registered = true;
+        runtime.annotate_registered = true;
+        let mut calls = Vec::new();
         runtime
-            .capture_shortcut(true, |_| panic!("No registered shortcut to remove"))
+            .capture_shortcut(true, |chord, register| {
+                calls.push((chord, register));
+                Ok(())
+            })
             .unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|(_, register)| !register));
+        assert!(runtime.capturing_shortcut);
+        assert!(!runtime.shortcut_registered);
+        assert!(!runtime.annotate_registered);
         assert!(
             runtime
-                .capture_shortcut(false, |_| Err("Taken".into()))
+                .capture_shortcut(false, |_, _| Err("Taken".into()))
                 .is_err()
         );
         assert!(!runtime.capturing_shortcut);
-        assert!(!runtime.shortcut_registered);
         runtime
-            .capture_shortcut(true, |_| panic!("No registered shortcut to remove"))
+            .capture_shortcut(false, |chord, register| {
+                calls.push((chord, register));
+                Ok(())
+            })
             .unwrap();
-        runtime.capture_shortcut(false, |_| Ok(())).unwrap();
-        assert!(!runtime.capturing_shortcut);
         assert!(runtime.shortcut_registered);
+        assert!(runtime.annotate_registered);
+        assert!(runtime.suspended_shortcuts.is_empty());
+        assert_eq!(calls[0].0, calls[3].0);
+        assert_eq!(calls[1].0, calls[2].0);
+    }
+
+    #[test]
+    fn capture_rejects_annotate_without_suspending_any_binding() {
+        let mut runtime = unavailable_shortcut();
+        runtime.annotate = annotate::Phase::Recording;
+        assert_eq!(
+            runtime
+                .capture_shortcut(true, |_, _| panic!("must not change bindings"))
+                .unwrap_err(),
+            "Stop Annotate before recording a shortcut"
+        );
+        assert!(!runtime.capturing_shortcut);
     }
 
     #[test]

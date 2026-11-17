@@ -210,6 +210,14 @@ async function openSettings(
             if (
               command === "capture_shortcut" &&
               args.enabled &&
+              status.phase !== "idle"
+            )
+              throw status.phase === "annotating"
+                ? "Stop Annotate before recording a shortcut"
+                : "Finish dictating before recording a shortcut";
+            if (
+              command === "capture_shortcut" &&
+              args.enabled &&
               delayCapture
             ) {
               await new Promise<void>((resolve) => {
@@ -250,6 +258,8 @@ async function openSettings(
               if (saveError) throw saveError;
               if (args.settings?.shortcut === "Super+KeyQ")
                 throw "Shortcut unavailable";
+              if (args.settings?.annotateShortcut === settings.shortcut)
+                throw "That shortcut is your dictation shortcut. Choose another.";
               Object.assign(settings, args.settings);
               emit("settings-changed", settings);
               return settings;
@@ -317,6 +327,106 @@ async function openSettings(
       ? "http://dictate.test/"
       : `http://dictate.test/?window=${label}`,
   );
+}
+
+for (const surface of ["General", "Annotate"]) {
+  test(`${surface} shortcut records from the keyboard, reports errors inline and lets Tab leave`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openSettings(page);
+    await page.getByRole("button", { name: surface, exact: true }).click();
+    const recorder = page.getByRole("button", { name: /^Shortcut,/ });
+    await recorder.focus();
+    await page.keyboard.press("Enter");
+    await expect(recorder).toHaveAccessibleName(/Press shortcut Esc to cancel/);
+    await page.keyboard.press("a");
+    await expect(recorder.locator("xpath=ancestor::li")).toContainText(
+      "Include Command",
+    );
+    await page.keyboard.press("Escape");
+    await expect(recorder).not.toHaveAccessibleName(/Press shortcut/);
+    await expect(recorder).toBeFocused();
+    await recorder.click();
+    await page.keyboard.press("Tab");
+    await expect(recorder).not.toBeFocused();
+    await expect(recorder).not.toHaveAccessibleName(/Press shortcut/);
+    await recorder.click();
+    await page.keyboard.press("Control+Shift+K");
+    await expect(recorder).toHaveAccessibleName(
+      "Shortcut, Control + Shift + K",
+    );
+    await page.getByRole("button", { name: "Output", exact: true }).click();
+    await page.getByRole("button", { name: surface, exact: true }).click();
+    await expect(recorder).toHaveAccessibleName(
+      "Shortcut, Control + Shift + K",
+    );
+  });
+}
+
+test("Annotate shortcut conflicts retain the binding and report beside its control", async ({
+  page,
+}) => {
+  await openSettings(page);
+  await page.getByRole("button", { name: "Annotate", exact: true }).click();
+  const recorder = page.getByRole("button", { name: /^Shortcut,/ });
+  await recorder.click();
+  await page.keyboard.press("Alt+Shift+Space");
+  await expect(recorder.locator("xpath=ancestor::li")).toContainText(
+    "That shortcut is your dictation shortcut",
+  );
+  await expect(recorder).toHaveAccessibleName("Shortcut, Alt + Shift + A");
+});
+
+test("a chord entered before native capture is ready cannot save after cancellation", async ({
+  page,
+}) => {
+  await openSettings(page, { delayCapture: true });
+  const recorder = page.getByRole("button", { name: /^Shortcut,/ });
+  await recorder.click();
+  await page.keyboard.press("Control+Shift+K");
+  await page.keyboard.press("Escape");
+  await page.evaluate(() =>
+    (window as unknown as { __finishCapture: () => void }).__finishCapture(),
+  );
+  await expect(recorder).toHaveAccessibleName("Shortcut, Alt + Shift + Space");
+  expect(
+    await page.evaluate(() =>
+      (window as unknown as { __commands: string[] }).__commands.filter(
+        (command) => command === "save_settings",
+      ),
+    ),
+  ).toEqual([]);
+});
+
+for (const phase of ["recording", "annotating"]) {
+  test(`shortcut editing explains why it is unavailable while ${phase}`, async ({
+    page,
+  }) => {
+    await openSettings(page);
+    await page.evaluate(
+      (phase) =>
+        window.postMessage(
+          {
+            type: "dictate-test",
+            event: "dictation-state",
+            payload: { phase, error: null },
+          },
+          "*",
+        ),
+      phase,
+    );
+    const recorder = page.getByRole("button", { name: /^Shortcut,/ });
+    await recorder.click();
+    await expect(recorder.locator("xpath=ancestor::li")).toContainText(
+      phase === "annotating"
+        ? "Stop Annotate before recording a shortcut"
+        : "Finish dictating before recording a shortcut",
+    );
+    await expect(recorder).toHaveAccessibleName(
+      "Shortcut, Alt + Shift + Space",
+    );
+  });
 }
 
 async function choose(page: Page, label: string, option: string) {

@@ -77,11 +77,14 @@ export function ShortcutRecorder({
   function keyDown(event: KeyboardEvent<HTMLElement>) {
     if (!recording || event.repeat) return;
     if (event.key === "Tab") {
+      restoreFocus.current = false;
       onCancel();
       return;
     }
     event.preventDefault();
+    event.stopPropagation();
     if (event.key === "Escape") {
+      restoreFocus.current = true;
       onCancel();
       return;
     }
@@ -96,19 +99,22 @@ export function ShortcutRecorder({
       onError("Include Command, Option, Control or Shift in your shortcut.");
       return;
     }
+    restoreFocus.current = true;
     onCommit([...modifiers, event.code].join("+"));
   }
   // A capture that ends puts focus back on the button, and a focus ring left
   // behind after Escape reads as a stray line. The ring returns on the next
   // key or pointer, so keyboard navigation still shows it.
   const button = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
   const [quiet, setQuiet] = useState(false);
   const wasRecording = useRef(recording);
   // The capture state adds a dot and dims the keys, so the button's own width
   useEffect(() => {
     if (wasRecording.current && !recording) {
       setQuiet(true);
-      button.current?.focus({ preventScroll: true });
+      if (restoreFocus.current) button.current?.focus({ preventScroll: true });
+      restoreFocus.current = false;
     }
     wasRecording.current = recording;
   }, [recording]);
@@ -144,6 +150,7 @@ export function ShortcutRecorder({
       }}
       onKeyDown={keyDown}
       onBlur={() => {
+        restoreFocus.current = false;
         if (recording) onCancel();
       }}
     >
