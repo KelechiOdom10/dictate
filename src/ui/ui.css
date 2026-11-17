@@ -489,3 +489,51 @@ meter.ui-rating::-moz-meter-bar {
   border-radius: var(--radius-full);
   background: var(--color-accent);
 }
+
+.ui-selection-reserve {
+  block-size: calc(var(--spacing-12) + var(--spacing-8));
+}
+.ui-selection-dock .ui-selection-pill {
+  margin: 0;
+}
+.ui-selection-pill {
+  position: fixed;
+  inset-block-end: var(--spacing-4);
+  inset-inline-start: var(--pane-center);
+  translate: -50% 0;
+  inline-size: max-content;
+  max-inline-size: calc(var(--pane-width) - var(--spacing-8));
+  z-index: 1;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background-color: var(--color-background-popover);
+  box-shadow: var(--shadow-high);
+  padding-inline: var(--spacing-3) var(--spacing-1);
+  transition:
+    opacity var(--duration-fast-max) var(--ease-entrance),
+    transform var(--duration-fast-max) var(--ease-entrance);
+  @starting-style {
+    opacity: 0;
+    transform: translateY(var(--spacing-2)) scale(0.97);
+  }
+}
+.ui-selection-leaving .ui-selection-pill {
+  opacity: 0;
+  transform: translateY(var(--spacing-2)) scale(0.97);
+  transition-duration: var(--duration-fast-min);
+}
+.ui-selection-count {
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-selection-pill,
+  .ui-selection-leaving .ui-selection-pill {
+    transform: none;
+    transition: opacity var(--duration-fast-min) var(--ease-entrance);
+  }
+  .ui-selection-pill {
+    @starting-style {
+      transform: none;
+    }
+  }
+}

@@ -465,6 +465,52 @@ const layoutOf = (...elements: HTMLElement[]) =>
     const { top, left, height, width } = element.getBoundingClientRect();
     return { top, left, height, width };
   });
+const longHistory = (now: number): HistoryEntry[] =>
+  Array.from({ length: 4 }, (_, round) =>
+    sampleHistory(now - round * 7 * 24 * 60 * minute).map((entry) => ({
+      ...entry,
+      id: entry.id + round * 100,
+    })),
+  ).flat();
+export const HistorySelecting: Story = {
+  name: "History / selecting",
+  beforeEach: ({ globals }) => mockApp(globals, longHistory(Date.now())),
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("button", { name: "Select" }));
+    const [ship, nothing] = [
+      c.getAllByRole("checkbox", { name: /^Select Ship the history/ })[0]!,
+      c.getAllByRole("checkbox", { name: /^Select No speech/ })[0]!,
+    ];
+    await userEvent.click(ship);
+    await userEvent.click(nothing);
+    const bar = c.getByRole("toolbar", { name: "Selected dictations" });
+    await expect(within(bar).getByText("2 selected")).toBeInTheDocument();
+    await expect(
+      within(bar).getByRole("button", { name: "Delete" }),
+    ).toBeEnabled();
+    await expect(
+      c.getByRole("region", { name: "Dictation" }),
+    ).toHaveTextContent("Stop by the bakery");
+  },
+};
+export const HistorySelectingNarrow: Story = {
+  name: "History / selecting, narrow",
+  beforeEach: ({ globals }) => mockApp(globals, longHistory(Date.now())),
+  render: () => <GeneralPage page="History" width={640} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("button", { name: "Select" }));
+    const all = c.getByRole("checkbox", { name: "Select all 20 shown" });
+    await userEvent.click(all);
+    await expect(all).toBeChecked();
+    await expect(c.getByText("20 selected")).toBeInTheDocument();
+    await userEvent.click(c.getAllByText(/^Let’s move the Thursday sync/)[0]!);
+    await expect(c.getByText("19 selected")).toBeInTheDocument();
+    await expect(all).toHaveProperty("indeterminate", true);
+  },
+};
 export const HistoryCopy: Story = {
   beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
   render: () => <GeneralPage page="History" />,

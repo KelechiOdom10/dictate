@@ -20,6 +20,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
@@ -62,6 +63,14 @@ import { formatBytes, readStorageUsage } from "./storage";
 import { KeyboardShortcut } from "./ui";
 import { ErrorNotice, LoadError, Loading } from "./SettingsStatus";
 import {
+  Checklist,
+  deleteEach,
+  SelectButton,
+  SelectionFloat,
+  useSelection,
+  type Selection,
+} from "./HistorySelection";
+import {
   annotationMeta,
   annotationTitle,
   clock,
@@ -80,6 +89,12 @@ const filters: { value: Filter; label: string }[] = [
   { value: "copied", label: "Copied" },
   { value: "skipped", label: "Nothing heard" },
   { value: "failed", label: "Failed" },
+];
+type AnnotationFilter = "all" | "complete" | "partial";
+const annotationFilters: { value: AnnotationFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "complete", label: "Complete" },
+  { value: "partial", label: "Partial" },
 ];
 const statusLabels: Record<TakeStatus, string> = {
   pasted: "Inserted",
@@ -100,6 +115,8 @@ const retentionChoices: Record<Retention, string> = {
   forever: "Forever",
 };
 const retentionOrder: Retention[] = ["day", "week", "month", "forever"];
+const dictationNoun = { one: "dictation", many: "dictations" };
+const annotationNoun = { one: "annotation", many: "annotations" };
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -235,11 +252,13 @@ function Rows<Id extends string | number>({
   rows,
   value,
   onChange,
+  selection,
 }: {
   label: string;
   rows: Row<Id>[];
   value: Id;
   onChange: (id: Id) => void;
+  selection: Selection<Id>;
 }) {
   return (
     <Card padding={0}>
@@ -273,13 +292,24 @@ function Rows<Id extends string | number>({
           <ListItem
             key={row.id}
             className={
-              row.id === value
+              row.id === value && !selection.selecting
                 ? "ui-history-row ui-history-row-current"
                 : "ui-history-row"
             }
             itemKey={row.id}
             label={row.title}
             description={row.meta}
+            startContent={
+              selection.selecting && (
+                <CheckboxInput
+                  size="sm"
+                  label={`Select ${row.title}`}
+                  isLabelHidden
+                  value={selection.checked.includes(row.id)}
+                  onChange={(on) => selection.toggle(row.id, on)}
+                />
+              )
+            }
             endContent={<Text type="supporting">{row.date}</Text>}
             isSelected={row.id === value}
             onClick={() => onChange(row.id)}
@@ -395,6 +425,29 @@ function Dictations() {
   const open = entries.find((entry) => entry.id === selectedId);
   const selected = open ?? entries[0];
   const current = settings.data?.historyRetention ?? "week";
+  const selection = useSelection(entries.map((entry) => entry.id));
+  const scope = [
+    query ? `matching “${query}”` : "shown",
+    filter === "all" ? "" : `as ${statusLabels[filter]}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  async function removeChecked(ids: number[]) {
+    setError("");
+    const deleted: typeof ids = [];
+    try {
+      await deleteEach(ids, deleteHistory, dictationNoun, deleted);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      if (selectedId !== null && deleted.includes(selectedId))
+        setSelectedId(null);
+      void client.invalidateQueries({ queryKey: ["history"] });
+      void client.invalidateQueries({ queryKey: ["storage"] });
+    }
+    return deleted;
+  }
 
   function saveRetention(value: Retention) {
     if (!settings.data) return;
@@ -427,10 +480,14 @@ function Dictations() {
           onChange={setSearch}
         />
         {history.isSuccess && !nothingYet && (
+          <SelectButton selection={selection} shown={entries.length} />
+        )}
+        {history.isSuccess && !nothingYet && (
           <Selector
             label="Status"
             isLabelHidden
             variant="secondary"
+            isDisabled={selection.selecting}
             value={filter}
             options={filters}
             onChange={(value) =>
@@ -584,22 +641,48 @@ function Dictations() {
                   rows={rows}
                   value={selected.id}
                   onChange={setSelectedId}
+                  selection={selection}
                 />
                 {more}
+                <SelectionFloat
+                  selection={selection}
+                  shown={entries.length}
+                  scope={scope}
+                  noun={dictationNoun}
+                  consequence="They can’t be recovered."
+                  onDelete={removeChecked}
+                />
               </VStack>
               {detailOf(selected, false)}
             </>
           ) : (
             <VStack gap={2}>
-              <Accordion
-                label="Dictations"
-                rows={rows}
-                value={open?.id ?? null}
-                onChange={setSelectedId}
-              >
-                {open && detailOf(open, true)}
-              </Accordion>
+              {selection.selecting ? (
+                <Checklist
+                  label="Dictations"
+                  rows={rows}
+                  current={open?.id ?? null}
+                  selection={selection}
+                />
+              ) : (
+                <Accordion
+                  label="Dictations"
+                  rows={rows}
+                  value={open?.id ?? null}
+                  onChange={setSelectedId}
+                >
+                  {open && detailOf(open, true)}
+                </Accordion>
+              )}
               {more}
+              <SelectionFloat
+                selection={selection}
+                shown={entries.length}
+                scope={scope}
+                noun={dictationNoun}
+                consequence="They can’t be recovered."
+                onDelete={removeChecked}
+              />
             </VStack>
           )}
         </Grid>
@@ -723,15 +806,52 @@ function DictationDetail({
 function Annotations() {
   const client = useQueryClient();
   const now = useNow();
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<AnnotationFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panes, twoPanes] = useTwoPanes();
   const [error, setError] = useState("");
+  const query = useDeferredValue(search.trim());
   const annotations = useQuery({
     queryKey: ["annotations"],
     queryFn: readAnnotations,
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   const usage = useQuery({ queryKey: ["storage"], queryFn: readStorageUsage });
+  const all = annotations.data ?? [];
+  const needle = query.toLowerCase();
+  const entries = all.filter(
+    (entry) =>
+      (filter === "all" ||
+        (filter === "partial") === entry.partial.length > 0) &&
+      (!needle ||
+        [annotationTitle(entry), entry.text, entry.app ?? ""].some((field) =>
+          field.toLowerCase().includes(needle),
+        )),
+  );
+  const selection = useSelection(entries.map((entry) => entry.id));
+  const scope = [
+    query ? `matching “${query}”` : "shown",
+    filter === "all" ? "" : filter,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  async function removeChecked(ids: string[]) {
+    setError("");
+    const deleted: typeof ids = [];
+    try {
+      await deleteEach(ids, deleteAnnotation, annotationNoun, deleted);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      if (selectedId !== null && deleted.includes(selectedId))
+        setSelectedId(null);
+      void client.invalidateQueries({ queryKey: ["annotations"] });
+      void client.invalidateQueries({ queryKey: ["storage"] });
+    }
+    return deleted;
+  }
 
   useEffect(() => {
     const subscription = listen("annotations-changed", () => {
@@ -751,10 +871,9 @@ function Annotations() {
         onRetry={() => void annotations.refetch()}
       />
     );
-  const entries = annotations.data;
   const open = entries.find((entry) => entry.id === selectedId);
   const selected = open ?? entries[0];
-  if (!selected)
+  if (all.length === 0)
     return (
       <EmptyState
         headingLevel={2}
@@ -794,27 +913,100 @@ function Annotations() {
   return (
     <>
       <ErrorNotice error={error} />
-      <Text type="supporting">
-        {usage.data
-          ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${entries.length.toLocaleString()} ${entries.length === 1 ? "session" : "sessions"} · kept until deleted`
-          : "Measuring this Mac"}
-      </Text>
+      <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
+        <HStack gap={2} vAlign="center" wrap="wrap">
+          <TextInput
+            type="search"
+            label="Search annotations"
+            isLabelHidden
+            placeholder="Search annotations"
+            startIcon={Search}
+            hasClear
+            value={search}
+            onChange={setSearch}
+          />
+          <SelectButton selection={selection} shown={entries.length} />
+          <Selector
+            label="Status"
+            isLabelHidden
+            variant="secondary"
+            isDisabled={selection.selecting}
+            value={filter}
+            options={annotationFilters}
+            onChange={(value) =>
+              setFilter(
+                annotationFilters.find((f) => f.value === value)?.value ??
+                  "all",
+              )
+            }
+          />
+        </HStack>
+        <Text type="supporting">
+          {usage.data
+            ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${all.length.toLocaleString()} ${all.length === 1 ? "session" : "sessions"} · kept until deleted`
+            : "Measuring this Mac"}
+        </Text>
+      </HStack>
       <Grid
         ref={panes}
         columns={{ minWidth: PANE_MIN_WIDTH, repeat: "fit" }}
         gap={4}
         align="start"
       >
-        {twoPanes ? (
+        {!selected ? (
+          <EmptyState
+            headingLevel={2}
+            title="No matching annotations"
+            description={
+              query
+                ? `Nothing you annotated matches “${query}”.`
+                : `No ${filter} annotations.`
+            }
+            actions={
+              <Button
+                label={query ? "Clear search" : "Show all"}
+                onClick={() => (query ? setSearch("") : setFilter("all"))}
+              />
+            }
+          />
+        ) : twoPanes ? (
           <>
-            <Rows
-              label="Annotations"
-              rows={rows}
-              value={selected.id}
-              onChange={setSelectedId}
-            />
+            <VStack gap={2}>
+              <Rows
+                label="Annotations"
+                rows={rows}
+                value={selected.id}
+                onChange={setSelectedId}
+                selection={selection}
+              />
+              <SelectionFloat
+                selection={selection}
+                shown={entries.length}
+                scope={scope}
+                noun={annotationNoun}
+                consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
+                onDelete={removeChecked}
+              />
+            </VStack>
             {detailOf(selected, false)}
           </>
+        ) : selection.selecting ? (
+          <VStack gap={2}>
+            <Checklist
+              label="Annotations"
+              rows={rows}
+              current={open?.id ?? null}
+              selection={selection}
+            />
+            <SelectionFloat
+              selection={selection}
+              shown={entries.length}
+              scope={scope}
+              noun={annotationNoun}
+              consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
+              onDelete={removeChecked}
+            />
+          </VStack>
         ) : (
           <Accordion
             label="Annotations"
