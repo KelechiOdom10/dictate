@@ -70,8 +70,12 @@ export function useSelection<Id>(shown: Id[]) {
         setDeleting(false);
         setConfirming(false);
       });
-      setIds((ids) => ids.filter((id) => !deleted.includes(id)));
-      if (deleted.length === asked.length) setSelecting(false);
+      if (deleted.length < asked.length) {
+        setIds((ids) => ids.filter((id) => !deleted.includes(id)));
+        return;
+      }
+      setSelecting(false);
+      setIds([]);
     },
   };
 }
@@ -153,6 +157,7 @@ export function SelectionFloat<Id>({
   scope,
   noun,
   consequence,
+  isSettling = false,
   onDelete,
 }: {
   selection: Selection<Id>;
@@ -160,6 +165,8 @@ export function SelectionFloat<Id>({
   scope: string;
   noun: Noun;
   consequence: string;
+  /** The list is still loading the rows the count is about, so Delete waits. */
+  isSettling?: boolean;
   onDelete: (ids: Id[]) => Promise<Id[]>;
 }) {
   const { deleting, hidden } = selection;
@@ -224,7 +231,7 @@ export function SelectionFloat<Id>({
               variant="ghost"
               label="Delete"
               icon={<Trash2 size={16} aria-hidden="true" />}
-              isDisabled={n === 0 || deleting}
+              isDisabled={n === 0 || deleting || isSettling}
               onClick={() => selection.setConfirming(true)}
             />
             <IconButton

@@ -284,15 +284,18 @@ async function openSettings(
             }
             if (command === "storage_usage")
               return { historyBytes: 18_432_000, annotationBytes: 3_145_728 };
-            if (command === "list_history")
+            if (command === "list_history") {
+              const matching = history.filter((entry) =>
+                String((entry as { text?: string }).text ?? "")
+                  .toLowerCase()
+                  .includes(String(args.search ?? "").toLowerCase()),
+              );
+              const limit = Number((args as { limit?: number }).limit ?? 1e9);
               return {
-                entries: history.filter((entry) =>
-                  String((entry as { text?: string }).text ?? "")
-                    .toLowerCase()
-                    .includes(String(args.search ?? "").toLowerCase()),
-                ),
-                hasMore: false,
+                entries: matching.slice(0, limit),
+                hasMore: matching.length > limit,
               };
+            }
             if (command === "list_annotations") return annotations;
             if (
               command === "delete_history" ||
@@ -3520,4 +3523,163 @@ test("a take arriving while all are checked stays unchecked", async ({
   await expect(
     page.getByRole("checkbox", { name: /^Select Take 99:/ }),
   ).not.toBeChecked();
+});
+
+test("a take finishing while 500 are selected keeps every checked row in the list", async ({
+  page,
+}) => {
+  const many = Array.from({ length: 500 }, (_, index) => ({
+    ...takes[0],
+    id: index + 1,
+    text: `Take ${index + 1}`,
+    createdAtMs: Date.now() - (index + 1) * minuteMs,
+  }));
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openSettings(page, { history: many });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Select all 500 shown" }).check();
+  const status = page.locator(".ui-selection-count");
+  await expect(status).toHaveText("500 selected");
+  const newest = many[0].createdAtMs;
+  await page.evaluate(
+    (newest) =>
+      (window as unknown as { __addTake: (take: unknown) => void }).__addTake({
+        id: 9999,
+        text: "New take",
+        createdAtMs: newest,
+        app: "Slack",
+        model: "ggml-base.en",
+        audioMs: 1000,
+        inferenceMs: 10,
+        totalMs: 20,
+        status: "pasted",
+        detail: null,
+      }),
+    newest,
+  );
+  await expect(
+    page.getByRole("checkbox", { name: /^Select New take/ }),
+  ).not.toBeChecked();
+  await expect(status).toHaveText("500 selected");
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toContainText(
+    "Delete 500 dictations?",
+  );
+});
+
+const longTitle =
+  "Send the deploy link https://dictate.kellycooks.dev/releases/download/v0.1.3/dictate_0.1.3_aarch64.dmg?utm_source=history&utm_medium=desktop to Aleksandra";
+const longApp =
+  "Microsoft Visual Studio Code – Insiders (Rosetta) – Untitled-1";
+
+for (const width of [640, 720, 1100]) {
+  for (const view of ["Dictations", "Annotations"]) {
+    test(`at ${width}px a ${view} row with an unbroken title keeps its date and chevron in place`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 600 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await openSettings(page, {
+        history: [
+          { ...takes[0], text: longTitle, app: longApp },
+          ...takes.slice(1, 4),
+        ],
+        annotations: [
+          { ...sessions[0], text: longTitle, app: longApp },
+          ...sessions.slice(1, 4),
+        ],
+      });
+      await page.getByRole("button", { name: "History", exact: true }).click();
+      if (view === "Annotations")
+        await page
+          .getByRole("radio", { name: "Annotations", exact: true })
+          .check();
+      const pane = page.locator("main, [role=main]").first();
+      const paneRight = await pane.evaluate(
+        (el) => el.getBoundingClientRect().right,
+      );
+      const date = page.getByText(/ago$/).first();
+      await expect(date).toBeVisible();
+      const dateBox = (await date.boundingBox())!;
+      expect(dateBox.x + dateBox.width).toBeLessThanOrEqual(paneRight);
+      if (width < 1100) {
+        const chevron = page
+          .locator(".astryx-collapsible-trigger")
+          .first()
+          .locator("svg")
+          .last();
+        const box = await chevron.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.x + box!.width).toBeLessThanOrEqual(paneRight);
+        expect(box!.x).toBeGreaterThanOrEqual(dateBox.x + dateBox.width);
+      }
+      const title = page.getByText(longTitle.slice(0, 20)).first();
+      const clamped = await title.evaluate(
+        (el) =>
+          el.scrollHeight > el.clientHeight + 1 ||
+          el.scrollWidth > el.clientWidth + 1,
+      );
+      const titleBox = (await title.boundingBox())!;
+      expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(dateBox.x);
+      expect(clamped).toBe(true);
+      expect(
+        await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(0);
+    });
+  }
+}
+
+test("clearing a search while selecting loads one page, not the whole history", async ({
+  page,
+}) => {
+  const many = Array.from({ length: 1200 }, (_, index) => ({
+    ...takes[0],
+    id: 1200 - index,
+    text: `Take ${1200 - index}`,
+    createdAtMs: Date.now() - (index + 1) * minuteMs,
+  }));
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openSettings(page, { history: many });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  const search = page.getByRole("searchbox", { name: "Search history" });
+  await search.fill("Take 3");
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await search.fill("");
+  const bar = selectionBar(page, "dictations");
+  await expect(
+    bar.getByRole("checkbox", { name: "Select all 500 shown" }),
+  ).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(
+    bar.getByRole("checkbox", { name: "Select all 500 shown" }),
+  ).toBeVisible();
+});
+
+test("deleting every shown row ends selecting with nothing left checked", async ({
+  page,
+}) => {
+  await openHistory(page, 1100);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const list = page.getByRole("list", { name: "Dictations" });
+  await list.getByRole("checkbox", { name: /^Select Take 3:/ }).check();
+  const bar = selectionBar(page, "dictations");
+  const search = page.getByRole("searchbox", { name: "Search history" });
+  await search.fill("Take 1");
+  await list.getByRole("checkbox", { name: /^Select Take 12:/ }).check();
+  await bar.getByRole("button", { name: "Delete" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Delete 1 dictation" })
+    .click();
+  await expect(bar).toHaveCount(0);
+  await search.fill("");
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await expect(bar.getByText("0 selected", { exact: true })).toBeVisible();
 });
