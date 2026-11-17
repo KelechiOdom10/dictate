@@ -397,12 +397,15 @@ function Dictations() {
   const [limit, setLimit] = useState({ query, count: HISTORY_PAGE });
   // While selecting, takes that finish are added to the window instead of
   // pushing the oldest loaded rows out of it, so a checked row only leaves
-  // the list when a search or filter hides it.
-  const [selectedSince, setSelectedSince] = useState<number | null>(null);
-  const [arrived, setArrived] = useState(0);
-  const count =
-    (limit.query === query ? limit.count : HISTORY_PAGE) +
-    (selectedSince === null ? 0 : arrived);
+  // the list when a search or filter hides it. A take is new when its id is
+  // above every id loaded for this search since selecting began.
+  const [growth, setGrowth] = useState<{
+    query: string;
+    seen: number;
+    arrived: number;
+  } | null>(null);
+  const base = limit.query === query ? limit.count : HISTORY_PAGE;
+  const count = base + (growth?.arrived ?? 0);
   const history = useQuery({
     queryKey: ["history", query, count],
     queryFn: () => readHistory(query, count),
@@ -440,19 +443,16 @@ function Dictations() {
   const selected = open ?? entries[0];
   const current = settings.data?.historyRetention ?? "week";
   const selection = useSelection(entries.map((entry) => entry.id));
-  const newest = history.data?.entries[0]?.createdAtMs ?? 0;
-  if (selection.selecting && selectedSince === null) setSelectedSince(newest);
-  if (!selection.selecting && selectedSince !== null) {
-    setSelectedSince(null);
-    setArrived(0);
+  const loaded = history.isPlaceholderData ? undefined : history.data;
+  const top = Math.max(0, ...(loaded?.entries ?? []).map((entry) => entry.id));
+  if (!selection.selecting) {
+    if (growth) setGrowth(null);
+  } else if (loaded && growth?.query !== query) {
+    setGrowth({ query, seen: top, arrived: growth?.arrived ?? 0 });
+  } else if (loaded && growth && top > growth.seen) {
+    const arrived = loaded.entries.filter((entry) => entry.id > growth.seen);
+    setGrowth({ query, seen: top, arrived: growth.arrived + arrived.length });
   }
-  const newSince =
-    selectedSince === null
-      ? 0
-      : (history.data?.entries ?? []).filter(
-          (entry) => entry.createdAtMs > selectedSince,
-        ).length;
-  if (newSince > arrived) setArrived(newSince);
   const scope = [
     query ? `matching “${query}”` : "shown",
     filter === "all" ? "" : `as ${statusLabels[filter]}`,
@@ -611,7 +611,7 @@ function Dictations() {
         size="sm"
         isDisabled={history.isFetching}
         label={history.isFetching ? "Loading…" : "Load older dictations"}
-        onClick={() => setLimit({ query, count: count + HISTORY_PAGE })}
+        onClick={() => setLimit({ query, count: base + HISTORY_PAGE })}
       />
     </HStack>
   );
@@ -677,6 +677,7 @@ function Dictations() {
                   scope={scope}
                   noun={dictationNoun}
                   consequence="They can’t be recovered."
+                  isSettling={history.isPlaceholderData}
                   onDelete={removeChecked}
                 />
               </VStack>
@@ -708,6 +709,7 @@ function Dictations() {
                 scope={scope}
                 noun={dictationNoun}
                 consequence="They can’t be recovered."
+                isSettling={history.isPlaceholderData}
                 onDelete={removeChecked}
               />
             </VStack>
