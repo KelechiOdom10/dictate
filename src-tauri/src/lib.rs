@@ -42,6 +42,7 @@ mod sound;
 mod storage;
 mod surface;
 mod update;
+mod vad;
 
 use history::{HistoryList, NewTake, TakeStatus};
 use models::{ModelEntry, SpeechModel};
@@ -500,25 +501,52 @@ fn open_location(app: AppHandle, location: Location) -> Result<(), String> {
 
 const MIN_TAKE_SAMPLES: usize = 4_800;
 
-fn take_skip_reason(samples: &[f32]) -> Option<String> {
-    let seconds = samples.len() as f64 / 16_000.0;
+/// Why a take produced nothing to paste. Each says what actually happened:
+/// only digital silence points at the microphone being held elsewhere.
+#[derive(Clone, Debug, PartialEq)]
+enum Skip {
+    TooShort { seconds: f64 },
+    InvalidAudio,
+    DigitalSilence,
+    NoSpeech,
+    NoWords,
+}
+
+impl Skip {
+    fn detail(&self, source: &audio::Source) -> String {
+        let device = source.describe();
+        match self {
+            Self::TooShort { seconds } => format!(
+                "Too short to transcribe: {seconds:.2} s, and a take needs at least 0.30 s. Speak a little longer before you stop."
+            ),
+            Self::InvalidAudio => format!(
+                "{device} sent invalid audio, so nothing was transcribed. If it happens again, choose another microphone in Settings → General."
+            ),
+            Self::DigitalSilence => format!(
+                "Digital silence. Recorded from {device}. Another app may be holding or processing this microphone. Check its input level in Settings → General, or choose another microphone."
+            ),
+            Self::NoSpeech => {
+                format!("No speech detected in the recording from {device}, so nothing was pasted.")
+            }
+            Self::NoWords => format!("No words detected in the recording from {device}."),
+        }
+    }
+}
+
+/// The checks that need no model: length, invalid samples, digital silence.
+fn take_skip_reason(samples: &[f32]) -> Option<Skip> {
     if samples.len() < MIN_TAKE_SAMPLES {
-        return Some(format!("{seconds:.2} s, below minimum 0.30 s"));
+        return Some(Skip::TooShort {
+            seconds: samples.len() as f64 / 16_000.0,
+        });
     }
     if samples.iter().any(|s| !s.is_finite()) {
-        return Some("nonfinite audio".into());
+        return Some(Skip::InvalidAudio);
     }
     samples
         .iter()
         .all(|s| *s == 0.0)
-        .then(|| "Digital silence".into())
-}
-
-fn no_speech_detail(reason: &str, source: &audio::Source) -> String {
-    format!(
-        "{reason}. Recorded from {}. Another app may be holding or processing this microphone. Check its input level in Settings → General, or choose another microphone.",
-        source.describe()
-    )
+        .then_some(Skip::DigitalSilence)
 }
 
 fn transcript_has_text(text: &str) -> bool {
@@ -528,7 +556,7 @@ fn transcript_has_text(text: &str) -> bool {
 struct Transcript {
     text: String,
     inference_ms: Option<i64>,
-    skip_reason: Option<String>,
+    skip_reason: Option<Skip>,
 }
 
 /// The take's text, from `live` when the take was decoded while it recorded,
@@ -538,8 +566,16 @@ fn dictation_text(
     model: &Path,
     live: Option<transcribe::LiveTake>,
 ) -> Result<Transcript, Problem> {
-    if let Some(reason) = take_skip_reason(samples) {
-        log::info!("[hotkey] skipped: {reason}");
+    let skip = take_skip_reason(samples).or_else(|| match vad::has_speech(samples) {
+        Ok(true) => None,
+        Ok(false) => Some(Skip::NoSpeech),
+        Err(error) => {
+            log::warn!("[vad] {error}; transcribing anyway");
+            None
+        }
+    });
+    if let Some(reason) = skip {
+        log::info!("[hotkey] skipped: {reason:?}");
         return Ok(Transcript {
             text: String::new(),
             inference_ms: None,
@@ -557,7 +593,7 @@ fn dictation_text(
         return Ok(Transcript {
             text: String::new(),
             inference_ms,
-            skip_reason: Some("No words detected".into()),
+            skip_reason: Some(Skip::NoWords),
         });
     }
     Ok(Transcript {
@@ -1282,7 +1318,7 @@ fn dictation_change(app: &AppHandle, mut runtime: std::sync::MutexGuard<'_, Runt
                         Ok(Some(insert::Outcome::Pasted)) => (TakeStatus::Pasted, None),
                         Ok(None) => (
                             TakeStatus::Skipped,
-                            skip_reason.map(|reason| no_speech_detail(&reason, &source)),
+                            skip_reason.map(|reason| reason.detail(&source)),
                         ),
                         Err(error) => (TakeStatus::Failed, Some(error.to_string())),
                     };
@@ -2793,38 +2829,108 @@ mod take_tests {
     }
 
     #[test]
-    fn quiet_audio_reaches_the_transcriber_without_an_energy_gate() {
+    fn quiet_audio_passes_the_checks_that_need_no_model() {
         for rms in [0.002295_f32, 0.001, 0.000239, 0.000075] {
             let samples: Vec<f32> = (0..32_000)
                 .map(|i| if i % 2 == 0 { rms } else { -rms })
                 .collect();
-            assert!(take_skip_reason(&samples).is_none());
-            let problem = dictation_text(&samples, Path::new("/nonexistent.bin"), None)
-                .err()
-                .expect("quiet audio must attempt transcription, not silently skip");
-            assert!(!problem.title.is_empty());
+            assert_eq!(take_skip_reason(&samples), None);
         }
         for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             let mut samples = vec![0.01; 16_000];
             samples[100] = invalid;
-            assert_eq!(
-                take_skip_reason(&samples).as_deref(),
-                Some("nonfinite audio")
-            );
+            assert_eq!(take_skip_reason(&samples), Some(Skip::InvalidAudio));
         }
     }
 
+    /// DICT-14 #6: a short tap and invalid samples were blamed on another app
+    /// holding the microphone. Only digital silence says that now.
     #[test]
-    fn no_words_detail_names_the_actual_device_and_an_action() {
+    fn each_skip_says_what_actually_happened() {
         let source = audio::Source {
             device: "MacBook Pro Microphone".into(),
             channels: 3,
             rate: 96_000,
         };
-        let detail = no_speech_detail("No words detected", &source);
-        assert!(detail.contains("MacBook Pro Microphone (3 channels at 96000 Hz)"));
-        assert!(detail.contains("Another app may be holding or processing"));
-        assert!(detail.contains("Settings → General"));
+        let device = "MacBook Pro Microphone (3 channels at 96000 Hz)";
+        let short = take_skip_reason(&vec![0.05; 1_600]).unwrap();
+        assert_eq!(
+            short.detail(&source),
+            "Too short to transcribe: 0.10 s, and a take needs at least 0.30 s. Speak a little longer before you stop."
+        );
+        for skip in [
+            Skip::TooShort { seconds: 0.1 },
+            Skip::InvalidAudio,
+            Skip::DigitalSilence,
+            Skip::NoSpeech,
+            Skip::NoWords,
+        ] {
+            let detail = skip.detail(&source);
+            assert_eq!(
+                detail.contains("Another app may be holding"),
+                skip == Skip::DigitalSilence,
+                "{detail}"
+            );
+            if skip != (Skip::TooShort { seconds: 0.1 }) {
+                assert!(detail.contains(device), "{detail}");
+            }
+        }
+    }
+
+    /// DICT-14 #2: 0.3–1 s of room tone used to paste "Okay.", "Uh" or
+    /// "Yeah."; quiet real speech (the #57 levels) must still come through.
+    #[test]
+    fn room_tone_pastes_nothing_and_quiet_speech_still_transcribes() {
+        let _turn = crate::transcribe::tests::transcription_turn();
+        let model = std::env::var_os("DICTATE_PARAKEET_MODEL")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../models")
+                    .join(models::info(SpeechModel::ParakeetUnifiedEn).file_name)
+            });
+        if !model.is_file() {
+            eprintln!("SKIP: no Parakeet model at {}", model.display());
+            return;
+        }
+        for seconds in [0.3, 0.5, 0.75, 1.0] {
+            for level in [0.0003, 0.001, 0.0029] {
+                for seed in 1..=3 {
+                    let tone = crate::vad::tests::room_tone(seconds, level, seed);
+                    let transcript = dictation_text(&tone, &model, None).unwrap();
+                    assert_eq!(transcript.text, "", "{seconds} s at {level}");
+                    assert_eq!(transcript.skip_reason, Some(Skip::NoSpeech));
+                    assert_eq!(transcript.inference_ms, None);
+                }
+            }
+        }
+        for (text, expected) in [
+            ("Yes.", "yes"),
+            ("Send it.", "send"),
+            ("Okay.", "okay"),
+            ("The quick brown fox jumps over the lazy dog.", "the"),
+        ] {
+            let Some(speech) = crate::vad::tests::say(text) else {
+                return;
+            };
+            for level in [0.002295, 0.000239, 0.000075] {
+                let quiet = crate::vad::tests::at_rms(&speech, level);
+                let transcript = dictation_text(&quiet, &model, None).unwrap();
+                let words: String = transcript
+                    .text
+                    .to_lowercase()
+                    .chars()
+                    .filter(|c| c.is_alphanumeric() || *c == ' ')
+                    .collect();
+                assert_eq!(transcript.skip_reason, None, "{text} at {level}");
+                assert_eq!(
+                    words.split_whitespace().next(),
+                    Some(expected),
+                    "{text} at {level}: {words}"
+                );
+            }
+        }
+        crate::transcribe::tests::unload_held();
     }
 
     #[test]

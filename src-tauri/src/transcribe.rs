@@ -711,7 +711,7 @@ fn write_wav(path: &Path, samples: &[f32]) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -938,7 +938,13 @@ mod tests {
     /// `transcribe` refuses to run twice at once, and the held engine is one
     /// slot, so the tests that transcribe take turns instead of failing each
     /// other.
-    fn transcription_turn() -> std::sync::MutexGuard<'static, ()> {
+    /// Lets go of the held model, as every in-process test does before it
+    /// ends: a model still held at exit trips Metal's teardown assertion.
+    pub(crate) fn unload_held() {
+        held::unload();
+    }
+
+    pub(crate) fn transcription_turn() -> std::sync::MutexGuard<'static, ()> {
         static TURN: Mutex<()> = Mutex::new(());
         TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
