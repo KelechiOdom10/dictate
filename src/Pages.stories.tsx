@@ -219,7 +219,7 @@ function mockApp(
       if (command === "input_devices")
         return ["Built-in Microphone", "USB Microphone"];
       if (command === "microphone_level") return 0.12;
-      if (command === "plugin:app|version") return "0.1.0";
+      if (command === "plugin:app|version") return "0.1.1";
       if (command === "app_folders")
         return {
           data: "/Users/you/Library/Application Support/com.kelechiodom.dictate",
@@ -1008,7 +1008,7 @@ export const About: Story = {
     const c = within(canvasElement);
     await expect(await c.findByText(/Logs\/com\.kelechiodom/)).toBeVisible();
     await expect(c.getByRole("status", { name: "Version" })).toHaveTextContent(
-      "0.1.0",
+      "0.1.1",
     );
     await userEvent.click(
       c.getByRole("button", { name: "Show in Finder, app data" }),

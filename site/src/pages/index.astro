@@ -7,7 +7,7 @@ import "../styles/site.css";
 
 const requirement = `Apple silicon, macOS 15 or later, ${release.size}`;
 
-const shotSizes = "(min-width: 56rem) 960px, calc(100vw - 2.5rem)";
+const shotSizes = "(min-width: 56rem) 965px, calc(100vw - 2.5rem)";
 
 const steps = [
   { id: "record", name: "Record" },
@@ -148,10 +148,10 @@ const settingsAlt =
           <img
             class="shot-light"
             src="/app/settings-light.webp"
-            srcset={`/app/settings-light-720.webp 720w, /app/settings-light.webp 1440w`}
+            srcset={`/app/settings-light-1080.webp 1080w, /app/settings-light.webp 2160w`}
             sizes={shotSizes}
-            width="1440"
-            height="1160"
+            width="2160"
+            height="1740"
             alt={settingsAlt}
             loading="lazy"
             decoding="async"
@@ -159,10 +159,10 @@ const settingsAlt =
           <img
             class="shot-dark"
             src="/app/settings-dark.webp"
-            srcset={`/app/settings-dark-720.webp 720w, /app/settings-dark.webp 1440w`}
+            srcset={`/app/settings-dark-1080.webp 1080w, /app/settings-dark.webp 2160w`}
             sizes={shotSizes}
-            width="1440"
-            height="1160"
+            width="2160"
+            height="1740"
             alt={settingsAlt}
             loading="lazy"
             decoding="async"

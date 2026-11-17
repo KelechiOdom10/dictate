@@ -56,7 +56,7 @@ const settingsReady = {
   "pages--advanced": (page) =>
     page.locator("#mic-warm:checked:enabled").waitFor(),
   "pages--about": (page) =>
-    page.locator("output#version", { hasText: "0.1.0" }).waitFor(),
+    page.locator("output#version", { hasText: "0.1.1" }).waitFor(),
   "pages--annotate": (page) =>
     page
       .getByText("Allowed", { exact: true })
