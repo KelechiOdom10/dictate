@@ -3008,9 +3008,8 @@ test("wide Dictations bulk delete keeps the viewed row apart from checked rows",
   const all = page.getByRole("checkbox", { name: "Select all 24 shown" });
   await expect(all).not.toBeChecked();
   await expect(
-    page.getByRole("status").filter({ hasText: "0 selected" }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Delete…" })).toBeDisabled();
+    page.getByRole("toolbar", { name: "Selected dictations" }),
+  ).toHaveCount(0);
   await list.getByRole("checkbox", { name: /^Select Take 3:/ }).check();
   await list.getByRole("checkbox", { name: /^Select Take 5:/ }).check();
   await expect(
@@ -3092,7 +3091,7 @@ test("narrow Dictations select by keyboard and return to the accordion", async (
   await expect(
     page.getByRole("status").filter({ hasText: "2 selected" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
   const group = page.getByRole("group", { name: "Dictations", exact: true });
   await expect(group.locator("button[aria-expanded]")).toHaveCount(24);
   await expect(page.getByRole("checkbox")).toHaveCount(0);
@@ -3119,3 +3118,72 @@ for (const width of [640, 1100])
     expect(await deletes(page, "delete_annotation")).toBe(3);
     await expect(page.getByText(/· 11 sessions ·/)).toBeVisible();
   });
+
+for (const view of ["Dictations", "Annotations"] as const)
+  for (const width of [640, 1100])
+    test(`${view} at ${width}px float the selection bar in the list pane without covering rows`, async ({
+      page,
+    }) => {
+      await openHistory(page, width, view);
+      const noun = view === "Dictations" ? "dictations" : "annotations";
+      await page.getByRole("button", { name: "Select", exact: true }).click();
+      const list = page.getByRole("list", { name: view });
+      const boxes = list.getByRole("checkbox");
+      const before = await boxes.evaluateAll((els) =>
+        els.map((el) => Math.round(el.getBoundingClientRect().top)),
+      );
+      const bar = page.getByRole("toolbar", { name: `Selected ${noun}` });
+      await expect(bar).toHaveCount(0);
+      await boxes.nth(1).focus();
+      await page.keyboard.press("Space");
+      await expect(bar).toBeVisible();
+      await expect(bar.getByText("1 selected", { exact: true })).toBeVisible();
+      // Showing the bar moves nothing above it.
+      expect(
+        await boxes.evaluateAll((els) =>
+          els.map((el) => Math.round(el.getBoundingClientRect().top)),
+        ),
+      ).toEqual(before);
+      // Centred in the list pane, not the window, and inside it.
+      const pane = (await list.boundingBox())!;
+      const box = (await bar.boundingBox())!;
+      expect(
+        Math.abs(box.x + box.width / 2 - (pane.x + pane.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      expect(box.width).toBeLessThan(pane.width);
+      // At the end of the pane it rests below the last row.
+      await list.evaluate((el) => {
+        for (let node = el.parentElement; node; node = node.parentElement)
+          if (
+            /auto|scroll/.test(getComputedStyle(node).overflowY) &&
+            node.scrollHeight > node.clientHeight
+          )
+            node.scrollTop = node.scrollHeight;
+        document.scrollingElement!.scrollTop = 1e9;
+      });
+      const last = (await list.getByRole("listitem").last().boundingBox())!;
+      const rest = (await bar.boundingBox())!;
+      expect(rest.y).toBeGreaterThanOrEqual(last.y + last.height);
+      // Keyboard: Tab reaches it, the clear button empties the selection and
+      // hands focus back to select-all, and Escape ends selecting.
+      const remove = bar.getByRole("button", { name: /^Delete 1…$/ });
+      // Tab walks the rows in order and then reaches the bar after them.
+      for (let step = 0; step < 80; step++) {
+        if (await remove.evaluate((el) => el === document.activeElement)) break;
+        await page.keyboard.press("Tab");
+      }
+      await expect(remove).toBeFocused();
+      await page.keyboard.press("ArrowRight");
+      await expect(
+        bar.getByRole("button", { name: "Clear selection" }),
+      ).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(bar).toHaveCount(0);
+      await expect(
+        page.getByRole("checkbox", { name: /^Select all \d+ shown$/ }),
+      ).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(
+        page.getByRole("button", { name: "Select", exact: true }),
+      ).toBeVisible();
+    });

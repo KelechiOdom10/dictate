@@ -489,3 +489,13 @@ meter.ui-rating::-moz-meter-bar {
   border-radius: var(--radius-full);
   background: var(--color-accent);
 }
+
+.ui-selection-float {
+  position: sticky;
+  inset-block-end: var(--spacing-4);
+  margin-block-end: var(--spacing-4);
+  align-self: center;
+  z-index: 1;
+  border-radius: var(--radius-container);
+  box-shadow: var(--shadow-med);
+}

@@ -66,6 +66,7 @@ import {
   Checklist,
   deleteEach,
   SelectionBar,
+  SelectionFloat,
   useSelection,
   type Selection,
 } from "./HistorySelection";
@@ -474,10 +475,7 @@ function Dictations() {
           <SelectionBar
             selection={selection}
             shown={entries.length}
-            noun={dictationNoun}
             scope={scope}
-            consequence="They can’t be recovered."
-            onDelete={removeChecked}
           />
         )}
         {history.isSuccess && !nothingYet && !selection.selecting && (
@@ -641,6 +639,12 @@ function Dictations() {
                   selection={selection}
                 />
                 {more}
+                <SelectionFloat
+                  selection={selection}
+                  noun={dictationNoun}
+                  consequence="They can’t be recovered."
+                  onDelete={removeChecked}
+                />
               </VStack>
               {detailOf(selected, false)}
             </>
@@ -664,6 +668,12 @@ function Dictations() {
                 </Accordion>
               )}
               {more}
+              <SelectionFloat
+                selection={selection}
+                noun={dictationNoun}
+                consequence="They can’t be recovered."
+                onDelete={removeChecked}
+              />
             </VStack>
           )}
         </Grid>
@@ -879,10 +889,7 @@ function Annotations() {
         <SelectionBar
           selection={selection}
           shown={entries.length}
-          noun={annotationNoun}
           scope="shown"
-          consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
-          onDelete={removeChecked}
         />
         <Text type="supporting">
           {usage.data
@@ -898,22 +905,38 @@ function Annotations() {
       >
         {twoPanes ? (
           <>
-            <Rows
-              label="Annotations"
-              rows={rows}
-              value={selected.id}
-              onChange={setSelectedId}
-              selection={selection}
-            />
+            <VStack gap={2}>
+              <Rows
+                label="Annotations"
+                rows={rows}
+                value={selected.id}
+                onChange={setSelectedId}
+                selection={selection}
+              />
+              <SelectionFloat
+                selection={selection}
+                noun={annotationNoun}
+                consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
+                onDelete={removeChecked}
+              />
+            </VStack>
             {detailOf(selected, false)}
           </>
         ) : selection.selecting ? (
-          <Checklist
-            label="Annotations"
-            rows={rows}
-            current={open?.id ?? null}
-            selection={selection}
-          />
+          <VStack gap={2}>
+            <Checklist
+              label="Annotations"
+              rows={rows}
+              current={open?.id ?? null}
+              selection={selection}
+            />
+            <SelectionFloat
+              selection={selection}
+              noun={annotationNoun}
+              consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
+              onDelete={removeChecked}
+            />
+          </VStack>
         ) : (
           <Accordion
             label="Annotations"

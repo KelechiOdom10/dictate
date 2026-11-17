@@ -479,7 +479,10 @@ export const HistorySelecting: Story = {
       c.getByRole("checkbox", { name: /^Select No speech/ }),
     );
     await expect(c.getByText("2 selected")).toBeInTheDocument();
-    await expect(c.getByRole("button", { name: "Delete 2…" })).toBeEnabled();
+    const bar = c.getByRole("toolbar", { name: "Selected dictations" });
+    await expect(
+      within(bar).getByRole("button", { name: "Delete 2…" }),
+    ).toBeEnabled();
     await expect(
       c.getByRole("region", { name: "Dictation" }),
     ).toHaveTextContent("Stop by the bakery");

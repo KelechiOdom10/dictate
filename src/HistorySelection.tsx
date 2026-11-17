@@ -4,8 +4,11 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { HStack } from "@astryxdesign/core/HStack";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";
+import { Toolbar } from "@astryxdesign/core/Toolbar";
+import { X } from "lucide-react";
 
 type Noun = { one: string; many: string };
 
@@ -18,15 +21,24 @@ export const count = (n: number, noun: Noun) =>
  */
 export function useSelection<Id>(shown: Id[]) {
   const [selecting, setSelecting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [ids, setIds] = useState<Id[]>([]);
+  const all = useRef<HTMLInputElement>(null);
   const checked = ids.filter((id) => shown.includes(id));
   return {
     selecting,
     checked,
+    all,
+    confirming,
+    setConfirming,
     start: () => setSelecting(true),
     cancel: () => {
       setSelecting(false);
       setIds([]);
+    },
+    clear: () => {
+      setIds([]);
+      all.current?.focus();
     },
     toggle: (id: Id, on: boolean) =>
       setIds(on ? [...checked, id] : checked.filter((other) => other !== id)),
@@ -37,28 +49,20 @@ export function useSelection<Id>(shown: Id[]) {
 export type Selection<Id> = ReturnType<typeof useSelection<Id>>;
 
 /**
- * "Select" until selecting starts, then the select-all scope, the count,
- * Delete and Cancel. Delete asks once, naming exactly how many go.
+ * The toolbar row: "Select" until selecting starts, then the select-all
+ * checkbox naming its scope, and Done. Escape ends selecting.
  */
 export function SelectionBar<Id>({
   selection,
   shown,
-  noun,
   scope,
-  consequence,
-  onDelete,
 }: {
   selection: Selection<Id>;
   shown: number;
-  noun: Noun;
   scope: string;
-  consequence: string;
-  onDelete: (ids: Id[]) => Promise<void>;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const n = selection.checked.length;
-  const { selecting, cancel } = selection;
+  const { selecting, confirming, cancel } = selection;
   useEffect(() => {
     if (!selecting || confirming) return;
     const onKey = (event: KeyboardEvent) => {
@@ -67,7 +71,7 @@ export function SelectionBar<Id>({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [selecting, confirming, cancel]);
-  if (!selection.selecting)
+  if (!selecting)
     return (
       <Button
         size="sm"
@@ -78,51 +82,85 @@ export function SelectionBar<Id>({
       />
     );
   return (
-    <HStack gap={3} vAlign="center" wrap="wrap">
-      <HStack gap={3} vAlign="center">
-        <CheckboxInput
-          size="sm"
-          label={`Select all ${shown.toLocaleString()} ${scope}`}
-          value={n === 0 ? false : n === shown ? true : "indeterminate"}
-          onChange={selection.setAll}
-        />
-        <Text type="supporting" role="status" textWrap="nowrap">
+    <HStack gap={2} vAlign="center">
+      <CheckboxInput
+        ref={selection.all}
+        size="sm"
+        label={`Select all ${shown.toLocaleString()} ${scope}`}
+        value={n === 0 ? false : n === shown ? true : "indeterminate"}
+        onChange={selection.setAll}
+      />
+      <Button size="sm" variant="ghost" label="Done" onClick={cancel} />
+    </HStack>
+  );
+}
+
+/**
+ * Floats at the bottom of the list pane while anything is checked: the
+ * count, Delete and a clear button. It sits in the flow after the rows, so
+ * at the end of the pane it rests below the last row instead of over it.
+ */
+export function SelectionFloat<Id>({
+  selection,
+  noun,
+  consequence,
+  onDelete,
+}: {
+  selection: Selection<Id>;
+  noun: Noun;
+  consequence: string;
+  onDelete: (ids: Id[]) => Promise<void>;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const n = selection.checked.length;
+  if (n === 0) return null;
+  return (
+    <Toolbar
+      className="ui-selection-float"
+      label={`Selected ${noun.many}`}
+      size="sm"
+      variant="section"
+      gap={2}
+      startContent={
+        <Text role="status" textWrap="nowrap">
           {n.toLocaleString()} selected
         </Text>
-      </HStack>
-      <HStack gap={1} vAlign="center">
-        <Button
-          size="sm"
-          variant="destructive"
-          label={n ? `Delete ${n.toLocaleString()}…` : "Delete…"}
-          isDisabled={n === 0 || deleting}
-          onClick={() => setConfirming(true)}
-        />
-        <Button
-          size="sm"
-          variant="ghost"
-          label="Cancel"
-          onClick={selection.cancel}
-        />
-      </HStack>
-      <AlertDialog
-        isOpen={confirming}
-        onOpenChange={setConfirming}
-        title={`Delete ${count(n, noun)}?`}
-        description={consequence}
-        actionLabel={`Delete ${count(n, noun)}`}
-        isActionLoading={deleting}
-        onAction={async () => {
-          setDeleting(true);
-          try {
-            await onDelete(selection.checked);
-          } finally {
-            setDeleting(false);
-            setConfirming(false);
-          }
-        }}
-      />
-    </HStack>
+      }
+      endContent={
+        <>
+          <Button
+            variant="destructive"
+            label={`Delete ${n.toLocaleString()}…`}
+            isDisabled={deleting}
+            onClick={() => selection.setConfirming(true)}
+          />
+          <IconButton
+            variant="ghost"
+            label="Clear selection"
+            tooltip="Clear selection"
+            icon={<X size={16} aria-hidden="true" />}
+            onClick={selection.clear}
+          />
+          <AlertDialog
+            isOpen={selection.confirming}
+            onOpenChange={selection.setConfirming}
+            title={`Delete ${count(n, noun)}?`}
+            description={consequence}
+            actionLabel={`Delete ${count(n, noun)}`}
+            isActionLoading={deleting}
+            onAction={async () => {
+              setDeleting(true);
+              try {
+                await onDelete(selection.checked);
+              } finally {
+                setDeleting(false);
+                selection.setConfirming(false);
+              }
+            }}
+          />
+        </>
+      }
+    />
   );
 }
 
