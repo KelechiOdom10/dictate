@@ -7,9 +7,7 @@ import "../styles/site.css";
 
 const requirement = `Apple silicon, macOS 15 or later, ${release.size}`;
 
-const shotSizes = "(min-width: 64rem) 60rem, calc(100vw - 2.5rem)";
-
-const takeSizes = "(min-width: 40rem) 34rem, calc(100vw - 2.5rem)";
+const shotSizes = "(min-width: 56rem) 965px, calc(100vw - 2.5rem)";
 
 const steps = [
   { id: "record", name: "Record" },
@@ -18,19 +16,15 @@ const steps = [
   { id: "copy", name: "Copy" },
 ];
 
-const quote =
-  "And if you notice here, I can kind of come in here and choose okay for light mode, maybe I use Ember, right?";
+const quote = "The button's cut off at this width. It should wrap under the price.";
 
 const summary = [
-  "[annotation 2:20 · T3 Code (Nightly)]",
-  "- #5 (0:53) circled region",
-  "  x 0.32–0.88, y 0.14–0.72",
-  "  — “And if you notice here, I can kind",
-  "    of come in here and choose okay”",
-  "- #6 (1:05) circled region",
-  "  x 0.34–0.91, y 0.13–0.82",
-  "  — “for light mode, maybe I use Ember,",
-  "    right?”",
+  "[annotation 0:41 · Lumen pricing]",
+  "- #1 (0:41) circled region",
+  "  x 0.35–0.64, y 0.50–0.66",
+  "  — “The button's cut off at this",
+  "    width. It should wrap under",
+  "    the price.”",
 ];
 
 const settingsAlt =
@@ -154,10 +148,10 @@ const settingsAlt =
           <img
             class="shot-light"
             src="/app/settings-light.webp"
-            srcset={`/app/settings-light-720.webp 720w, /app/settings-light.webp 1440w`}
+            srcset={`/app/settings-light-1080.webp 1080w, /app/settings-light.webp 2160w`}
             sizes={shotSizes}
-            width="1440"
-            height="1160"
+            width="2160"
+            height="1740"
             alt={settingsAlt}
             loading="lazy"
             decoding="async"
@@ -165,10 +159,10 @@ const settingsAlt =
           <img
             class="shot-dark"
             src="/app/settings-dark.webp"
-            srcset={`/app/settings-dark-720.webp 720w, /app/settings-dark.webp 1440w`}
+            srcset={`/app/settings-dark-1080.webp 1080w, /app/settings-dark.webp 2160w`}
             sizes={shotSizes}
-            width="1440"
-            height="1160"
+            width="2160"
+            height="1740"
             alt={settingsAlt}
             loading="lazy"
             decoding="async"
@@ -200,31 +194,37 @@ const settingsAlt =
           }
         </div>
         <div class="take" id="take" role="tabpanel" aria-labelledby="step-record" tabindex="0">
-          <img
-            class="layer layer-clean"
-            src="/app/take-clean.webp"
-            srcset="/app/take-clean-640.webp 640w, /app/take-clean.webp 1200w"
-            sizes={takeSizes}
-            width="1200"
-            height="953"
-            alt="T3 Code's Appearance settings during a real take. The Annotate bar at the top reads 00:45."
-            loading="lazy"
-            decoding="async"
-          />
-          <img
-            class="layer layer-ink"
-            src="/app/take-ink.webp"
-            srcset="/app/take-ink-640.webp 640w, /app/take-ink.webp 1200w"
-            sizes={takeSizes}
-            width="1200"
-            height="953"
-            alt="The same screen at 00:53, with a red ink loop drawn around the color schemes and themes."
-            loading="lazy"
-            decoding="async"
-          />
+          <picture>
+            <source media="(max-width: 56rem)" srcset="/app/take-clean-m630.webp 630w, /app/take-clean-m945.webp 945w" sizes="calc(90vw)" width="945" height="840" />
+            <img
+              class="layer layer-clean"
+              src="/app/take-clean.webp"
+              srcset="/app/take-clean-965.webp 965w, /app/take-clean.webp 1930w"
+              sizes="(min-width: 56rem) 965px, 90vw"
+              width="1930"
+              height="1016"
+              alt="A pricing page in Lumen with three plans. The Pro plan's Start free trial button runs past the card edge and is cut off. The Annotate bar at the top reads 00:38."
+              loading="lazy"
+              decoding="async"
+            />
+          </picture>
+          <picture>
+            <source media="(max-width: 56rem)" srcset="/app/take-ink-m630.webp 630w, /app/take-ink-m945.webp 945w" sizes="calc(90vw)" width="945" height="840" />
+            <img
+              class="layer layer-ink"
+              src="/app/take-ink.webp"
+              srcset="/app/take-ink-965.webp 965w, /app/take-ink.webp 1930w"
+              sizes="(min-width: 56rem) 965px, 90vw"
+              width="1930"
+              height="1016"
+              alt="The same pricing page at 00:41 with a red ink loop drawn around the cut-off Start free trial button."
+              loading="lazy"
+              decoding="async"
+            />
+          </picture>
           <figure class="layer layer-quote">
             <blockquote>{quote}</blockquote>
-            <figcaption><span class="mono">0:53</span> said while circling</figcaption>
+            <figcaption><span class="mono">0:41</span> said while circling</figcaption>
           </figure>
           <figure class="layer layer-code">
             <figcaption><span>summary.md</span><span class="copied">Copied · packaged in 2.2 s</span></figcaption>
@@ -327,29 +327,36 @@ const settingsAlt =
 
       let loop = 0;
       let seen = false;
-      const stopLoop = () => {
-        clearInterval(loop);
-        loop = 0;
-        seen = false;
-        stopped = true;
-        observer?.disconnect();
-      };
+      let paused = false;
       let stopped = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const advance = () => {
         const at = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
         select(tabs[(at + 1) % tabs.length]);
       };
+      const sync = () => {
+        clearInterval(loop);
+        loop = !stopped && seen && !paused ? window.setInterval(advance, 2400) : 0;
+      };
+      const stopLoop = () => {
+        stopped = true;
+        observer?.disconnect();
+        sync();
+      };
       const observer = stopped
         ? undefined
         : new IntersectionObserver(([entry]) => {
-            if (stopped) return;
             seen = entry.isIntersecting;
-            clearInterval(loop);
-            loop = seen ? window.setInterval(advance, 4000) : 0;
-          }, { threshold: 0.5 });
-      if (observer) observer.observe(annotate);
-      for (const part of [pills, take]) part.addEventListener("pointerenter", stopLoop);
-      pills.addEventListener("focusin", stopLoop);
+            sync();
+          }, { threshold: 0.25 });
+      observer?.observe(annotate);
+      const pause = (on: boolean) => () => {
+        paused = on;
+        sync();
+      };
+      pills.addEventListener("pointermove", pause(true));
+      pills.addEventListener("pointerleave", pause(false));
+      pills.addEventListener("focusin", pause(true));
+      pills.addEventListener("focusout", pause(false));
 
       for (const tab of tabs) {
         tab.addEventListener("click", () => {
@@ -370,6 +377,7 @@ const settingsAlt =
                     : -1;
           if (to < 0) return;
           event.preventDefault();
+          stopLoop();
           select(tabs[to]);
           tabs[to].focus();
         });
