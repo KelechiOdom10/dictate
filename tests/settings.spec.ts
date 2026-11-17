@@ -2993,3 +2993,129 @@ for (const width of [640, 720, 820, 1100]) {
     });
   }
 }
+
+const deletes = async (page: Page, command: string) =>
+  (await sentCommands(page)).filter((sent) => sent === command).length;
+
+test("wide Dictations bulk delete keeps the viewed row apart from checked rows", async ({
+  page,
+}) => {
+  await openHistory(page, 1100);
+  const list = page.getByRole("list", { name: "Dictations" });
+  const detail = page.getByRole("region", { name: "Dictation" });
+  await expect(detail).toContainText("Take 1:");
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const all = page.getByRole("checkbox", { name: "Select all 24 shown" });
+  await expect(all).not.toBeChecked();
+  await expect(
+    page.getByRole("status").filter({ hasText: "0 selected" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete…" })).toBeDisabled();
+  await list.getByRole("checkbox", { name: /^Select Take 3:/ }).check();
+  await list.getByRole("checkbox", { name: /^Select Take 5:/ }).check();
+  await expect(
+    page.getByRole("status").filter({ hasText: "2 selected" }),
+  ).toBeVisible();
+  await expect(all).toHaveJSProperty("indeterminate", true);
+  // Checking a row does not change the one being viewed, and viewing one
+  // does not check it.
+  await expect(detail).toContainText("Take 1:");
+  await list.getByRole("button", { name: /^Take 4:/ }).click();
+  await expect(detail).toContainText("Take 4:");
+  await expect(
+    list.getByRole("checkbox", { name: /^Select Take 4:/ }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("status").filter({ hasText: "2 selected" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Delete 2…" }).click();
+  const dialog = page.getByRole("alertdialog", {
+    name: "Delete 2 dictations?",
+  });
+  await expect(dialog).toContainText("They can’t be recovered.");
+  await dialog.getByRole("button", { name: "Delete 2 dictations" }).click();
+  await expect(list.getByRole("button", { name: /^Take 3:/ })).toHaveCount(0);
+  await expect(list.getByRole("button", { name: /^Take 5:/ })).toHaveCount(0);
+  await expect(list.getByRole("button")).toHaveCount(22);
+  expect(await deletes(page, "delete_history")).toBe(2);
+  await expect(
+    page.getByRole("button", { name: "Select", exact: true }),
+  ).toBeVisible();
+  await expect(detail).toContainText("Take 4:");
+});
+
+test("Dictations select-all names its scope and Escape cancels", async ({
+  page,
+}) => {
+  await openHistory(page, 1100);
+  await page.getByRole("searchbox", { name: "Search history" }).fill("Take");
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const all = page.getByRole("checkbox", {
+    name: "Select all 24 matching “Take”",
+  });
+  await all.check();
+  await expect(
+    page.getByRole("status").filter({ hasText: "24 selected" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Delete 24…" }).click();
+  await expect(
+    page.getByRole("alertdialog", { name: "Delete 24 dictations?" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("status").filter({ hasText: "24 selected" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("button", { name: "Select", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+  expect(await deletes(page, "delete_history")).toBe(0);
+});
+
+test("narrow Dictations select by keyboard and return to the accordion", async ({
+  page,
+}) => {
+  await openHistory(page, 640);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const list = page.getByRole("list", { name: "Dictations" });
+  await expect(list.locator("button[aria-expanded]")).toHaveCount(0);
+  const second = list.getByRole("checkbox", { name: /^Select Take 2:/ });
+  await second.focus();
+  await page.keyboard.press("Space");
+  await expect(second).toBeChecked();
+  await list.getByText(/^Take 6:/).click();
+  await expect(
+    list.getByRole("checkbox", { name: /^Select Take 6:/ }),
+  ).toBeChecked();
+  await expect(
+    page.getByRole("status").filter({ hasText: "2 selected" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  const group = page.getByRole("group", { name: "Dictations", exact: true });
+  await expect(group.locator("button[aria-expanded]")).toHaveCount(24);
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+});
+
+for (const width of [640, 1100])
+  test(`Annotations bulk delete at ${width}px removes each session the single-delete way`, async ({
+    page,
+  }) => {
+    await openHistory(page, width, "Annotations");
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: /^Select Session 2:/ }).check();
+    await page.getByRole("checkbox", { name: /^Select Session 9:/ }).check();
+    await page.getByRole("checkbox", { name: /^Select Session 11:/ }).check();
+    await page.getByRole("button", { name: "Delete 3…" }).click();
+    const dialog = page.getByRole("alertdialog", {
+      name: "Delete 3 annotations?",
+    });
+    await expect(dialog).toContainText(
+      "Their recordings, frames and summaries are removed.",
+    );
+    await dialog.getByRole("button", { name: "Delete 3 annotations" }).click();
+    await expect(page.getByText(/^Session 9:/)).toHaveCount(0);
+    expect(await deletes(page, "delete_annotation")).toBe(3);
+    await expect(page.getByText(/· 11 sessions ·/)).toBeVisible();
+  });

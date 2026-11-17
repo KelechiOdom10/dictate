@@ -20,6 +20,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
@@ -62,6 +63,13 @@ import { formatBytes, readStorageUsage } from "./storage";
 import { KeyboardShortcut } from "./ui";
 import { ErrorNotice, LoadError, Loading } from "./SettingsStatus";
 import {
+  Checklist,
+  deleteEach,
+  SelectionBar,
+  useSelection,
+  type Selection,
+} from "./HistorySelection";
+import {
   annotationMeta,
   annotationTitle,
   clock,
@@ -100,6 +108,8 @@ const retentionChoices: Record<Retention, string> = {
   forever: "Forever",
 };
 const retentionOrder: Retention[] = ["day", "week", "month", "forever"];
+const dictationNoun = { one: "dictation", many: "dictations" };
+const annotationNoun = { one: "annotation", many: "annotations" };
 
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -235,11 +245,13 @@ function Rows<Id extends string | number>({
   rows,
   value,
   onChange,
+  selection,
 }: {
   label: string;
   rows: Row<Id>[];
   value: Id;
   onChange: (id: Id) => void;
+  selection: Selection<Id>;
 }) {
   return (
     <Card padding={0}>
@@ -280,6 +292,17 @@ function Rows<Id extends string | number>({
             itemKey={row.id}
             label={row.title}
             description={row.meta}
+            startContent={
+              selection.selecting && (
+                <CheckboxInput
+                  size="sm"
+                  label={`Select ${row.title}`}
+                  isLabelHidden
+                  value={selection.checked.includes(row.id)}
+                  onChange={(on) => selection.toggle(row.id, on)}
+                />
+              )
+            }
             endContent={<Text type="supporting">{row.date}</Text>}
             isSelected={row.id === value}
             onClick={() => onChange(row.id)}
@@ -395,6 +418,27 @@ function Dictations() {
   const open = entries.find((entry) => entry.id === selectedId);
   const selected = open ?? entries[0];
   const current = settings.data?.historyRetention ?? "week";
+  const selection = useSelection(entries.map((entry) => entry.id));
+  const scope = [
+    query ? `matching “${query}”` : "shown",
+    filter === "all" ? "" : `as ${statusLabels[filter]}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  async function removeChecked(ids: number[]) {
+    setError("");
+    try {
+      await deleteEach(ids, deleteHistory, dictationNoun);
+      selection.cancel();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      if (selectedId !== null && ids.includes(selectedId)) setSelectedId(null);
+      void client.invalidateQueries({ queryKey: ["history"] });
+      void client.invalidateQueries({ queryKey: ["storage"] });
+    }
+  }
 
   function saveRetention(value: Retention) {
     if (!settings.data) return;
@@ -427,6 +471,16 @@ function Dictations() {
           onChange={setSearch}
         />
         {history.isSuccess && !nothingYet && (
+          <SelectionBar
+            selection={selection}
+            shown={entries.length}
+            noun={dictationNoun}
+            scope={scope}
+            consequence="They can’t be recovered."
+            onDelete={removeChecked}
+          />
+        )}
+        {history.isSuccess && !nothingYet && !selection.selecting && (
           <Selector
             label="Status"
             isLabelHidden
@@ -584,6 +638,7 @@ function Dictations() {
                   rows={rows}
                   value={selected.id}
                   onChange={setSelectedId}
+                  selection={selection}
                 />
                 {more}
               </VStack>
@@ -591,14 +646,23 @@ function Dictations() {
             </>
           ) : (
             <VStack gap={2}>
-              <Accordion
-                label="Dictations"
-                rows={rows}
-                value={open?.id ?? null}
-                onChange={setSelectedId}
-              >
-                {open && detailOf(open, true)}
-              </Accordion>
+              {selection.selecting ? (
+                <Checklist
+                  label="Dictations"
+                  rows={rows}
+                  current={open?.id ?? null}
+                  selection={selection}
+                />
+              ) : (
+                <Accordion
+                  label="Dictations"
+                  rows={rows}
+                  value={open?.id ?? null}
+                  onChange={setSelectedId}
+                >
+                  {open && detailOf(open, true)}
+                </Accordion>
+              )}
               {more}
             </VStack>
           )}
@@ -732,6 +796,23 @@ function Annotations() {
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: readSettings });
   const usage = useQuery({ queryKey: ["storage"], queryFn: readStorageUsage });
+  const selection = useSelection(
+    annotations.data?.map((entry) => entry.id) ?? [],
+  );
+
+  async function removeChecked(ids: string[]) {
+    setError("");
+    try {
+      await deleteEach(ids, deleteAnnotation, annotationNoun);
+      selection.cancel();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      if (selectedId !== null && ids.includes(selectedId)) setSelectedId(null);
+      void client.invalidateQueries({ queryKey: ["annotations"] });
+      void client.invalidateQueries({ queryKey: ["storage"] });
+    }
+  }
 
   useEffect(() => {
     const subscription = listen("annotations-changed", () => {
@@ -794,11 +875,21 @@ function Annotations() {
   return (
     <>
       <ErrorNotice error={error} />
-      <Text type="supporting">
-        {usage.data
-          ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${entries.length.toLocaleString()} ${entries.length === 1 ? "session" : "sessions"} · kept until deleted`
-          : "Measuring this Mac"}
-      </Text>
+      <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
+        <SelectionBar
+          selection={selection}
+          shown={entries.length}
+          noun={annotationNoun}
+          scope="shown"
+          consequence="Their recordings, frames and summaries are removed. They can’t be recovered."
+          onDelete={removeChecked}
+        />
+        <Text type="supporting">
+          {usage.data
+            ? `${formatBytes(usage.data.annotationBytes)} on this Mac · ${entries.length.toLocaleString()} ${entries.length === 1 ? "session" : "sessions"} · kept until deleted`
+            : "Measuring this Mac"}
+        </Text>
+      </HStack>
       <Grid
         ref={panes}
         columns={{ minWidth: PANE_MIN_WIDTH, repeat: "fit" }}
@@ -812,9 +903,17 @@ function Annotations() {
               rows={rows}
               value={selected.id}
               onChange={setSelectedId}
+              selection={selection}
             />
             {detailOf(selected, false)}
           </>
+        ) : selection.selecting ? (
+          <Checklist
+            label="Annotations"
+            rows={rows}
+            current={open?.id ?? null}
+            selection={selection}
+          />
         ) : (
           <Accordion
             label="Annotations"

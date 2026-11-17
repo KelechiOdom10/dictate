@@ -465,6 +465,42 @@ const layoutOf = (...elements: HTMLElement[]) =>
     const { top, left, height, width } = element.getBoundingClientRect();
     return { top, left, height, width };
   });
+export const HistorySelecting: Story = {
+  name: "History / selecting",
+  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  render: () => <GeneralPage page="History" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("button", { name: "Select" }));
+    await userEvent.click(
+      c.getByRole("checkbox", { name: /^Select Ship the history/ }),
+    );
+    await userEvent.click(
+      c.getByRole("checkbox", { name: /^Select No speech/ }),
+    );
+    await expect(c.getByText("2 selected")).toBeInTheDocument();
+    await expect(c.getByRole("button", { name: "Delete 2…" })).toBeEnabled();
+    await expect(
+      c.getByRole("region", { name: "Dictation" }),
+    ).toHaveTextContent("Stop by the bakery");
+  },
+};
+export const HistorySelectingNarrow: Story = {
+  name: "History / selecting, narrow",
+  beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
+  render: () => <GeneralPage page="History" width={640} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement);
+    await userEvent.click(await c.findByRole("button", { name: "Select" }));
+    const all = c.getByRole("checkbox", { name: "Select all 5 shown" });
+    await userEvent.click(all);
+    await expect(all).toBeChecked();
+    await expect(c.getByText("5 selected")).toBeInTheDocument();
+    await userEvent.click(c.getByText(/^Let’s move the Thursday sync/));
+    await expect(c.getByText("4 selected")).toBeInTheDocument();
+    await expect(all).toHaveProperty("indeterminate", true);
+  },
+};
 export const HistoryCopy: Story = {
   beforeEach: ({ globals }) => mockApp(globals, sampleHistory(Date.now())),
   render: () => <GeneralPage page="History" />,
