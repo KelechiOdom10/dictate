@@ -578,21 +578,38 @@ fn with_history<T>(
     read(store.as_ref().map_err(Clone::clone)?)
 }
 
-/// The history store at launch. It is pruned only when the settings were read
-/// from disk as written: a retention that came from a default or a repair
-/// must never decide what is deleted.
+/// The history store at launch. It is pruned only with a retention read from
+/// the settings file. Any other retention came from a default or a repair,
+/// and must never decide what is deleted, at launch or later: when there is
+/// history to lose, it becomes Forever and is written to the file, so a take
+/// or a visit to History can't prune with a default either.
 fn open_history(
     path: &Path,
-    retention: HistoryRetention,
-    may_prune: bool,
+    settings_path: &Path,
+    loaded: &mut settings::Loaded,
 ) -> Result<history::Store, history::OpenError> {
     let store = history::Store::open(path)?;
-    if may_prune {
+    if loaded.retention_known {
         store
-            .prune(retention, history::now_ms())
+            .prune(loaded.settings.history_retention, history::now_ms())
             .map_err(history::OpenError::Failed)?;
-    } else {
-        log::warn!("[history] startup prune skipped: settings were not read from disk as written");
+        return Ok(store);
+    }
+    log::warn!("[history] startup prune skipped: no history setting was read from disk");
+    let has_history = !store
+        .list("", 1)
+        .map_err(history::OpenError::Failed)?
+        .entries
+        .is_empty();
+    if has_history && loaded.settings.history_retention != HistoryRetention::Forever {
+        loaded.settings.history_retention = HistoryRetention::Forever;
+        loaded.notices.push(
+            "dictate couldn’t find how long to keep your history, so it keeps every dictation until you choose in History."
+                .into(),
+        );
+    }
+    if let Err(error) = settings::save(settings_path, &loaded.settings) {
+        log::warn!("[settings] write history setting: {error}");
     }
     Ok(store)
 }
@@ -2061,12 +2078,19 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let data_dir = app.path().app_data_dir()?;
+            let settings_path = data_dir.join("settings.json");
+            let mut loaded = settings::load_or_default(&settings_path);
+            let store = open_history(
+                &data_dir.join("history.sqlite3"),
+                &settings_path,
+                &mut loaded,
+            );
             let settings::Loaded {
                 settings,
-                may_prune,
                 notices,
                 problem: mut startup_error,
-            } = settings::load_or_default(&data_dir.join("settings.json"));
+                ..
+            } = loaded;
             app.manage(SettingsNotices(Mutex::new(notices)));
             app_icon::sync(app.handle(), &settings);
             let models_dir = data_dir.join("models");
@@ -2076,11 +2100,6 @@ pub fn run() {
             }
             let legacy = models::legacy_candidates();
             let pending = models::legacy_pending(&models_dir, &legacy);
-            let store = open_history(
-                &data_dir.join("history.sqlite3"),
-                settings.history_retention,
-                may_prune,
-            );
             let store = store.map_err(|error| {
                 let problem = error.problem();
                 let message = problem.fix.clone();
@@ -2455,20 +2474,25 @@ mod take_tests {
         }
     }
 
-    /// The DICT-14 repro end to end: the two calls launch makes, against a
-    /// temp app-data dir. A reserved chord in a "Forever" file, or a file
-    /// that can't be read at all, must never delete a 30-day-old dictation.
+    /// The DICT-14 repro end to end, against a temp app-data dir: launch,
+    /// a take, a visit to History, and a second launch. None of them may
+    /// delete a 30-day-old dictation when the history setting wasn't read
+    /// from disk as written.
     #[test]
-    fn launch_never_prunes_history_on_a_settings_file_it_had_to_repair() {
+    fn history_is_never_pruned_with_a_retention_nobody_chose() {
         for file in [
-            r#"{"version":2,"shortcut":"Super+Space","historyRetention":"forever"}"#,
-            r#"{"version":2,"historyRetention":"decade"}"#,
-            "{broken",
+            Some(r#"{"version":2,"shortcut":"Super+Space","historyRetention":"forever"}"#),
+            Some(r#"{"version":2,"historyRetention":"decade"}"#),
+            Some(r#"{"version":2,"soundFeedback":true}"#),
+            Some("{broken"),
+            None,
         ] {
             let dir = tempfile::tempdir().unwrap();
             let settings_path = dir.path().join("settings.json");
             let history_path = dir.path().join("history.sqlite3");
-            std::fs::write(&settings_path, file).unwrap();
+            if let Some(file) = file {
+                std::fs::write(&settings_path, file).unwrap();
+            }
             let now = history::now_ms();
             {
                 let store = history::Store::open(&history_path).unwrap();
@@ -2488,20 +2512,43 @@ mod take_tests {
                         .unwrap();
                 }
             }
-            let loaded = settings::load_or_default(&settings_path);
-            let store = open_history(
-                &history_path,
-                loaded.settings.history_retention,
-                loaded.may_prune,
-            )
-            .unwrap();
-            assert_eq!(store.list("", 10).unwrap().entries.len(), 2, "{file}");
-            assert_eq!(
-                loaded.settings.history_retention,
-                HistoryRetention::Forever,
-                "{file}"
-            );
+            for launch in 1..=2 {
+                let mut loaded = settings::load_or_default(&settings_path);
+                let store = open_history(&history_path, &settings_path, &mut loaded).unwrap();
+                // What a take and a History visit do with the runtime's retention.
+                store
+                    .prune(loaded.settings.history_retention, history::now_ms())
+                    .unwrap();
+                assert_eq!(
+                    store.list("", 10).unwrap().entries.len(),
+                    2,
+                    "{file:?} launch {launch}"
+                );
+                assert_eq!(
+                    loaded.settings.history_retention,
+                    HistoryRetention::Forever,
+                    "{file:?} launch {launch}"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn a_fresh_install_writes_the_default_retention_and_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("settings.json");
+        let mut loaded = settings::load_or_default(&settings_path);
+        open_history(
+            &dir.path().join("history.sqlite3"),
+            &settings_path,
+            &mut loaded,
+        )
+        .unwrap();
+        assert_eq!(loaded.settings.history_retention, HistoryRetention::Week);
+        assert!(loaded.notices.is_empty());
+        let next = settings::load_or_default(&settings_path);
+        assert!(next.retention_known);
+        assert_eq!(next.settings.history_retention, HistoryRetention::Week);
     }
 
     #[test]

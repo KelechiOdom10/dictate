@@ -353,7 +353,7 @@ const UNREADABLE_RETENTION: HistoryRetention = HistoryRetention::Forever;
 /// default and every other field is kept, so one bad value never costs the
 /// rest. `None` when there is no file; an error only when the file is not a
 /// JSON object at all.
-fn read(path: &Path) -> Result<Option<(Settings, Vec<Repair>)>, String> {
+fn read(path: &Path) -> Result<Option<(Settings, Vec<Repair>, bool)>, String> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -365,6 +365,7 @@ fn read(path: &Path) -> Result<Option<(Settings, Vec<Repair>)>, String> {
         return Err("Read settings: not a JSON object".into());
     };
     migrate_theme(&mut stored);
+    let retention_written = stored.contains_key("historyRetention");
     let serde_json::Value::Object(mut merged) =
         serde_json::to_value(Settings::default()).map_err(|e| e.to_string())?
     else {
@@ -451,7 +452,7 @@ fn read(path: &Path) -> Result<Option<(Settings, Vec<Repair>)>, String> {
             });
         }
     }
-    Ok(Some((settings, repairs)))
+    Ok(Some((settings, repairs, retention_written)))
 }
 
 fn field_label(field: &str) -> &str {
@@ -473,6 +474,9 @@ fn field_label(field: &str) -> &str {
         "annotateShortcut" => "Annotate shortcut",
         "annotateEnabled" => "Annotate",
         "annotateShowInRecordings" => "Annotate recording",
+        "themeLight" => "light theme",
+        "themeDark" => "dark theme",
+        "version" => "settings version",
         other => other,
     }
 }
@@ -481,7 +485,7 @@ fn field_label(field: &str) -> &str {
 /// the defaults.
 #[cfg(test)]
 pub fn load(path: &Path) -> Result<Settings, String> {
-    Ok(read(path)?.map_or_else(Settings::default, |(settings, _)| settings))
+    Ok(read(path)?.map_or_else(Settings::default, |(settings, ..)| settings))
 }
 
 fn migrate(settings: &mut Settings) {
@@ -493,9 +497,9 @@ fn migrate(settings: &mut Settings) {
 /// Settings at launch, and what the launch may do with them.
 pub struct Loaded {
     pub settings: Settings,
-    /// True only when the file was read and its history setting was used as
-    /// written. Startup prunes history only then.
-    pub may_prune: bool,
+    /// True only when the file was read and held a usable history setting.
+    /// Nothing may be pruned with a retention that came from anywhere else.
+    pub retention_known: bool,
     /// One sentence per setting that was reset, for the General page.
     pub notices: Vec<String>,
     pub problem: Option<Problem>,
@@ -513,11 +517,11 @@ pub fn load_or_default(path: &Path) -> Loaded {
     match read(path) {
         Ok(None) => Loaded {
             settings: Settings::default(),
-            may_prune: false,
+            retention_known: false,
             notices: Vec::new(),
             problem: None,
         },
-        Ok(Some((settings, repairs))) => {
+        Ok(Some((settings, repairs, retention_written))) => {
             if !repairs.is_empty() {
                 let backup = backup_path(path);
                 match fs::copy(path, &backup) {
@@ -536,7 +540,8 @@ pub fn load_or_default(path: &Path) -> Loaded {
                 }
             }
             Loaded {
-                may_prune: !repairs.iter().any(|r| r.field == "historyRetention"),
+                retention_known: retention_written
+                    && !repairs.iter().any(|r| r.field == "historyRetention"),
                 notices: repairs.into_iter().map(|r| r.notice).collect(),
                 settings,
                 problem: None,
@@ -544,22 +549,28 @@ pub fn load_or_default(path: &Path) -> Loaded {
         }
         Err(error) => {
             let backup = backup_path(path);
+            let settings = Settings {
+                history_retention: UNREADABLE_RETENTION,
+                ..Settings::default()
+            };
             let (fix, detail) = match fs::rename(path, &backup) {
-                Ok(()) => (
-                    "Using defaults, and keeping all your history. Your old file is saved beside them.",
-                    format!("{error}; original saved to {}", backup.display()),
-                ),
+                Ok(()) => {
+                    if let Err(error) = save(path, &settings) {
+                        log::warn!("[settings] write replacement settings: {error}");
+                    }
+                    (
+                        "Using defaults, and keeping all your history. Your old file is saved beside the new one.",
+                        format!("{error}; original saved to {}", backup.display()),
+                    )
+                }
                 Err(backup_error) => (
                     "Using defaults, and keeping all your history. Choose your preferences again in Settings.",
                     format!("{error}; could not back up original: {backup_error}"),
                 ),
             };
             Loaded {
-                settings: Settings {
-                    history_retention: UNREADABLE_RETENTION,
-                    ..Settings::default()
-                },
-                may_prune: false,
+                settings,
+                retention_known: false,
                 notices: Vec::new(),
                 problem: Some(Problem::new("Settings couldn’t be read", fix).because(detail)),
             }
@@ -927,12 +938,17 @@ mod tests {
                     ..Settings::default()
                 }
             );
-            assert!(!loaded.may_prune);
+            assert!(!loaded.retention_known);
             let problem = loaded.problem.unwrap();
             assert_eq!(problem.title, "Settings couldn’t be read");
             assert!(problem.fix.contains("keeping all your history"));
-            assert!(!path.exists());
             assert_eq!(backups(dir.path()), [original]);
+            // The replacement says Forever on disk, so the next launch can't
+            // fall back to the 7-day default.
+            let next = load_or_default(&path);
+            assert!(next.problem.is_none());
+            assert!(next.retention_known);
+            assert_eq!(next.settings.history_retention, HistoryRetention::Forever);
         }
     }
 
@@ -947,7 +963,7 @@ mod tests {
         fs::write(&path, original).unwrap();
         let loaded = load_or_default(&path);
         assert!(loaded.problem.is_none());
-        assert!(loaded.may_prune);
+        assert!(loaded.retention_known);
         assert_eq!(loaded.settings.shortcut, "Alt+Shift+Space");
         assert_eq!(loaded.settings.history_retention, HistoryRetention::Forever);
         assert_eq!(loaded.settings.theme_light, Theme::Paper);
@@ -988,7 +1004,7 @@ mod tests {
             let loaded = load_or_default(&path);
             assert_eq!(loaded.settings.annotate_shortcut, "Alt+Shift+KeyA");
             assert_eq!(loaded.settings.history_retention, HistoryRetention::Month);
-            assert!(loaded.may_prune);
+            assert!(loaded.retention_known);
             assert_eq!(loaded.notices.len(), 1);
             assert!(loaded.notices[0].starts_with("Your Annotate shortcut"));
             assert!(
@@ -1028,7 +1044,7 @@ mod tests {
         assert_eq!(loaded.settings.history_retention, HistoryRetention::Forever);
         assert!(loaded.settings.sound_feedback);
         assert_eq!(loaded.settings.mic_mode, MicMode::OnDemand);
-        assert!(!loaded.may_prune);
+        assert!(!loaded.retention_known);
         assert_eq!(loaded.notices.len(), 2, "{:?}", loaded.notices);
         assert!(
             loaded
@@ -1036,6 +1052,18 @@ mod tests {
                 .iter()
                 .any(|n| n.contains("keeps every dictation"))
         );
+    }
+
+    #[test]
+    fn a_missing_file_or_history_key_never_counts_as_a_known_retention() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert!(!load_or_default(&path).retention_known);
+        fs::write(&path, r#"{"version":2,"soundFeedback":true}"#).unwrap();
+        let loaded = load_or_default(&path);
+        assert!(loaded.settings.sound_feedback);
+        assert!(!loaded.retention_known);
+        assert!(loaded.notices.is_empty());
     }
 
     #[test]
