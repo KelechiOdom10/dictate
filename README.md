@@ -1,87 +1,127 @@
-# dictate
+# dictate — Local-First Voice Dictation & Screen Annotation for macOS
 
-Local dictation: hold a key, speak, and the transcript lands in the app that
-already had focus.
+Hold a key, speak, and the transcript lands in whatever app already has focus. Circle a UI glitch and talk with **Annotate** to package a screen recording, ink drawings, and a timed voice transcript into a structured summary you can paste straight into your coding agent. Everything runs 100% locally on Apple Silicon with Parakeet / Whisper on Metal and Silero VAD — zero cloud, zero telemetry, and no account.
 
-The pipeline spike and the first settings surface are in development.
+Download the latest macOS build at **[dictate.kellycooks.dev](https://dictate.kellycooks.dev)**.
 
-- `docs/spike.md` — the question and the seven checks it has to pass
-- `GUIDE.md` — the build order, with the failures you will hit
-- `AGENTS.md` — layout and conventions
-- `docs/settings.md` — settings runtime, design choices and manual checks
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/settings-dark.png" />
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/settings-light.png" />
+  <img alt="dictate General settings showing the Option-Shift-Space shortcut in Hold to talk mode, Parakeet English speech model, and microphone selection" src="docs/assets/settings-light.png" width="965" />
+</picture>
 
-Pipeline contracts live in `src-tauri/src/`: `audio` → `transcribe` → `insert`.
+<img alt="dictate Annotate mode recording a screen with a red ink circle around a cut-off pricing button and the floating recording bar at 00:41" src="docs/assets/annotate-ink.png" width="965" />
 
-## Building
+## Features
 
-The Parakeet engine (`transcribe-cpp`) compiles ggml with CMake, so the build
-machine needs it: `brew install cmake`. Whisper models still run through
-Homebrew's `whisper-cli` (`brew install whisper.cpp`).
+- 🎙️ **Hold-to-Talk & Toggle Dictation** — Hold `⌥⇧Space`, speak, and release to type directly into the focused app while preserving your clipboard, or switch to press-once toggle mode.
+- ⚡ **Parakeet & Whisper on Apple Silicon Metal** — In-process `parakeet-tdt-0.6b-v2` inference via `transcribe-cpp` on ggml Metal (~80–235 ms release-to-text) alongside local Whisper models (`base.en`, `small.en`, `large-v3-turbo`).
+- 🔇 **Silero VAD Room-Tone Filtering** — Pre-filters silence and background noise before inference so quiet holds and room tone never hallucinate stray words.
+- 🖍️ **Annotate for Coding Agents** — Press `⌥⇧A` to record a display with ScreenCaptureKit, hold `Shift` to circle bugs in live ink, speak your diagnosis, and copy a timestamped Markdown + keyframe package ready for an AI agent.
+- 🎨 **5 Astryx Themes with Independent Light & Dark Picks** — Choose separate light and dark themes across Ember, Paper, Capy, Rosé Pine, and Zinc, with a live-rendered theme-aware Dock and menu-bar icon.
+- 🗂️ **Local History & Retention Controls** — Search past dictations and annotations, filter by source or date, inspect audio and keyframes, and configure automatic retention or bulk delete.
+- 🔄 **Signed Automatic Updates** — Minisign-verified background update checks and one-click upgrades served from `dictate.kellycooks.dev`.
 
-## Shipping it to another Mac
+## Tech Stack ⚒️
 
-```sh
-pnpm install
-pnpm icons            # build the app icon set from the draft the app ships
-pnpm release:mac      # arm64 release build -> dist/dictate-0.1.0-arm64.dmg
+- [Tauri v2](https://v2.tauri.app/) - macOS Desktop Shell & Native Panels (`tauri-nspanel`)
+- [Rust](https://www.rust-lang.org/) - Audio Capture (`cpal`, `rubato`), ScreenCaptureKit & AppKit Pasteboard Pipeline
+- [React 19](https://react.dev/) & [TypeScript](https://www.typescriptlang.org/) - Settings, History & Overlay UI
+- [Astryx Design System](https://www.npmjs.com/package/@astryxdesign/core) & [StyleX](https://stylexjs.com/) - Component Library & Theme Tokens
+- [transcribe-cpp](https://crates.io/crates/transcribe-cpp) / [Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) / [whisper.cpp](https://github.com/ggml-org/whisper.cpp) - Local Speech-to-Text on ggml Metal
+- [Silero VAD](https://github.com/snakers4/silero-vad) - Voice Activity Detection
+- [SQLite](https://www.sqlite.org/) (`rusqlite`) - Local History & Annotation Store
+- [Astro](https://astro.build/) - Static Download & Update Site (`site/`)
+
+## Install on macOS
+
+Requires a Mac with **Apple Silicon** (M1 or later) running **macOS 15 (Sequoia)** or later.
+
+1. **Download and install.** Download the latest `.dmg` from [dictate.kellycooks.dev](https://dictate.kellycooks.dev), open it, and drag **dictate** into **Applications**.
+2. **First open (Gatekeeper bypass).** Because dictate is signed without a paid Apple Developer ID, macOS blocks the first launch. Try to open dictate once, then go to **System Settings › Privacy & Security**, scroll down to the notice for **dictate**, and click **Open Anyway**.
+3. **Grant Microphone & Accessibility.** Allow **Microphone** access when prompted on your first recording, then enable dictate under **System Settings › Privacy & Security › Accessibility** so it can paste into the focused app. _(Grant **Screen Recording** as well if you use Annotate with `⌥⇧A`.)_
+4. **Download a speech model.** Open dictate from the menu bar, go to **Models**, and download the recommended **Parakeet English** model (~661 MB).
+5. **Dictate anywhere.** Click into any text field, hold `⌥⇧Space`, speak, and release.
+
+## Run Locally
+
+1. Clone the project
+
+```bash
+git clone https://github.com/KelechiOdom10/dictate.git
 ```
 
-`pnpm release:mac` refuses nothing but tells you when the build is ad-hoc
-signed, which means the other Mac re-grants Microphone and Accessibility after
-every new build. To sign with a certificate of your own instead:
+2. Go to the project directory
 
-```sh
-export DICTATE_SIGNING_IDENTITY="dictate local signing"
+```bash
+cd dictate
+```
+
+3. Install native build prerequisites (`transcribe-cpp` builds ggml Metal with CMake; optional Whisper CLI support uses `whisper-cpp`)
+
+```bash
+brew install cmake
+```
+
+4. Install dependencies
+
+```bash
+pnpm install
+```
+
+5. Useful Development Scripts:
+
+```bash
+# Start Tauri development window with Rust rebuild on save
+pnpm tauri dev
+
+# Typecheck and bundle the frontend
+pnpm build
+
+# Run Playwright UI end-to-end tests
+pnpm test:ui
+
+# Run Storybook component tests via Vitest
+pnpm test:stories
+
+# Run the Rust test suite
+cargo test --manifest-path src-tauri/Cargo.toml
+
+# Build a signed arm64 macOS release bundle and DMG
 pnpm release:mac
 ```
 
-The certificate is created once by hand in Keychain Access; the exact clicks,
-the release sizes and the manual checks are in [docs/release.md](docs/release.md).
-The build is Apple Silicon only and needs macOS 15 or later on both Macs.
+## Architecture & Docs
 
-## Installing on a second Mac
+The core dictation pipeline lives in `src-tauri/src/` as independently callable stages that convert audio once to 16 kHz mono `f32` at capture:
 
-This section is written for the person who receives dictate, not for a
-developer. It takes about five minutes, plus a model download.
+```text
+audio (cpal + rubato 16 kHz mono f32) ──► vad (Silero VAD) ──► transcribe (Parakeet / Whisper on Metal) ──► insert (isolated pasteboard + restore)
+```
 
-**1. Put the app in Applications.** Double-click `dictate-0.1.0-arm64.dmg`. A
-window opens with the dictate icon and an Applications folder. Drag the dictate
-icon onto the Applications folder, then close the window and click the eject
-arrow next to "dictate" in the sidebar of Finder.
+Annotate (`src-tauri/src/annotate.rs`, `screen.rs`, `ink.rs`, `frames.rs`, `package.rs`) runs alongside the voice pipeline to record a display via ScreenCaptureKit, composite non-activating ink strokes, extract keyframes around speech segments, and write a structured Markdown bundle.
 
-**2. The first open needs one extra step.** macOS blocks apps that did not come
-from the App Store. Open Applications, then **right-click (or Control-click)
-dictate and choose Open**, then click **Open** in the dialog. From now on a
-normal double-click works.
+- [`docs/release.md`](docs/release.md) — Release build pipeline, code signing, DMG packaging, and Minisign auto-update publishing
+- [`docs/spike-results.md`](docs/spike-results.md) — Hardware latency, capture, VAD, pasteboard restoration, and engine benchmarks measured on Apple Silicon
+- [`docs/annotate-design.md`](docs/annotate-design.md) — Screen recording, ink overlay, and agent package format
+- [`docs/stt-engines.md`](docs/stt-engines.md) — Parakeet and Whisper engine integration details
 
-If macOS does not offer that dialog, or you already double-clicked and got
-"Apple cannot check it for malicious software": open **System Settings ›
-Privacy & Security**, scroll down to the line about dictate, and click **Open
-Anyway**. You have about an hour after the message before that button goes
-away, and trying to open dictate again brings it back.
+## Authors
 
-**3. Say yes to the microphone.** The first time dictate records, macOS asks
-whether dictate may use the microphone. Click **Allow**. If you clicked Don't
-Allow by mistake, fix it in **System Settings › Privacy & Security ›
-Microphone** by switching dictate on.
+- [@KelechiOdom10](https://github.com/KelechiOdom10)
 
-**4. Turn on Accessibility so dictate can type into other apps.** dictate
-cannot ask for this one itself, so it says "Accessibility access needed" the
-first time you dictate. Open **System Settings › Privacy & Security ›
-Accessibility**, click the **+**, choose dictate from Applications, and make
-sure its switch is on. The switch takes effect straight away; you do not need
-to restart dictate.
+## License
 
-**5. Download a speech model.** dictate has no speech model built in. Open
-dictate's window from the menu-bar icon, go to **Models**, and start the
-Parakeet download — it is about 700 MB, so give it a few minutes. Until it
-finishes, dictation tells you the model is missing.
+[MIT](LICENSE)
 
-**6. Use it.** Click into any text box, then hold **Option-Shift-Space**, speak,
-and let go. The text appears where your cursor was. The shortcut is shown,
-and can be changed, in dictate's **General** settings.
+## Contributing
 
-**Screen Recording** is only needed if you use Annotate (Option-Shift-A), which
-records your screen with notes on it. Until you allow it in **System Settings ›
-Privacy & Security › Screen Recording**, Annotate asks for it the first time and
-dictation is unaffected.
+Contributions, bug reports, and ideas are welcome! Feel free to open an issue or submit a Pull Request. When touching a pipeline stage (`audio`, `vad`, `transcribe`, `insert`, or `annotate`), keep stages independently callable and include measurements from real hardware where latency or accuracy is affected.
+
+## Acknowledgements
+
+- [NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) and [transcribe-cpp](https://crates.io/crates/transcribe-cpp) for fast local English speech recognition on Metal
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and [ggml](https://github.com/ggml-org/ggml) for on-device Whisper inference
+- [Silero VAD](https://github.com/snakers4/silero-vad) for lightweight voice activity detection
+- [Tauri](https://v2.tauri.app/) for the macOS application runtime
+- [Astryx](https://www.npmjs.com/package/@astryxdesign/core) for the component system and multi-theme engine

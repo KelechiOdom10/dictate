@@ -3,6 +3,9 @@ name = "dictate"
 version = "0.1.4"
 description = "Local dictation: hold a key, speak, and the transcript lands in the app that already had focus."
 authors = ["Kelechi Odom"]
+license = "MIT"
+repository = "https://github.com/KelechiOdom10/dictate"
+homepage = "https://dictate.kellycooks.dev"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
