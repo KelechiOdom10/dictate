@@ -2,6 +2,12 @@
   "name": "dictate",
   "private": true,
   "version": "0.1.4",
+  "license": "MIT",
+  "homepage": "https://dictate.kellycooks.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KelechiOdom10/dictate.git"
+  },
   "type": "module",
   "scripts": {
     "build:themes": "for t in ember paper capy rose-pine zinc; do astryx experimental theme compile themes/$t/$t.theme.ts || exit 1; done",
