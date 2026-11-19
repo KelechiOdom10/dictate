@@ -1,11 +1,11 @@
 {
-  "version": "0.1.4",
-  "notes": "History is never pruned because of a bad settings file, empty taps no longer paste stray words, and History selection is steadier.",
-  "pub_date": "2026-11-17T16:22:05Z",
+  "version": "0.1.5",
+  "notes": "The recording and Annotate overlays now show on every Space and over full-screen apps.",
+  "pub_date": "2026-11-19T13:02:56Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdnU2TjhmTHpaVWxsVjBYejdRNU0zMis5eDFyTVozMkd5Y1d6QlpmY2FFQVFmcDdlRGVDRUJpY0UzSUU1UjJBQk8ydkFNUUEvWDJVL1QvbWFHSHNLMmN4VjhIT3E1dFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0OTMyNDcxCWZpbGU6ZGljdGF0ZS0wLjEuNC1hcm02NC5hcHAudGFyLmd6CmVuN2RRL0E0dm9uNHZGVWFST0NOZTZxdzdVbW01NXNuSnhzYXdIY1JXa013UlRvR05SL0tLenF1R1o0RVpyR29UT0l2S2I5TURBRFZ2Witzb3lRSUJnPT0K",
-      "url": "https://dictate.kellycooks.dev/updates/dictate-0.1.4-arm64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdnU2TjhmTHpaVWx6LzN2Vlp0K2dGOFQxQkhOMmhmaDRHT0tmZzZ6WU1rd25nVUxNRytNTFJKWXFSbnJxcVNsZDV1cVVPcTJvU0pPb1R0KzBPak5uNEN0QVBQZ01BL1FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDkzMjc0CWZpbGU6ZGljdGF0ZS0wLjEuNS1hcm02NC5hcHAudGFyLmd6CnNpYkNxa25rNTJFWFZCMUJ1dUJWZWtveUhCVGZia1dYN3cyQ2NjN0tpOFpxL1hLSDJKaWJBRjcwTnJFYUhEZE9wVHJNM0pIL0hqVGtsczhldUtzeUFRPT0K",
+      "url": "https://dictate.kellycooks.dev/updates/dictate-0.1.5-arm64.app.tar.gz"
     }
   }
 }
