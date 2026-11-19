@@ -1,6 +1,6 @@
 [package]
 name = "dictate"
-version = "0.1.4"
+version = "0.1.5"
 description = "Local dictation: hold a key, speak, and the transcript lands in the app that already had focus."
 authors = ["Kelechi Odom"]
 license = "MIT"
