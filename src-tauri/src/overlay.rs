@@ -22,9 +22,31 @@ pub fn collection_behavior() -> objc2_app_kit::NSWindowCollectionBehavior {
     Behavior::CanJoinAllSpaces | Behavior::FullScreenAuxiliary | Behavior::Stationary
 }
 
+/// Above pop-up menus, Split View and full-screen apps. The capsule and the
+/// Annotate bar share it; the ink panel sits one below, under both.
+pub const LEVEL: i64 = 1001;
+
+/// Puts `window` back on every Space that exists now, full-screen ones
+/// included. Call it on the main thread just before ordering an overlay front.
+///
+/// `collection_behavior` is set once at launch, but the window server keeps
+/// its own list of the Spaces a long-lived panel belongs to, and that list can
+/// go stale: on 18 Nov 2026 the panels belonged to the desktop and one
+/// full-screen Space but not another, and `orderFrontRegardless` on that Space
+/// left them off screen. Setting the same behaviour again changes nothing,
+/// because AppKit sends it to the window server only when the transaction
+/// commits and two writes in one transaction cancel out. Committing a
+/// different behaviour first makes the second write rebuild the list.
+#[cfg(target_os = "macos")]
+pub fn join_all_spaces(window: &objc2_app_kit::NSWindow) {
+    window.setCollectionBehavior(objc2_app_kit::NSWindowCollectionBehavior::Default);
+    objc2_quartz_core::CATransaction::flush();
+    window.setCollectionBehavior(collection_behavior());
+}
+
 /// Turns the capsule into a non-activating panel, so it can show over a
-/// full-screen app or on any Space without taking focus from the app the user
-/// dictates into. Called once from `setup`, on the main thread.
+/// full-screen app, an open menu or on any Space without taking focus from the
+/// app the user dictates into. Called once from `setup`, on the main thread.
 pub fn setup(app: &App) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window("main") else {
         return Err(tauri::Error::WindowNotFound);
@@ -35,7 +57,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     panel
         .add_style_mask(objc2_app_kit::NSWindowStyleMask::NonactivatingPanel)
         .map_err(|e| tauri::Error::Io(std::io::Error::other(format!("{e:?}"))))?;
-    panel.set_level(tauri_nspanel::PanelLevel::Status.value());
+    panel.set_level(LEVEL);
     panel.set_collection_behavior(collection_behavior());
     panel.set_hides_on_deactivate(false);
     panel.set_transparent(true);
@@ -126,6 +148,7 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
                 if let Ok(pointer) = native.ns_window() {
                     // SAFETY: Tauri owns this NSWindow; the clone keeps it alive on the main thread.
                     let window = unsafe { &*pointer.cast::<objc2_app_kit::NSWindow>() };
+                    join_all_spaces(window);
                     window.orderFrontRegardless();
                 }
             })

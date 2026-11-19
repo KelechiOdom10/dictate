@@ -176,6 +176,7 @@ pub fn show_copied(app: &AppHandle, contact_sheet: Option<PathBuf>) {
     let handle = app.clone();
     if let Err(error) = app.run_on_main_thread(move || {
         if let Ok(panel) = handle.get_webview_panel(BAR) {
+            crate::overlay::join_all_spaces(panel.as_panel());
             panel.order_front_regardless();
         }
     }) {
@@ -230,7 +231,11 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     app.manage(CopiedState::default());
     app.manage(StartingState::default());
     let handle = app.handle();
-    for (label, query, level) in [(INK, "ink", 1000), (BAR, "annotate-bar", 1001)] {
+    let levels = [
+        (INK, "ink", crate::overlay::LEVEL - 1),
+        (BAR, "annotate-bar", crate::overlay::LEVEL),
+    ];
+    for (label, query, level) in levels {
         let window = WebviewWindowBuilder::new(
             handle,
             label,
@@ -323,6 +328,7 @@ fn show_panel(app: &AppHandle, label: &str, rect: &crate::package::Rect) {
         ),
         true,
     );
+    crate::overlay::join_all_spaces(panel.as_panel());
     panel.order_front_regardless();
 }
 
